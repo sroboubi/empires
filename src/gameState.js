@@ -1,4 +1,4 @@
-import { TERRAIN_CONFIG } from './config.js';
+import { CONFIG } from './config.js';
 
 /**
  * GameState tracks players and the hex grid cells.
@@ -23,8 +23,6 @@ export class GameState {
       { id: 2, name: 'Blue Alliance', color: '#3399ff' }
     ];
 
-    const terrainTypes = Object.keys(TERRAIN_CONFIG);
-    // Simple distribution weight: Plains (50%), Hills (20%), Mountains (15%), Water (15%)
     const terrainPool = [
       ...Array(10).fill('plains'),
       ...Array(4).fill('hills'),

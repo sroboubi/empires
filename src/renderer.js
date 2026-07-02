@@ -64,6 +64,13 @@ export function initRenderer(canvas, config, size) {
   dirLight.shadow.mapSize.width = 2048;
   dirLight.shadow.mapSize.height = 2048;
   dirLight.shadow.bias = -0.001;
+  const d = 15;
+  dirLight.shadow.camera.left = -d;
+  dirLight.shadow.camera.right = d;
+  dirLight.shadow.camera.top = d;
+  dirLight.shadow.camera.bottom = -d;
+  dirLight.shadow.camera.near = 0.1;
+  dirLight.shadow.camera.far = 40;
   scene.add(dirLight);
 
   const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.4);
@@ -76,7 +83,6 @@ export function initRenderer(canvas, config, size) {
 
   // Selection Highlight Mesh
   const highlightGeometry = new THREE.CylinderGeometry(hexSize * 0.98, hexSize * 0.98, 0.05, 6);
-  highlightGeometry.rotateY(Math.PI / 6); // Align with pointy-topped grid
   const highlightMaterial = new THREE.MeshBasicMaterial({
     color: 0xffff00,
     transparent: true,
@@ -128,35 +134,8 @@ function getTerrainMaterial(terrainType) {
     return materialCache[terrainType];
   }
 
-  const config = terrainConfig[terrainType] || { color: 0x888888 };
-  
-  // Custom styles for special terrain types to look premium
-  let materialOptions = {
-    color: config.color,
-    roughness: 0.8,
-    metalness: 0.1,
-    flatShading: true
-  };
-
-  if (terrainType === 'water') {
-    materialOptions = {
-      color: config.color,
-      roughness: 0.1,
-      metalness: 0.8,
-      transparent: true,
-      opacity: 0.75,
-      flatShading: true
-    };
-  } else if (terrainType === 'mountains') {
-    materialOptions = {
-      color: config.color,
-      roughness: 0.7,
-      metalness: 0.2,
-      flatShading: true
-    };
-  }
-
-  const material = new THREE.MeshStandardMaterial(materialOptions);
+  const config = terrainConfig[terrainType] || { material: { color: 0x888888 } };
+  const material = new THREE.MeshStandardMaterial(config.material);
   materialCache[terrainType] = material;
   return material;
 }
@@ -186,7 +165,6 @@ export function drawGrid(cells) {
       // 6 segments creates a hexagon.
       // We scale radius slightly down (0.96) to leave a sleek gap between tiles.
       geometry = new THREE.CylinderGeometry(hexSize * 0.96, hexSize * 0.96, height, 6);
-      geometry.rotateY(Math.PI / 6); // Align to pointy-topped orientation
       geometryCache[height] = geometry;
     }
 

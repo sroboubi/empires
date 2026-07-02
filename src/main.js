@@ -1,10 +1,7 @@
 import { GameState } from './gameState.js';
-import { TERRAIN_CONFIG } from './config.js';
+import { CONFIG } from './config.js';
 import { initRenderer, drawGrid, highlightCell, raycastHex } from './renderer.js';
 import * as THREE from 'three';
-
-const HEX_SIZE = 1.0;
-const GRID_RADIUS = 4;
 
 let gameState;
 const mouse = new THREE.Vector2();
@@ -15,11 +12,11 @@ const mouse = new THREE.Vector2();
 function init() {
   // 1. Create Game State and Generate Map
   gameState = new GameState();
-  gameState.generateMap(GRID_RADIUS);
+  gameState.generateMap(CONFIG.GRID_RADIUS);
 
   // 2. Initialize 3D Renderer
   const canvas = document.getElementById('game-canvas');
-  initRenderer(canvas, TERRAIN_CONFIG, HEX_SIZE);
+  initRenderer(canvas, CONFIG.TERRAIN, CONFIG.HEX_SIZE);
 
   // 3. Draw Grid
   drawGrid(gameState.cells);
@@ -64,7 +61,7 @@ function onMouseMove(event) {
   const infoPanel = document.getElementById('inspect-panel');
 
   if (hovered) {
-    const config = TERRAIN_CONFIG[hovered.terrain] || { name: 'Unknown', height: 0.1 };
+    const config = CONFIG.TERRAIN[hovered.terrain] || { name: 'Unknown', height: 0.1 };
     highlightCell(hovered.q, hovered.r, config.height);
 
     // Update inspect panel UI
@@ -84,7 +81,7 @@ function onMouseMove(event) {
  * Generates a new random hex map.
  */
 function regenerateMap() {
-  gameState.generateMap(GRID_RADIUS);
+  gameState.generateMap(CONFIG.GRID_RADIUS);
   drawGrid(gameState.cells);
   updatePlayersUI();
   
