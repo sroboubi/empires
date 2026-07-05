@@ -6,7 +6,6 @@ let scene, camera, renderer, controls;
 let hexGroup;
 let cellMeshMap = {}; // Maps "q,r" to Mesh object
 let highlightMesh = null; // Mesh to show selection/hover highlight
-let terrainConfig = {};
 let hexSize = 1.0;
 
 // Material caches to reuse materials for performance
@@ -15,11 +14,9 @@ const materialCache = {};
 /**
  * Initializes the 3D scene.
  * @param {HTMLCanvasElement} canvas - Canvas element to render into
- * @param {Object} config - The terrain configuration lookup
  * @param {number} size - Outer radius size of the hexagons
  */
-export function initRenderer(canvas, config, size) {
-  terrainConfig = config;
+export function initRenderer(canvas, size) {
   hexSize = size;
 
   // 1. Create Scene
@@ -52,7 +49,7 @@ export function initRenderer(canvas, config, size) {
   controls.dampingFactor = 0.05;
   controls.maxPolarAngle = Math.PI / 2 - 0.05; // Don't go below the ground plane
   controls.minDistance = 3;
-  controls.maxDistance = 40;
+  controls.maxDistance = 100;
 
   // 5. Setup Lights
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
@@ -114,11 +111,11 @@ function onWindowResize() {
  */
 function animate() {
   requestAnimationFrame(animate);
-  
+
   if (controls) {
     controls.update();
   }
-  
+
   if (renderer && scene && camera) {
     renderer.render(scene, camera);
   }
@@ -126,17 +123,16 @@ function animate() {
 
 /**
  * Helper to get or create a material for a terrain type.
- * @param {string} terrainType - Key of the terrain configuration
+ * @param {Object} terrain - terrain object
  * @returns {THREE.Material} The material
  */
-function getTerrainMaterial(terrainType) {
-  if (materialCache[terrainType]) {
-    return materialCache[terrainType];
+function getTerrainMaterial(terrain) {
+  if (materialCache[terrain.name]) {
+    return materialCache[terrain.name];
   }
 
-  const config = terrainConfig[terrainType] || { material: { color: 0x888888 } };
-  const material = new THREE.MeshStandardMaterial(config.material);
-  materialCache[terrainType] = material;
+  const material = new THREE.MeshStandardMaterial(terrain.material);
+  materialCache[terrain.name] = material;
   return material;
 }
 
@@ -156,9 +152,8 @@ export function drawGrid(cells) {
   const geometryCache = {};
 
   Object.values(cells).forEach(cell => {
-    const config = terrainConfig[cell.terrain] || { height: 0.2 };
-    const height = config.height;
-    
+    const height = cell.terrain.height;
+
     // Check geometry cache
     let geometry = geometryCache[height];
     if (!geometry) {
@@ -170,12 +165,12 @@ export function drawGrid(cells) {
 
     const material = getTerrainMaterial(cell.terrain);
     const mesh = new THREE.Mesh(geometry, material);
-    
+
     // Positioning
     const { x, z } = axialToPixel(cell.q, cell.r, hexSize);
     // Align base to Y = 0 (since default cylinder centers at height / 2)
     mesh.position.set(x, height / 2, z);
-    
+
     mesh.castShadow = true;
     mesh.receiveShadow = true;
 

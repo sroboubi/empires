@@ -1,4 +1,4 @@
-import { CONFIG } from './config.js';
+import { TerrainProvider } from "./terrainProvider.js";
 
 /**
  * GameState tracks players and the hex grid cells.
@@ -16,34 +16,25 @@ export class GameState {
    */
   generateMap(radius) {
     this.cells = {};
-    
+
+    const terrainProvider = new TerrainProvider(radius);
+
     // Clear and add default placeholder players
     this.players = [
       { id: 1, name: 'Red Empire', color: '#ff4d4d' },
       { id: 2, name: 'Blue Alliance', color: '#3399ff' }
     ];
 
-    const terrainPool = [
-      ...Array(10).fill('plains'),
-      ...Array(4).fill('hills'),
-      ...Array(3).fill('mountains'),
-      ...Array(3).fill('water')
-    ];
-
     for (let q = -radius; q <= radius; q++) {
       const rMin = Math.max(-radius, -q - radius);
       const rMax = Math.min(radius, -q + radius);
-      
+
       for (let r = rMin; r <= rMax; r++) {
-        // Randomly select a terrain type
-        const randomIndex = Math.floor(Math.random() * terrainPool.length);
-        const terrain = terrainPool[randomIndex];
-        
         // Key is the string "q,r" for easy indexing and serialization
         this.cells[`${q},${r}`] = {
           q,
           r,
-          terrain,
+          terrain: terrainProvider.get(q, r),
           owner: null // No owner by default in Phase 1
         };
       }

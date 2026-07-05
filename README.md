@@ -17,3 +17,7 @@ Strict Constraints:
 - No build tools (no Vite, no Webpack).
 - Keep the Game Manager completely agnostic to specific terrain types. Use a configuration lookup for heights and colors.
 - Ensure the scene auto-resizes with the browser window.
+
+-----
+
+create a terrainProvider class. It will contain the terrain config. In [gameState.js](codeContext;file:///c%3A/Users/Falcon/workspace/empires/src/gameState.js#L16-50) we will call terrainProvider get(q, r) which will provide a terrain object to use for the cell at q, r. For now the terrainProvider will return a random terrain object.     

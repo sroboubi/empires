@@ -1,10 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Empires - 3D Hex Grid Visualization</title>
-  
+
   <!-- Modern Premium Font -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -269,7 +270,7 @@
       opacity: 0;
       pointer-events: none;
       transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-      box-shadow: 0 4px 15px rgba(0,0,0,0.25);
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.25);
     }
 
     .toast.show {
@@ -289,12 +290,24 @@
     }
 
     @keyframes pulse {
-      0% { transform: scale(0.9); opacity: 0.5; }
-      50% { transform: scale(1.2); opacity: 1; }
-      100% { transform: scale(0.9); opacity: 0.5; }
+      0% {
+        transform: scale(0.9);
+        opacity: 0.5;
+      }
+
+      50% {
+        transform: scale(1.2);
+        opacity: 1;
+      }
+
+      100% {
+        transform: scale(0.9);
+        opacity: 0.5;
+      }
     }
   </style>
 </head>
+
 <body>
 
   <!-- Game Canvas -->
@@ -335,7 +348,7 @@
       <span class="active-dot"></span> Cell Inspector
     </div>
     <div class="divider" style="margin-bottom: 12px;"></div>
-    
+
     <div class="info-row">
       <span class="info-label">Axial Coord:</span>
       <span class="info-value" id="inspect-coords">(0, 0)</span>
@@ -353,7 +366,8 @@
   <!-- Bottom Panel: Serialization HUD -->
   <div class="glass-panel serialization-panel">
     <div class="section-title" style="margin-bottom: 0;">State Serialization</div>
-    <div class="instructions" style="margin-bottom: 4px;">Copy state JSON to save / share, or paste and deserialize to reload.</div>
+    <div class="instructions" style="margin-bottom: 4px;">Copy state JSON to save / share, or paste and deserialize to
+      reload.</div>
     <textarea id="state-data" class="state-textarea" placeholder='Serialized JSON state will appear here...'></textarea>
     <div class="serialization-controls">
       <button id="btn-serialize" class="btn btn-secondary">Serialize State</button>
@@ -368,4 +382,5 @@
   <script type="module" src="src/main.js"></script>
 
 </body>
+
 </html>
