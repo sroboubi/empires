@@ -1,0 +1,126 @@
+{
+  "resources": [
+    {
+      "name": "gold",
+      "iconUrl": "./assets/working/gold.png"
+    },
+    {
+      "name": "wood",
+      "iconUrl": "./assets/working/lumber_mill.png"
+    },
+    {
+      "name": "iron",
+      "iconUrl": "./assets/working/iron.png"
+    },
+    {
+      "name": "food",
+      "iconUrl": "./assets/working/fish.png"
+    },
+    {
+      "name": "gems",
+      "iconUrl": "./assets/working/gems.png"
+    }
+  ],
+  "entities": [
+    {
+      "name": "swordsman",
+      "category": "unit",
+      "modelUrl": "./assets/units/swordsman-optimized.glb",
+      "size": 2,
+      "controllerUrl": "./src/controllers/swordsman.js"
+    },
+    {
+      "name": "worker",
+      "category": "unit",
+      "modelUrl": "./assets/units/worker-optimized.glb",
+      "size": 1.2,
+      "controllerUrl": "./src/controllers/worker.js"
+    },
+    {
+      "name": "settler",
+      "category": "unit",
+      "modelUrl": "./assets/units/settler-optimized.glb",
+      "controllerUrl": "./src/controllers/settler.js"
+    },
+    {
+      "name": "bowman",
+      "category": "unit",
+      "modelUrl": "./assets/units/bowman-optimized.glb",
+      "controllerUrl": "./src/controllers/bowman.js"
+    },
+    {
+      "name": "horseman",
+      "category": "unit",
+      "modelUrl": "./assets/units/horseman-optimized.glb",
+      "controllerUrl": "./src/controllers/horseman.js"
+    },
+    {
+      "name": "village",
+      "category": "construct",
+      "modelUrl": "./assets/constructs/village-optimized.glb",
+      "controllerUrl": "./src/controllers/village.js"
+    },
+    {
+      "name": "forge",
+      "category": "construct",
+      "modelUrl": "./assets/constructs/forge-optimized.glb",
+      "controllerUrl": "./src/controllers/forge.js"
+    },
+    {
+      "name": "lumber_mill",
+      "category": "construct",
+      "modelUrl": "./assets/constructs/lumber_mill-optimized.glb",
+      "controllerUrl": "./src/controllers/lumber_mill.js"
+    },
+    {
+      "name": "mine",
+      "category": "construct",
+      "modelUrl": "./assets/constructs/mine-optimized.glb",
+      "controllerUrl": "./src/controllers/mine.js"
+    },
+    {
+      "name": "farm",
+      "category": "construct",
+      "modelUrl": "./assets/constructs/farm-optimized.glb",
+      "controllerUrl": "./src/controllers/farm.js"
+    }
+  ],
+  "initialization": {
+    "startingResources": [
+      {
+        "name": "gold",
+        "quantity": 100
+      },
+      {
+        "name": "wood",
+        "quantity": 50
+      },
+      {
+        "name": "iron",
+        "quantity": 0
+      },
+      {
+        "name": "food",
+        "quantity": 40
+      },
+      {
+        "name": "gems",
+        "quantity": 0
+      }
+    ],
+    "startingUnits": [
+      {
+        "name": "settler",
+        "quantity": 1
+      },
+      {
+        "name": "worker",
+        "quantity": 2
+      },
+      {
+        "name": "swordsman",
+        "quantity": 1
+      }
+    ]
+  }
+}

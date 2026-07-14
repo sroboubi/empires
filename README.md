@@ -35,3 +35,11 @@ Implement the game configuration loading system using the provided JSON architec
    - It must asynchronously preload the dynamic JS controller classes using dynamic `import()`.
 5. When the manifest and entities are loaded, add the resources and add the entities to the grid for each player.
 6. Create `src/engine.js` that will be responsible for the game loop. It will call the step() function of each entity every frame. It will also handle the game state and the drawing of the grid and entities.
+
+TODO:
+- unit lighting and shahows
+- resources init on grid?
+- frame drop?
+- civ resource pool
+- camera controls and set target to selected cell, smooth move
+- move units

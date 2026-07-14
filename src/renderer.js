@@ -2,11 +2,19 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { axialToPixel } from './hexMath.js';
 
-let scene, camera, renderer, controls;
+export let scene, camera, renderer, controls;
 let hexGroup;
 let cellMeshMap = {}; // Maps "q,r" to Mesh object
 let highlightMesh = null; // Mesh to show selection/hover highlight
-let hexSize = 1.0;
+export let hexSize = 1.0;
+
+// Update callback and Clock for external simulation hooks
+let updateCallback = null;
+const clock = new THREE.Clock();
+
+export function setUpdateCallback(cb) {
+  updateCallback = cb;
+}
 
 // Material caches to reuse materials for performance
 const materialCache = {};
@@ -48,7 +56,7 @@ export function initRenderer(canvas, size) {
   controls.enableDamping = true;
   controls.dampingFactor = 0.05;
   controls.maxPolarAngle = Math.PI / 2 - 0.05; // Don't go below the ground plane
-  controls.minDistance = 3;
+  controls.minDistance = 1;
   controls.maxDistance = 100;
 
   // 5. Setup Lights
@@ -94,6 +102,7 @@ export function initRenderer(canvas, size) {
   window.addEventListener('resize', onWindowResize);
 
   // Start animation loop
+  clock.start();
   animate();
 }
 
@@ -111,6 +120,11 @@ function onWindowResize() {
  */
 function animate() {
   requestAnimationFrame(animate);
+
+  const deltaTime = clock.getDelta();
+  if (updateCallback) {
+    updateCallback(deltaTime);
+  }
 
   if (controls) {
     controls.update();
