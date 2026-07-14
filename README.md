@@ -18,6 +18,20 @@ Strict Constraints:
 - Keep the Game Manager completely agnostic to specific terrain types. Use a configuration lookup for heights and colors.
 - Ensure the scene auto-resizes with the browser window.
 
------
+Task: Phase 1.1 - Terrain Provider
 
-create a terrainProvider class. It will contain the terrain config. In [gameState.js](codeContext;file:///c%3A/Users/Falcon/workspace/empires/src/gameState.js#L16-50) we will call terrainProvider get(q, r) which will provide a terrain object to use for the cell at q, r. For now the terrainProvider will return a random terrain object.     
+Create a terrainProvider class. It will contain the terrain config. In [gameState.js](codeContext;file:///c%3A/Users/Falcon/workspace/empires/src/gameState.js#L16-50) we will call terrainProvider get(q, r) which will provide a terrain object to use for the cell at q, r. Use simplex noise for the terrain type.
+
+Task: Phase 2 - Dynamic Asset and Controller Manifest Loader
+
+Implement the game configuration loading system using the provided JSON architecture.
+
+1. Each cell can have a list of entities, that can be constructs or units.
+2. Entities all have a glb file that defines the geometry. This will be added to the scene.
+3. Entities all have a js file that defines the controller. This can implement an info(), step(), and actions() functions for each entity.
+4. Create `src/manifestLoader.js`: 
+   - Implement an asynchronous `loadGameManifest(url)` function, where the URL can be provided as a query parameter to the game.
+   - It must fetch the JSON payload with a schema defined by src/manifest.schema.json, parse the global resources, and cache the entity metadata.
+   - It must asynchronously preload the dynamic JS controller classes using dynamic `import()`.
+5. When the manifest and entities are loaded, add the resources and add the entities to the grid for each player.
+6. Create `src/engine.js` that will be responsible for the game loop. It will call the step() function of each entity every frame. It will also handle the game state and the drawing of the grid and entities.

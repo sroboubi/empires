@@ -1,0 +1,120 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "GameManifest",
+    "type": "object",
+    "required": [
+        "resources",
+        "entities"
+    ],
+    "properties": {
+        "resources": {
+            "type": "array",
+            "description": "Global resources tracked by the game engine.",
+            "items": {
+                "type": "object",
+                "required": [
+                    "name",
+                    "iconUrl"
+                ],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Unique name (e.g., 'gold', 'wood')"
+                    },
+                    "iconUrl": {
+                        "type": "string",
+                        "format": "uri",
+                        "description": "2D image asset for UIs"
+                    }
+                }
+            }
+        },
+        "entities": {
+            "type": "array",
+            "description": "Game pieces (Terrain, Units, Constructs) that can occupy the hex grid.",
+            "items": {
+                "type": "object",
+                "required": [
+                    "name",
+                    "category",
+                    "modelUrl",
+                    "controllerUrl"
+                ],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Unique name (e.g., 'swordsman', 'mine')"
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "e.g. construct or unit"
+                    },
+                    "modelUrl": {
+                        "type": "string",
+                        "format": "uri",
+                        "description": "Path to the 3D .glb file"
+                    },
+                    "controllerUrl": {
+                        "type": "string",
+                        "format": "uri",
+                        "description": "Path to the JS module defining the controller class"
+                    }
+                }
+            }
+        },
+        "initialization": {
+            "type": "object",
+            "description": "Starting setup parameters applied to each player when a new game begins.",
+            "required": [
+                "startingResources",
+                "startingUnits"
+            ],
+            "properties": {
+                "startingResources": {
+                    "type": "array",
+                    "description": "The types and amounts of resources every player begins with.",
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "name",
+                            "quantity"
+                        ],
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "description": "Must match a resource name defined in 'resources'."
+                            },
+                            "quantity": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Starting amount."
+                            }
+                        }
+                    }
+                },
+                "startingUnits": {
+                    "type": "array",
+                    "description": "The collection of units each player starts with. The engine will place these at or near the player's starting coordinate.",
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "name",
+                            "quantity"
+                        ],
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "description": "Must match an entity name defined in 'entities' where category is 'unit'."
+                            },
+                            "quantity": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "description": "Number of this unit to spawn."
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
