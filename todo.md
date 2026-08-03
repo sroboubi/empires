@@ -1,0 +1,7 @@
+- unit lighting and shahows
+- resources init on grid?
+- frame drop and lagging?
+- civ resource pool
+- camera controls and set target to selected cell, smooth move
+- move units
+- when AI is thinking, do a day/night cycle

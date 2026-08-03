@@ -243,67 +243,54 @@
       resize: none;
     }
 
-    .state-textarea:focus {
-      outline: 1px solid var(--accent-color);
-    }
-
-    /* Instructions overlay */
-    .instructions {
-      font-size: 12px;
-      color: var(--text-muted);
-      line-height: 1.5;
-    }
-
-    /* Toast Notification */
-    .toast {
+    /* Floating Context Menu */
+    .context-menu {
       position: absolute;
-      bottom: 180px;
-      left: 50%;
-      transform: translate(-50%, 20px);
-      background: #2ecc71;
-      color: white;
-      padding: 10px 20px;
-      border-radius: 30px;
-      font-size: 14px;
+      width: 220px;
+      padding: 16px;
+      z-index: 1000;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+      border: 1px solid rgba(52, 152, 219, 0.4);
+      pointer-events: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .context-menu-header {
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--accent-color);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .context-action-btn {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-family: inherit;
+      font-size: 12px;
       font-weight: 600;
-      z-index: 100;
-      opacity: 0;
-      pointer-events: none;
-      transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.25);
+      cursor: pointer;
+      width: 100%;
+      text-align: left;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
     }
 
-    .toast.show {
-      opacity: 1;
-      transform: translate(-50%, 0);
-    }
-
-    /* Small dot animation for active inspect panel */
-    .active-dot {
-      width: 6px;
-      height: 6px;
-      background: #2ecc71;
-      border-radius: 50%;
-      display: inline-block;
-      box-shadow: 0 0 8px #2ecc71;
-      animation: pulse 1.5s infinite;
-    }
-
-    @keyframes pulse {
-      0% {
-        transform: scale(0.9);
-        opacity: 0.5;
-      }
-
-      50% {
-        transform: scale(1.2);
-        opacity: 1;
-      }
-
-      100% {
-        transform: scale(0.9);
-        opacity: 0.5;
-      }
+    .context-action-btn:hover {
+      background: var(--accent-color);
+      color: white;
+      border-color: var(--accent-color);
+      transform: translateX(3px);
     }
   </style>
 </head>
@@ -330,12 +317,13 @@
     <div class="divider"></div>
 
     <div>
-      <div class="section-title">Instructions</div>
+      <div class="section-title">Controls</div>
       <div class="instructions">
-        Drag with <strong>Left Click</strong> to rotate.<br>
-        Drag with <strong>Right Click</strong> to pan.<br>
-        <strong>Scroll</strong> to zoom.<br>
-        <strong>Hover</strong> hexes to inspect properties.
+        <strong>WASD</strong> / <strong>Left Drag</strong>: Pan map (fixed height)<br>
+        <strong>Scroll Wheel</strong>: Zoom in / out<br>
+        <strong>Q / E</strong> / <strong>Right Drag</strong>: Rotate & Tilt camera<br>
+        <strong>Left Click</strong>: Select entity / deselect<br>
+        <strong>Right Click</strong>: Action context menu
       </div>
     </div>
 
@@ -361,11 +349,31 @@
       <span class="info-label">Base Height:</span>
       <span class="info-value" id="inspect-height">0.2</span>
     </div>
+    <div class="info-row">
+      <span class="info-label">Elevation:</span>
+      <span class="info-value" id="inspect-elevation">0.2</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Temperature:</span>
+      <span class="info-value" id="inspect-temperature">0.2</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Humidity:</span>
+      <span class="info-value" id="inspect-humidity">0.2</span>
+    </div>
     <div class="divider" style="margin-top: 12px; margin-bottom: 12px;"></div>
     <div class="section-title">Entities</div>
-    <div id="inspect-entities" style="font-size: 13px; display: flex; flex-direction: column; gap: 8px; color: var(--text-muted);">
+    <div id="inspect-entities"
+      style="font-size: 13px; display: flex; flex-direction: column; gap: 8px; color: var(--text-muted);">
       None
     </div>
+  </div>
+
+  <!-- Context Menu Popup -->
+  <div id="entity-context-menu" class="glass-panel context-menu" style="display: none;">
+    <div class="context-menu-header" id="context-menu-title">Entity Actions</div>
+    <div class="divider"></div>
+    <div id="context-menu-actions" style="display: flex; flex-direction: column; gap: 6px;"></div>
   </div>
 
   <!-- Bottom Panel: Serialization HUD -->

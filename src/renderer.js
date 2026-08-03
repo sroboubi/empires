@@ -58,6 +58,12 @@ export function initRenderer(canvas, size) {
   controls.maxPolarAngle = Math.PI / 2 - 0.05; // Don't go below the ground plane
   controls.minDistance = 1;
   controls.maxDistance = 100;
+  controls.screenSpacePanning = false; // Left click pan stays on horizontal XZ plane (fixed elevation)
+  controls.mouseButtons = {
+    LEFT: THREE.MOUSE.PAN,
+    MIDDLE: THREE.MOUSE.DOLLY,
+    RIGHT: THREE.MOUSE.ROTATE
+  };
 
   // 5. Setup Lights
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
@@ -86,7 +92,7 @@ export function initRenderer(canvas, size) {
   hexGroup = new THREE.Group();
   scene.add(hexGroup);
 
-  // Selection Highlight Mesh
+  // Selection Hover Highlight Mesh
   const highlightGeometry = new THREE.CylinderGeometry(hexSize * 0.98, hexSize * 0.98, 0.05, 6);
   const highlightMaterial = new THREE.MeshBasicMaterial({
     color: 0xffff00,
@@ -98,12 +104,42 @@ export function initRenderer(canvas, size) {
   highlightMesh.visible = false;
   scene.add(highlightMesh);
 
-  // Window Resize Listener
+  // Entity Selection Ring Mesh (Animated cyan ring)
+  const entityRingGeom = new THREE.RingGeometry(0.42, 0.54, 32);
+  entityRingGeom.rotateX(-Math.PI / 2);
+  const entityRingMat = new THREE.MeshBasicMaterial({
+    color: 0x00ffff,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0.85
+  });
+  entitySelectionMesh = new THREE.Mesh(entityRingGeom, entityRingMat);
+  entitySelectionMesh.visible = false;
+  scene.add(entitySelectionMesh);
+
+  // Window & Keyboard Listeners
   window.addEventListener('resize', onWindowResize);
+  window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('keyup', onKeyUp);
 
   // Start animation loop
   clock.start();
   animate();
+}
+
+let entitySelectionMesh = null;
+const keysPressed = {};
+
+function onKeyDown(event) {
+  // Ignore keyboard shortcuts if user is typing in an input/textarea
+  if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+  keysPressed[event.code] = true;
+  keysPressed[event.key] = true;
+}
+
+function onKeyUp(event) {
+  keysPressed[event.code] = false;
+  keysPressed[event.key] = false;
 }
 
 /**
@@ -122,12 +158,53 @@ function animate() {
   requestAnimationFrame(animate);
 
   const deltaTime = clock.getDelta();
-  if (updateCallback) {
-    updateCallback(deltaTime);
+
+  // WASD (Pan) and Q/E (Rotate) Camera Movement
+  if (controls) {
+    const speed = 15 * deltaTime;
+    const rotSpeed = 2.0 * deltaTime;
+
+    const forward = new THREE.Vector3();
+    camera.getWorldDirection(forward);
+    forward.y = 0;
+    forward.normalize();
+
+    const right = new THREE.Vector3();
+    right.crossVectors(forward, camera.up).normalize();
+
+    const moveVector = new THREE.Vector3();
+    if (keysPressed['KeyW'] || keysPressed['w'] || keysPressed['W']) moveVector.addScaledVector(forward, speed);
+    if (keysPressed['KeyS'] || keysPressed['s'] || keysPressed['S']) moveVector.addScaledVector(forward, -speed);
+    if (keysPressed['KeyD'] || keysPressed['d'] || keysPressed['D']) moveVector.addScaledVector(right, speed);
+    if (keysPressed['KeyA'] || keysPressed['a'] || keysPressed['A']) moveVector.addScaledVector(right, -speed);
+
+    if (moveVector.lengthSq() > 0) {
+      camera.position.add(moveVector);
+      controls.target.add(moveVector);
+    }
+
+    if (keysPressed['KeyQ'] || keysPressed['q'] || keysPressed['Q']) {
+      const offset = camera.position.clone().sub(controls.target);
+      offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotSpeed);
+      camera.position.copy(controls.target).add(offset);
+    }
+    if (keysPressed['KeyE'] || keysPressed['e'] || keysPressed['E']) {
+      const offset = camera.position.clone().sub(controls.target);
+      offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), -rotSpeed);
+      camera.position.copy(controls.target).add(offset);
+    }
+
+    controls.update();
   }
 
-  if (controls) {
-    controls.update();
+  // Animate Entity Selection Ring
+  if (entitySelectionMesh && entitySelectionMesh.visible) {
+    entitySelectionMesh.rotation.z += deltaTime * 1.5;
+    entitySelectionMesh.material.opacity = 0.6 + 0.35 * Math.sin(clock.getElapsedTime() * 5);
+  }
+
+  if (updateCallback) {
+    updateCallback(deltaTime);
   }
 
   if (renderer && scene && camera) {
@@ -229,3 +306,30 @@ export function raycastHex(mouseNormalized) {
   }
   return null;
 }
+
+/**
+ * Highlights a selected entity in 3D using the cyan selection ring.
+ * @param {number} x
+ * @param {number} y
+ * @param {number} z
+ */
+export function setEntitySelectionHighlight(x, y, z) {
+  if (x === null || y === null || z === null) {
+    clearEntitySelectionHighlight();
+    return;
+  }
+  if (entitySelectionMesh) {
+    entitySelectionMesh.position.set(x, y + 0.03, z);
+    entitySelectionMesh.visible = true;
+  }
+}
+
+/**
+ * Clears the 3D entity selection highlight.
+ */
+export function clearEntitySelectionHighlight() {
+  if (entitySelectionMesh) {
+    entitySelectionMesh.visible = false;
+  }
+}
+

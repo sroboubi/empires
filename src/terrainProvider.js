@@ -1,5 +1,6 @@
 import { createNoise2D } from 'https://esm.sh/simplex-noise@4.0.3';
 
+export const SeaLevel = -0.3;
 const terrain = {
     shallowWater: {
         name: 'ShallowWater',
@@ -13,7 +14,7 @@ const terrain = {
             flatShading: true
         },
         conditions: {
-            elevation: { min: -0.7, max: -0.3 }
+            elevation: { min: -0.7, max: SeaLevel }
         }
     },
     deepWater: {
@@ -41,7 +42,7 @@ const terrain = {
             flatShading: true
         },
         conditions: {
-            elevation: { min: -0.3, max: 0.3 },
+            elevation: { min: SeaLevel, max: 0.3 },
             temperature: { min: -1, max: -0.5 }
         }
     },
@@ -55,7 +56,7 @@ const terrain = {
             flatShading: true
         },
         conditions: {
-            elevation: { min: -0.3, max: 0.3 },
+            elevation: { min: SeaLevel, max: 0.3 },
             temperature: { min: 0.5, max: 1 },
             humidity: { min: 0, max: 1 }
         }
@@ -70,7 +71,7 @@ const terrain = {
             flatShading: true
         },
         conditions: {
-            elevation: { min: -0.3, max: 0.3 },
+            elevation: { min: SeaLevel, max: 0.3 },
             temperature: { min: -0.5, max: 0.5 }
         }
     },
@@ -84,7 +85,7 @@ const terrain = {
             flatShading: true
         },
         conditions: {
-            elevation: { min: -0.3, max: 0.3 },
+            elevation: { min: SeaLevel, max: 0.3 },
             temperature: { min: 0.5, max: 1 },
             humidity: { min: -1, max: 0 }
         }
@@ -176,7 +177,6 @@ const terrain = {
             humidity: { min: -2, max: -2 },
         }
     }
-
 };
 
 export class TerrainProvider {
@@ -188,6 +188,7 @@ export class TerrainProvider {
     }
 
     get(q, r) {
+        // values generated between -1 and 1
         const elevation = this.elevationNoise(3 * q / this.radius, 3 * r / this.radius)
         const temperature = this.temperatureNoise(q / this.radius, r / this.radius)
         const humidity = this.humidityNoise(5 * q / this.radius, 5 * r / this.radius)
@@ -196,12 +197,12 @@ export class TerrainProvider {
             if (this.meetsCondition(terrain[key].conditions.elevation, elevation) &&
                 this.meetsCondition(terrain[key].conditions.temperature, temperature) &&
                 this.meetsCondition(terrain[key].conditions.humidity, humidity)) {
-                return terrain[key]
+                return { ...terrain[key], elevation, temperature, humidity };
             }
         }
 
         console.warn("no terrain found for", elevation, temperature, humidity);
-        return terrain.default;
+        return { ...terrain.default, elevation, temperature, humidity };
     }
 
     meetsCondition(condition, value) {

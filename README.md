@@ -1,7 +1,5 @@
 # README #
 
-## Prompt ##
-
 Task: Phase 1 - Base Engine Architecture & 3D Hex Grid Visualization
 
 We are building a modular, data-driven 4X strategy game using vanilla JavaScript (ESModules) and Three.js. 
@@ -36,10 +34,25 @@ Implement the game configuration loading system using the provided JSON architec
 5. When the manifest and entities are loaded, add the resources and add the entities to the grid for each player.
 6. Create `src/engine.js` that will be responsible for the game loop. It will call the step() function of each entity every frame. It will also handle the game state and the drawing of the grid and entities.
 
-TODO:
-- unit lighting and shahows
-- resources init on grid?
-- frame drop?
-- civ resource pool
-- camera controls and set target to selected cell, smooth move
-- move units
+Task: Phase 3 - Update Camera Controls and Selection
+
+1. WASD keys or drag with left click to pan the camera but keep the camera elevation fixed
+2. mouse wheel to zoom in and out
+3. Q/E keys or right click and drag to rotate camera - right click also allows tilting up and down
+4. left click to select entity, or deselect if clicking on a location that is not an entity
+   - selected entity should be highlighted
+5. right click to get a context menu for actions on selected entity
+
+Task: Phase 4 - Cleanup and refactor
+
+1. don't pass entities to controllers, instead each controller instance will be an entity
+2. remove references from cells to entities, instead each entity already has a refernece to the cell it stands on
+   - for rendering, loop through all entities, get their cell, and draw them based on the cell's position
+3. make a Player class and each player an instance of Player, that holds the player's resources
+4. the player should not have a reference to entities, instead each entity should have a reference to the player that owns it
+5. entities should have a function canStandOn(terrain) that determines if it can stand on a given terrain 
+   - for now return true if terrain elevation is above the const defined SeaLevel
+6. remove all references to terrain name from code outside of terrainProvider
+   - don't spawn resources on the map
+   - remove isLand() function, instead for each entity to spawn use canStandOn()
+7.   
