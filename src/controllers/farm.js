@@ -1,19 +1,13 @@
-export default class FarmController {
-  constructor(entity, cell, gameState) {
-    this.entity = entity;
-    this.cell = cell;
-    this.gameState = gameState;
-  }
+import { ConstructEntity } from './constructEntity.js';
 
-  info() {
-    return `Farm: Produces food resources. Owner ID: ${this.entity.ownerId || 'None'}.`;
-  }
+export default class FarmController extends ConstructEntity {
+  constructor(entityData, ownerPlayer, gridProxy, cell, initialState = null) {
+    super(entityData, ownerPlayer, gridProxy, cell, initialState);
 
-  step() {
-    // No-op for now
-  }
-
-  actions() {
-    return [];
+    if (!initialState) {
+      this.state.maxHealth = 100;
+      this.state.health = 100;
+      this.state.yields = { food: 15 };
+    }
   }
 }

@@ -1,19 +1,13 @@
-export default class LumberMillController {
-  constructor(entity, cell, gameState) {
-    this.entity = entity;
-    this.cell = cell;
-    this.gameState = gameState;
-  }
+import { ConstructEntity } from './constructEntity.js';
 
-  info() {
-    return `Lumber Mill: Harvests wood. Owner ID: ${this.entity.ownerId || 'None'}.`;
-  }
+export default class LumberMillController extends ConstructEntity {
+  constructor(entityData, ownerPlayer, gridProxy, cell, initialState = null) {
+    super(entityData, ownerPlayer, gridProxy, cell, initialState);
 
-  step() {
-    // No-op for now
-  }
-
-  actions() {
-    return [];
+    if (!initialState) {
+      this.state.maxHealth = 120;
+      this.state.health = 120;
+      this.state.yields = { wood: 15 };
+    }
   }
 }

@@ -1,14 +1,25 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { axialToPixel } from './hexMath.js';
 
 export let scene, camera, renderer, controls;
 let hexGroup;
 let cellMeshMap = {}; // Maps "q,r" to Mesh object
 let highlightMesh = null; // Mesh to show selection/hover highlight
+let entitySelectionMesh = null; // Selection ring around active entity
 export let hexSize = 1.0;
 
-// Update callback and Clock for external simulation hooks
+// GLTF model caching and entity mesh map
+const modelCache = {};
+const entityMeshMap = {}; // Maps entity.id -> Three.js Group
+let gltfLoader = null;
+
+// Material caches to reuse materials for performance
+const materialCache = {};
+
+// Animation & Update hooks
 let updateCallback = null;
 const clock = new THREE.Clock();
 
@@ -16,20 +27,17 @@ export function setUpdateCallback(cb) {
   updateCallback = cb;
 }
 
-// Material caches to reuse materials for performance
-const materialCache = {};
-
 /**
- * Initializes the 3D scene.
+ * Initializes the 3D scene, camera, lights, orbit controls, and loaders.
  * @param {HTMLCanvasElement} canvas - Canvas element to render into
  * @param {number} size - Outer radius size of the hexagons
  */
 export function initRenderer(canvas, size) {
   hexSize = size;
 
-  // 1. Create Scene
+  // 1. Setup Scene
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x111216); // Sleek dark space background
+  scene.background = new THREE.Color(0x111216); // Dark space background
 
   // 2. Setup Camera
   camera = new THREE.PerspectiveCamera(
@@ -38,9 +46,9 @@ export function initRenderer(canvas, size) {
     0.1,
     1000
   );
-  camera.position.set(0, 10, 12); // Positioned above and looking down
+  camera.position.set(0, 10, 12);
 
-  // 3. Setup Renderer
+  // 3. Setup WebGL Renderer
   renderer = new THREE.WebGLRenderer({
     canvas: canvas,
     antialias: true,
@@ -55,10 +63,10 @@ export function initRenderer(canvas, size) {
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.05;
-  controls.maxPolarAngle = Math.PI / 2 - 0.05; // Don't go below the ground plane
+  controls.maxPolarAngle = Math.PI / 2 - 0.05;
   controls.minDistance = 1;
   controls.maxDistance = 100;
-  controls.screenSpacePanning = false; // Left click pan stays on horizontal XZ plane (fixed elevation)
+  controls.screenSpacePanning = false;
   controls.mouseButtons = {
     LEFT: THREE.MOUSE.PAN,
     MIDDLE: THREE.MOUSE.DOLLY,
@@ -88,7 +96,7 @@ export function initRenderer(canvas, size) {
   hemiLight.position.set(0, 200, 0);
   scene.add(hemiLight);
 
-  // Group to hold all hexes
+  // Group to hold hex tiles
   hexGroup = new THREE.Group();
   scene.add(hexGroup);
 
@@ -117,21 +125,26 @@ export function initRenderer(canvas, size) {
   entitySelectionMesh.visible = false;
   scene.add(entitySelectionMesh);
 
-  // Window & Keyboard Listeners
+  // 6. Setup DRACO & GLTF Loaders
+  const dracoLoader = new DRACOLoader();
+  dracoLoader.setDecoderPath('https://unpkg.com/three@0.160.0/examples/jsm/libs/draco/gltf/');
+
+  gltfLoader = new GLTFLoader();
+  gltfLoader.setDRACOLoader(dracoLoader);
+
+  // Listeners
   window.addEventListener('resize', onWindowResize);
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
 
-  // Start animation loop
+  // Start Animation Loop
   clock.start();
   animate();
 }
 
-let entitySelectionMesh = null;
 const keysPressed = {};
 
 function onKeyDown(event) {
-  // Ignore keyboard shortcuts if user is typing in an input/textarea
   if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
   keysPressed[event.code] = true;
   keysPressed[event.key] = true;
@@ -142,9 +155,6 @@ function onKeyUp(event) {
   keysPressed[event.key] = false;
 }
 
-/**
- * Handles window resize events.
- */
 function onWindowResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
@@ -152,14 +162,14 @@ function onWindowResize() {
 }
 
 /**
- * Main animation and render loop.
+ * Main animation loop.
  */
 function animate() {
   requestAnimationFrame(animate);
 
   const deltaTime = clock.getDelta();
 
-  // WASD (Pan) and Q/E (Rotate) Camera Movement
+  // WASD Pan & Q/E Rotate
   if (controls) {
     const speed = 15 * deltaTime;
     const rotSpeed = 2.0 * deltaTime;
@@ -197,7 +207,7 @@ function animate() {
     controls.update();
   }
 
-  // Animate Entity Selection Ring
+  // Animate selection ring
   if (entitySelectionMesh && entitySelectionMesh.visible) {
     entitySelectionMesh.rotation.z += deltaTime * 1.5;
     entitySelectionMesh.material.opacity = 0.6 + 0.35 * Math.sin(clock.getElapsedTime() * 5);
@@ -213,43 +223,34 @@ function animate() {
 }
 
 /**
- * Helper to get or create a material for a terrain type.
- * @param {Object} terrain - terrain object
- * @returns {THREE.Material} The material
+ * Helper to get or create material for terrain.
  */
 function getTerrainMaterial(terrain) {
   if (materialCache[terrain.name]) {
     return materialCache[terrain.name];
   }
-
   const material = new THREE.MeshStandardMaterial(terrain.material);
   materialCache[terrain.name] = material;
   return material;
 }
 
 /**
- * Draws the hexagonal grid from the cell data.
- * @param {Object} cells - Dictionary of cells keyed by "q,r"
+ * Draws the 3D hexagonal grid from cell data.
  */
 export function drawGrid(cells) {
-  // Clear any existing hexes
   while (hexGroup.children.length > 0) {
     const child = hexGroup.children[0];
     hexGroup.remove(child);
   }
   cellMeshMap = {};
 
-  // For geometry reuse, we can define them per height
   const geometryCache = {};
 
   Object.values(cells).forEach(cell => {
     const height = cell.terrain.height;
 
-    // Check geometry cache
     let geometry = geometryCache[height];
     if (!geometry) {
-      // 6 segments creates a hexagon.
-      // We scale radius slightly down (0.96) to leave a sleek gap between tiles.
       geometry = new THREE.CylinderGeometry(hexSize * 0.96, hexSize * 0.96, height, 6);
       geometryCache[height] = geometry;
     }
@@ -257,15 +258,12 @@ export function drawGrid(cells) {
     const material = getTerrainMaterial(cell.terrain);
     const mesh = new THREE.Mesh(geometry, material);
 
-    // Positioning
     const { x, z } = axialToPixel(cell.q, cell.r, hexSize);
-    // Align base to Y = 0 (since default cylinder centers at height / 2)
     mesh.position.set(x, height / 2, z);
 
     mesh.castShadow = true;
     mesh.receiveShadow = true;
 
-    // Attach custom data to mesh for raycasting lookup
     mesh.userData = { q: cell.q, r: cell.r, terrain: cell.terrain };
 
     hexGroup.add(mesh);
@@ -274,10 +272,156 @@ export function drawGrid(cells) {
 }
 
 /**
- * Highlights a specific cell or clears highlight.
- * @param {number|null} q - Axial q coordinate
- * @param {number|null} r - Axial r coordinate
- * @param {number|null} height - The height of the cell, to position highlight at top
+ * Preloads all GLTF models defined in entity metadata in parallel.
+ * @param {Object} entityMetadata - Preloaded entity metadata map
+ */
+export async function preloadModels(entityMetadata) {
+  console.log("Preloading GLTF models...");
+  const promises = Object.values(entityMetadata).map(entity => {
+    return new Promise((resolve) => {
+      if (!entity.modelUrl) {
+        resolve();
+        return;
+      }
+
+      gltfLoader.load(
+        entity.modelUrl,
+        (gltf) => {
+          console.log(`Preloaded 3D model for: ${entity.name}`);
+          modelCache[entity.modelUrl] = gltf.scene;
+          resolve();
+        },
+        undefined,
+        (err) => {
+          console.error(`Failed to load GLTF model for "${entity.name}" from ${entity.modelUrl}:`, err);
+          resolve();
+        }
+      );
+    });
+  });
+
+  await Promise.all(promises);
+  console.log("GLTF model preloading complete.");
+}
+
+/**
+ * Reconciles 3D meshes for entities in GameState.
+ * Loops through all active entities in gameState.entities, positions their 3D groups based on cell coordinates,
+ * and removes meshes for entities that were destroyed.
+ * @param {GameState} gameState
+ */
+export function reconcileEntities(gameState) {
+  const activeIds = new Set();
+
+  gameState.entities.forEach(entity => {
+    activeIds.add(entity.id);
+
+    const cell = entity.cell || gameState.cells[`${entity.q},${entity.r}`];
+    const terrainHeight = cell && cell.terrain ? cell.terrain.height : 1.0;
+    const { x, z } = axialToPixel(entity.q, entity.r, hexSize);
+
+    if (!entityMeshMap[entity.id]) {
+      // Spawn new 3D mesh
+      spawnEntityMesh(entity, gameState, x, terrainHeight, z);
+    } else {
+      // Update position of existing mesh
+      const meshGroup = entityMeshMap[entity.id];
+      meshGroup.position.set(x, terrainHeight, z);
+    }
+  });
+
+  // Remove meshes of entities that no longer exist
+  for (const id in entityMeshMap) {
+    if (!activeIds.has(id)) {
+      console.log(`Removing 3D mesh for destroyed entity: ${id}`);
+      const meshGroup = entityMeshMap[id];
+      if (meshGroup) {
+        scene.remove(meshGroup);
+      }
+      delete entityMeshMap[id];
+    }
+  }
+}
+
+/**
+ * Helper to spawn 3D visual group for an entity.
+ */
+function spawnEntityMesh(entity, gameState, x, terrainHeight, z) {
+  const meta = gameState.manifestData ? gameState.manifestData.entities[entity.name] : null;
+
+  const group = new THREE.Group();
+
+  // 1. Draw Player-Colored Base Ring
+  if (entity.owner) {
+    const colorHex = entity.owner.color || '#ffffff';
+    const ringGeom = new THREE.RingGeometry(0.3, 0.4, 16);
+    ringGeom.rotateX(-Math.PI / 2);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(colorHex),
+      side: THREE.DoubleSide
+    });
+    const ringMesh = new THREE.Mesh(ringGeom, ringMat);
+    ringMesh.position.y = 0.01;
+    group.add(ringMesh);
+  }
+
+  // 2. Add GLTF model geometry or fallback box
+  const modelUrl = meta ? meta.modelUrl : null;
+  const originalScene = modelUrl ? modelCache[modelUrl] : null;
+
+  if (originalScene) {
+    const modelClone = originalScene.clone();
+
+    const box = new THREE.Box3().setFromObject(modelClone);
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const targetSize = (meta && meta.size) ? meta.size : 1;
+    const scale = targetSize / (maxDim || 1);
+    modelClone.scale.set(scale, scale, scale);
+
+    const localBox = new THREE.Box3().setFromObject(modelClone);
+    modelClone.position.y = -localBox.min.y;
+
+    modelClone.traverse(node => {
+      if (node.isMesh) {
+        node.castShadow = true;
+        node.receiveShadow = true;
+      }
+    });
+
+    group.add(modelClone);
+  } else {
+    // Fallback block
+    const geom = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+    const color = entity.owner ? entity.owner.color : '#cccccc';
+    const mat = new THREE.MeshStandardMaterial({ color: color });
+    const fallbackMesh = new THREE.Mesh(geom, mat);
+    fallbackMesh.position.y = 0.15;
+    group.add(fallbackMesh);
+  }
+
+  group.position.set(x, terrainHeight, z);
+  entityMeshMap[entity.id] = group;
+  scene.add(group);
+}
+
+/**
+ * Clears all entity meshes from Three.js scene.
+ */
+export function clearEntityMeshes() {
+  for (const id in entityMeshMap) {
+    const meshGroup = entityMeshMap[id];
+    if (meshGroup) {
+      scene.remove(meshGroup);
+    }
+  }
+  for (const key in entityMeshMap) {
+    delete entityMeshMap[key];
+  }
+}
+
+/**
+ * Highlights a specific cell under cursor.
  */
 export function highlightCell(q, r, height = null) {
   if (q === null || r === null) {
@@ -291,9 +435,7 @@ export function highlightCell(q, r, height = null) {
 }
 
 /**
- * Casts a ray from the mouse pointer to detect which hex is hovered.
- * @param {THREE.Vector2} mouseNormalized - Mouse coordinates in [-1, 1] space
- * @returns {Object|null} Cell data under cursor or null
+ * Raycasts from camera to cursor position.
  */
 export function raycastHex(mouseNormalized) {
   const raycaster = new THREE.Raycaster();
@@ -308,10 +450,7 @@ export function raycastHex(mouseNormalized) {
 }
 
 /**
- * Highlights a selected entity in 3D using the cyan selection ring.
- * @param {number} x
- * @param {number} y
- * @param {number} z
+ * Sets animated entity selection highlight ring.
  */
 export function setEntitySelectionHighlight(x, y, z) {
   if (x === null || y === null || z === null) {
@@ -324,12 +463,8 @@ export function setEntitySelectionHighlight(x, y, z) {
   }
 }
 
-/**
- * Clears the 3D entity selection highlight.
- */
 export function clearEntitySelectionHighlight() {
   if (entitySelectionMesh) {
     entitySelectionMesh.visible = false;
   }
 }
-

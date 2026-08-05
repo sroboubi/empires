@@ -1,19 +1,17 @@
-export default class SwordsmanController {
-  constructor(entity, cell, gameState) {
-    this.entity = entity;
-    this.cell = cell;
-    this.gameState = gameState;
-  }
+import { UnitEntity } from './unitEntity.js';
 
-  info() {
-    return `Swordsman: Combat unit. Owner ID: ${this.entity.ownerId || 'None'}.`;
-  }
+export default class SwordsmanController extends UnitEntity {
+  constructor(entityData, ownerPlayer, gridProxy, cell, initialState = null) {
+    super(entityData, ownerPlayer, gridProxy, cell, initialState);
 
-  step() {
-    // No-op for now
-  }
-
-  actions() {
-    return ["Move", "Attack"];
+    if (!initialState) {
+      this.state.maxMovementPoints = 2;
+      this.state.movementPoints = 2;
+      this.state.attackPower = 15;
+      this.state.range = 1;
+      this.state.armor = 2;
+      this.state.maxHealth = 120;
+      this.state.health = 120;
+    }
   }
 }

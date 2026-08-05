@@ -55,4 +55,20 @@ Task: Phase 4 - Cleanup and refactor
 6. remove all references to terrain name from code outside of terrainProvider
    - don't spawn resources on the map
    - remove isLand() function, instead for each entity to spawn use canStandOn()
-7.   
+7. combine all rendering code into one file instead of havign renderer.js and engine.js
+
+Task: Phase 5 - Entities and actions
+
+1. Read and modify baseEntity.js to make it functional. Note the comments. All entities should extend this class.
+2. Each entity will have a reference to the hex grid. 
+3. Each entity must control what actions it can do and how they are done. For example:
+   - it can use the hex grid to determine if and how it can move to a target cell, which will be passed as an argument to the action function. It can take into account the attributes of the current and target cell, and perhaps cells in between if we allow multi-cell movement. It will then reduce its own movement points and consume the required resources from the owning player
+   - in the case where an entity is asked to attack another entity, it will be passed the target entity and it can first determine if the attack is possible based on distance and attributes of the hex cells on which it and the target stand, and perhaps intermediate cells
+   - if an attack is possible and is performed, it will adjust its own and the target entity properties accordingly, by consuming resources, reducing health, etc. 
+   - if the entity is asked to construct another entity on a target cell, it can again determine if it's possible based on target cell properties, resources, etc, and then make the adjustments and spawn the new entity
+
+Task: Phase 6 - Bug fixes
+
+1. Units are not being placed on the map anymore. Fix it.
+2. Update baseEntity to have getActions and doAction - these apply to all entities
+   - for example, Village should have a "spawn" action to create units on adjacent hexes if the terrain type allows and enough resources exist.

@@ -1,19 +1,12 @@
-export default class ResourceController {
-  constructor(entity, cell, gameState) {
-    this.entity = entity;
-    this.cell = cell;
-    this.gameState = gameState;
-  }
+import { ConstructEntity } from './constructEntity.js';
 
-  info() {
-    return `Resource Deposit: ${this.entity.name}. Can be harvested by Workers.`;
-  }
+export default class ResourceController extends ConstructEntity {
+  constructor(entityData, ownerPlayer, gridProxy, cell, initialState = null) {
+    super(entityData, ownerPlayer, gridProxy, cell, initialState);
 
-  step() {
-    // Resources are static
-  }
-
-  actions() {
-    return [];
+    if (!initialState) {
+      this.state.maxHealth = 50;
+      this.state.health = 50;
+    }
   }
 }

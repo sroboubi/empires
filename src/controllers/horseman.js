@@ -1,19 +1,17 @@
-export default class HorsemanController {
-  constructor(entity, cell, gameState) {
-    this.entity = entity;
-    this.cell = cell;
-    this.gameState = gameState;
-  }
+import { UnitEntity } from './unitEntity.js';
 
-  info() {
-    return `Horseman: High mobility scout/combat unit. Owner ID: ${this.entity.ownerId || 'None'}.`;
-  }
+export default class HorsemanController extends UnitEntity {
+  constructor(entityData, ownerPlayer, gridProxy, cell, initialState = null) {
+    super(entityData, ownerPlayer, gridProxy, cell, initialState);
 
-  step() {
-    // No-op for now
-  }
-
-  actions() {
-    return ["Move", "Scout"];
+    if (!initialState) {
+      this.state.maxMovementPoints = 3;
+      this.state.movementPoints = 3;
+      this.state.attackPower = 14;
+      this.state.range = 1;
+      this.state.armor = 1;
+      this.state.maxHealth = 100;
+      this.state.health = 100;
+    }
   }
 }

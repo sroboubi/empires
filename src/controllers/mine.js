@@ -1,19 +1,13 @@
-export default class MineController {
-  constructor(entity, cell, gameState) {
-    this.entity = entity;
-    this.cell = cell;
-    this.gameState = gameState;
-  }
+import { ConstructEntity } from './constructEntity.js';
 
-  info() {
-    return `Mine: Extracts iron and minerals. Owner ID: ${this.entity.ownerId || 'None'}.`;
-  }
+export default class MineController extends ConstructEntity {
+  constructor(entityData, ownerPlayer, gridProxy, cell, initialState = null) {
+    super(entityData, ownerPlayer, gridProxy, cell, initialState);
 
-  step() {
-    // No-op for now
-  }
-
-  actions() {
-    return [];
+    if (!initialState) {
+      this.state.maxHealth = 150;
+      this.state.health = 150;
+      this.state.yields = { iron: 10, gold: 5 };
+    }
   }
 }
