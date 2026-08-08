@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { axialToPixel } from './hexMath.js';
+import { HexGrid } from './hexGrid.js';
 
 export let scene, camera, renderer, controls;
 let hexGroup;
@@ -258,7 +258,7 @@ export function drawGrid(cells) {
     const material = getTerrainMaterial(cell.terrain);
     const mesh = new THREE.Mesh(geometry, material);
 
-    const { x, z } = axialToPixel(cell.q, cell.r, hexSize);
+    const { x, z } = HexGrid.axialToPixel(cell.q, cell.r, hexSize);
     mesh.position.set(x, height / 2, z);
 
     mesh.castShadow = true;
@@ -318,7 +318,7 @@ export function reconcileEntities(gameState) {
 
     const cell = entity.cell || gameState.cells[`${entity.q},${entity.r}`];
     const terrainHeight = cell && cell.terrain ? cell.terrain.height : 1.0;
-    const { x, z } = axialToPixel(entity.q, entity.r, hexSize);
+    const { x, z } = HexGrid.axialToPixel(entity.q, entity.r, hexSize);
 
     if (!entityMeshMap[entity.id]) {
       // Spawn new 3D mesh
@@ -429,7 +429,7 @@ export function highlightCell(q, r, height = null) {
     return;
   }
 
-  const { x, z } = axialToPixel(q, r, hexSize);
+  const { x, z } = HexGrid.axialToPixel(q, r, hexSize);
   highlightMesh.position.set(x, height !== null ? height + 0.03 : 0.1, z);
   highlightMesh.visible = true;
 }

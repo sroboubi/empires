@@ -1,65 +1,46 @@
-import { TerrainProvider, SeaLevel } from './terrainProvider.js';
-import { getNeighbors } from './hexMath.js';
+import { HexGrid } from './hexGrid.js';
 import { Player } from './player.js';
 
 /**
- * GameState tracks players, hex cells, and active entity instances.
+ * GameState tracks players, the hex grid, and active entity instances.
  * It is fully serializable to and from JSON.
  */
 export class GameState {
   constructor() {
     this.players = [];
-    this.cells = {}; // Key: "q,r", Value: { q, r, terrain, owner }
-    this.entities = []; // List of active BaseEntity instances
+    this.hexGrid = null;  // HexGrid instance
+    this.entities = [];   // List of active BaseEntity instances
     this.manifestData = null;
   }
 
   /**
-   * Helper condition check for general terrain land validity (elevation > SeaLevel).
-   * Used when no entity instance is available.
-   * @param {Object} terrain
-   * @returns {boolean}
+   * Provides backwards-compatible access to cells as a plain object keyed by "q,r".
+   * Used by renderer, serialization, and other code that expects the old format.
+   * @returns {Object}
    */
-  isElevationAboveSeaLevel(terrain) {
-    return terrain && terrain.elevation > SeaLevel;
+  get cells() {
+    if (!this.hexGrid) return {};
+    return this.hexGrid.getCellsObject();
   }
 
   /**
-   * Generates a hexagonal map of a given radius filled with randomized terrain types.
+   * Generates a hexagonal map of a given radius filled with terrain.
    * @param {number} radius - Grid radius (number of hex rings from the center)
    */
   generateMap(radius) {
-    this.cells = {};
+    this.hexGrid = new HexGrid(radius);
     this.entities = [];
-
-    const terrainProvider = new TerrainProvider(radius);
 
     // Default placeholder players
     this.players = [
       new Player(1, 'Red Empire', '#ff4d4d'),
       new Player(2, 'Blue Alliance', '#3399ff')
     ];
-
-    for (let q = -radius; q <= radius; q++) {
-      const rMin = Math.max(-radius, -q - radius);
-      const rMax = Math.min(radius, -q + radius);
-
-      for (let r = rMin; r <= rMax; r++) {
-        const terrain = terrainProvider.get(q, r);
-
-        // Key is string "q,r" for easy indexing
-        this.cells[`${q},${r}`] = {
-          q,
-          r,
-          terrain,
-          owner: null
-        };
-      }
-    }
   }
 
   /**
    * Initializes player starting resources and spawns starting units on valid terrain.
+   * Uses entity canStandOn() via a function predicate passed to hexGrid.findStartingCell.
    * @param {Object} manifestData - Loaded game manifest metadata
    */
   initializeManifest(manifestData) {
@@ -79,40 +60,61 @@ export class GameState {
       new Player(2, 'Blue Alliance', '#3399ff', startingResources)
     ];
 
-    // 2. Determine starting coordinates based on cell map size
-    let maxQ = 0;
-    for (const key in this.cells) {
-      maxQ = Math.max(maxQ, Math.abs(this.cells[key].q));
-    }
-    const radius = maxQ;
+    // 2. Determine starting coordinates based on grid radius
+    const radius = this.hexGrid.radius;
 
-    // Place players on land cells on opposite sides
-    const p1Start = this.findStartingLandCell(-Math.round(radius / 4), Math.round(radius / 4));
-    const p2Start = this.findStartingLandCell(Math.round(radius / 4), -Math.round(radius / 4));
-
-    this.players[0].startCoord = p1Start ? { q: p1Start.q, r: p1Start.r } : { q: 0, r: 0 };
-    this.players[1].startCoord = p2Start ? { q: p2Start.q, r: p2Start.r } : { q: 0, r: 0 };
+    // Target coords on opposite sides of the map
+    const p1TargetQ = -Math.round(radius / 4);
+    const p1TargetR = Math.round(radius / 4);
+    const p2TargetQ = Math.round(radius / 4);
+    const p2TargetR = -Math.round(radius / 4);
 
     // 3. Spawn starting units for each player
     this.entities = [];
     if (manifestData.initialization && manifestData.initialization.startingUnits) {
-      this.players.forEach(player => {
-        const startCoord = player.startCoord;
-        
-        const openCoords = [startCoord];
-        const neighbors = getNeighbors(startCoord.q, startCoord.r);
+      const startingUnits = manifestData.initialization.startingUnits;
+
+      this.players.forEach((player, playerIdx) => {
+        const targetQ = playerIdx === 0 ? p1TargetQ : p2TargetQ;
+        const targetR = playerIdx === 0 ? p1TargetR : p2TargetR;
+
+        // Create a temporary entity from the first starting unit type to get its canStandOn
+        const firstUnitName = startingUnits[0].name;
+        const firstUnitMeta = manifestData.entities[firstUnitName];
+        let canStandOnFn = (terrain) => terrain && terrain.elevation > -0.3; // fallback
+
+        if (firstUnitMeta && firstUnitMeta.controllerClass) {
+          try {
+            const tempEntity = new firstUnitMeta.controllerClass(firstUnitMeta, player, this, null);
+            canStandOnFn = (terrain) => tempEntity.canStandOn(terrain);
+          } catch (e) {
+            console.warn('Could not create temp entity for canStandOn check, using fallback:', e);
+          }
+        }
+
+        // Find the starting cell for this player using BFS
+        const startCell = this.hexGrid.findStartingCell(targetQ, targetR, canStandOnFn);
+        if (!startCell) {
+          console.warn(`No valid starting cell found for player ${player.name}`);
+          return;
+        }
+
+        player.startCoord = { q: startCell.q, r: startCell.r };
+
+        // Collect open cells near the start: start cell + valid neighbors
+        const openCoords = [startCell];
+        const neighbors = this.hexGrid.getNeighbors(startCell.q, startCell.r);
         neighbors.forEach(nb => {
-          const cell = this.cells[`${nb.q},${nb.r}`];
-          if (cell && this.isElevationAboveSeaLevel(cell.terrain)) {
+          if (canStandOnFn(nb.terrain)) {
             openCoords.push(nb);
           }
         });
 
         let coordIdx = 0;
-        manifestData.initialization.startingUnits.forEach(unitConfig => {
+        startingUnits.forEach(unitConfig => {
           for (let i = 0; i < unitConfig.quantity; i++) {
             const coord = openCoords[coordIdx % openCoords.length];
-            const cell = this.cells[`${coord.q},${coord.r}`];
+            const cell = this.hexGrid.getCell(coord.q, coord.r);
             if (cell) {
               this.spawnEntity(unitConfig.name, cell, player);
             }
@@ -173,29 +175,6 @@ export class GameState {
   }
 
   /**
-   * Finds the closest land cell near target coordinate.
-   */
-  findStartingLandCell(qTarget, rTarget) {
-    const targetCell = this.cells[`${qTarget},${rTarget}`];
-    if (targetCell && this.isElevationAboveSeaLevel(targetCell.terrain)) {
-      return targetCell;
-    }
-    let bestCell = null;
-    let minDistance = Infinity;
-    for (const key in this.cells) {
-      const cell = this.cells[key];
-      if (this.isElevationAboveSeaLevel(cell.terrain)) {
-        const dist = Math.abs(cell.q - qTarget) + Math.abs(cell.r - rTarget);
-        if (dist < minDistance) {
-          minDistance = dist;
-          bestCell = cell;
-        }
-      }
-    }
-    return bestCell;
-  }
-
-  /**
    * Turn progression hook: steps all active entities and updates global turn context.
    */
   stepTurn() {
@@ -232,14 +211,28 @@ export class GameState {
         this.players = data.players.map(p => Player.fromJSON(p));
       }
 
-      // Re-hydrate Cells
-      this.cells = data.cells || {};
+      // Re-hydrate Cells into the HexGrid
+      if (data.cells) {
+        // Reconstruct HexGrid from serialized cell data
+        const cellKeys = Object.keys(data.cells);
+        let maxQ = 0;
+        for (const key of cellKeys) {
+          const cell = data.cells[key];
+          maxQ = Math.max(maxQ, Math.abs(cell.q));
+        }
+        // Create a new HexGrid but overwrite its cells with deserialized data
+        this.hexGrid = new HexGrid(maxQ);
+        this.hexGrid.cells.clear();
+        for (const key of cellKeys) {
+          this.hexGrid.cells.set(key, data.cells[key]);
+        }
+      }
 
       // Re-hydrate Entities
       this.entities = [];
       if (data.entities && Array.isArray(data.entities)) {
         data.entities.forEach(eData => {
-          const cell = this.cells[`${eData.q},${eData.r}`];
+          const cell = this.hexGrid ? this.hexGrid.getCell(eData.q, eData.r) : null;
           const owner = this.players.find(p => p.id === eData.ownerId) || null;
           if (cell) {
             this.spawnEntity(eData.name, cell, owner, eData.state);

@@ -1,5 +1,5 @@
 import { UnitEntity } from './unitEntity.js';
-import { distance } from '../hexMath.js';
+import { HexGrid } from '../hexGrid.js';
 
 export default class WorkerController extends UnitEntity {
   constructor(entityData, ownerPlayer, gridProxy, cell, initialState = null) {
@@ -28,7 +28,7 @@ export default class WorkerController extends UnitEntity {
     const actions = super.getActions(targetCell, targetEntity);
     if (!targetCell) return actions;
 
-    const dist = distance(this, targetCell);
+    const dist = HexGrid.distance(this, targetCell);
 
     // If target cell is adjacent, empty of entities, and land, worker can build constructs
     if (dist === 1 && (!targetEntity || targetEntity === this) && this.canStandOn(targetCell.terrain) && this.state.movementPoints >= 1) {
@@ -51,7 +51,7 @@ export default class WorkerController extends UnitEntity {
     if (this.buildables[actionName]) {
       const config = this.buildables[actionName];
       if (!targetCell) return { success: false, message: "No target cell selected." };
-      const dist = distance(this, targetCell);
+      const dist = HexGrid.distance(this, targetCell);
       if (dist !== 1) return { success: false, message: "Construct target must be adjacent." };
       if (!this.canStandOn(targetCell.terrain)) return { success: false, message: "Cannot build on water." };
       if (this.state.movementPoints < 1) return { success: false, message: "No movement points remaining." };

@@ -12,7 +12,7 @@ import {
   clearEntityMeshes
 } from './renderer.js';
 import { loadGameManifest } from './manifestLoader.js';
-import { axialToPixel } from './hexMath.js';
+import { HexGrid } from './hexGrid.js';
 import * as THREE from 'three';
 
 let gameState;
@@ -166,7 +166,7 @@ function selectEntity(entity) {
   const cell = entity.cell || gameState.cells[`${entity.q},${entity.r}`];
 
   if (cell) {
-    const { x, z } = axialToPixel(cell.q, cell.r, CONFIG.HEX_SIZE);
+    const { x, z } = HexGrid.axialToPixel(cell.q, cell.r, CONFIG.HEX_SIZE);
     setEntitySelectionHighlight(x, cell.terrain ? cell.terrain.height : 1.0, z);
   }
 

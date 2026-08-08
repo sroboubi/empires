@@ -5,6 +5,7 @@ const terrain = {
     shallowWater: {
         name: 'ShallowWater',
         height: 1.0,
+        movementCost: 1,
         material: {
             color: 0x3498db,
             roughness: 0.1,
@@ -20,6 +21,7 @@ const terrain = {
     deepWater: {
         name: 'DeepWater',
         height: 1.0,
+        movementCost: 2,
         material: {
             color: 0x1d396e,
             roughness: 0.1,
@@ -35,6 +37,7 @@ const terrain = {
     tundra: {
         name: 'Tundra',
         height: 1.2,
+        movementCost: 1.2,
         material: {
             color: 0xe0d3bf,
             roughness: 0.5,
@@ -49,6 +52,7 @@ const terrain = {
     swamp: {
         name: 'Swamp',
         height: 1.1,
+        movementCost: 1.8,
         material: {
             color: 0x163b12,
             roughness: 0.8,
@@ -64,6 +68,7 @@ const terrain = {
     grasslands: {
         name: 'Grasslands',
         height: 1.2,
+        movementCost: 1,
         material: {
             color: 0x13bd32,
             roughness: 0.8,
@@ -78,6 +83,7 @@ const terrain = {
     desert: {
         name: 'Desert',
         height: 1.1,
+        movementCost: 1.2,
         material: {
             color: 0xb5b333,
             roughness: 0.8,
@@ -93,6 +99,7 @@ const terrain = {
     footHills: {
         name: 'FootHills',
         height: 1.4,
+        movementCost: 1.5,
         material: {
             color: 0x768749,
             roughness: 0.8,
@@ -107,6 +114,7 @@ const terrain = {
     hills: {
         name: 'Hills',
         height: 1.6,
+        movementCost: 1.8,
         material: {
             color: 0xab771d,
             roughness: 0.8,
@@ -121,6 +129,7 @@ const terrain = {
     mountains: {
         name: 'Mountains',
         height: 2.0,
+        movementCost: 3,
         material: {
             color: 0x797d6f,
             roughness: 0.7,
@@ -135,6 +144,7 @@ const terrain = {
     snowyHills: {
         name: 'Snowy Hills',
         height: 1.5,
+        movementCost: 2,
         material: {
             color: 0xffffff,
             roughness: 0.8,
@@ -149,6 +159,7 @@ const terrain = {
     snowyMountains: {
         name: 'Snowy Mountains',
         height: 2.0,
+        movementCost: 4,
         material: {
             color: 0xffffff,
             roughness: 0.7,
@@ -163,6 +174,7 @@ const terrain = {
     default: {
         name: 'Default',
         height: 2.0,
+        movementCost: 1,
         material: {
             color: 0xFF1111,
             roughness: 0,

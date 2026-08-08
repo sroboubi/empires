@@ -1,5 +1,5 @@
 import { UnitEntity } from './unitEntity.js';
-import { distance } from '../hexMath.js';
+import { HexGrid } from '../hexGrid.js';
 
 export default class SettlerController extends UnitEntity {
   constructor(entityData, ownerPlayer, gridProxy, cell, initialState = null) {
@@ -20,7 +20,7 @@ export default class SettlerController extends UnitEntity {
     const actions = super.getActions(targetCell, targetEntity);
     if (!targetCell) return actions;
 
-    const dist = distance(this, targetCell);
+    const dist = HexGrid.distance(this, targetCell);
     const isCurrentOrAdjacent = dist <= 1;
 
     // Found Village action on current or adjacent empty land cell
@@ -40,7 +40,7 @@ export default class SettlerController extends UnitEntity {
   doAction(actionName, targetCell, targetEntity) {
     if (actionName === "Found Village") {
       if (!targetCell) return { success: false, message: "No target cell selected." };
-      const dist = distance(this, targetCell);
+      const dist = HexGrid.distance(this, targetCell);
       if (dist > 1) return { success: false, message: "Village must be founded on current or adjacent cell." };
       if (!this.canStandOn(targetCell.terrain)) return { success: false, message: "Cannot build on water." };
 

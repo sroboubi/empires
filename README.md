@@ -72,3 +72,14 @@ Task: Phase 6 - Bug fixes
 1. Units are not being placed on the map anymore. Fix it.
 2. Update baseEntity to have getActions and doAction - these apply to all entities
    - for example, Village should have a "spawn" action to create units on adjacent hexes if the terrain type allows and enough resources exist.
+
+Task: Phase 7 - Refactor Hex Grid
+
+1. Make a class to encapsulate the hex grid and merge hexMath.js into it.
+2. This class should contain all the cells, where each cell has axial co-ordinates and the terrain for that cell. Cells don't need to have an "owner".
+3. Update gameState to use this class instead of a plain object. 
+4. Remove isElevationAboveSeaLevel() from gameState, instead use the canStandOn() function of each entity to determine if it can stand on a given terrain. For each player, first pick a starting cell, then search outwards from that cell until you find a cell where the first starting unit can stand on it. For each subsequent unit, start from the cell of the first unit and search outwards.
+5. Add functions to the hex grid class: 
+   - directionTo(source, target) - this will determine direction given a source and target cell. This will return the direction that will see the target from the source (E, NE, NW, W, SW, SE) and see the source from the target.
+   - movementCostTo(source, target) - this will calculate the minimum movement cost of cells between the source and target, but only considering cells that are progressively closer to the target, never moving away from the target. It will return the cost and the list of cells along the best path.
+   - visiblePath(source, target) - this will determine if and along what path the source cell can see that target based on elevation, but only considering cells that are progressively closer to the target, never moving away from the target. For each path, if there is a cell that has a higher elevation than the source then the target can't be seen along that path. If no path exists, return nil, otherwise return the shortest path (list of cells) along which the target is visible.

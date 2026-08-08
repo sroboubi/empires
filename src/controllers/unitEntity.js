@@ -1,5 +1,5 @@
 import { BaseEntity } from './baseEntity.js';
-import { distance } from '../hexMath.js';
+import { HexGrid } from '../hexGrid.js';
 
 /**
  * UnitEntity - Base Class for all mobile, combat-capable units.
@@ -34,7 +34,7 @@ export class UnitEntity extends BaseEntity {
     const actions = [];
     if (!targetCell) return actions;
 
-    const dist = distance(this, targetCell);
+    const dist = HexGrid.distance(this, targetCell);
 
     // 1. Attack action if target cell contains an enemy unit/construct
     if (targetEntity && targetEntity.owner && this.owner && targetEntity.owner.id !== this.owner.id) {
@@ -68,7 +68,7 @@ export class UnitEntity extends BaseEntity {
   doAction(actionName, targetCell, targetEntity) {
     if (actionName === "Move") {
       if (!targetCell) return { success: false, message: "No target cell specified." };
-      const dist = distance(this, targetCell);
+      const dist = HexGrid.distance(this, targetCell);
       if (dist !== 1) return { success: false, message: "Can only move to an adjacent cell." };
       if (!this.canStandOn(targetCell.terrain)) return { success: false, message: "Cannot stand on water terrain." };
       if (this.state.movementPoints < 1) return { success: false, message: "Not enough movement points." };
@@ -87,7 +87,7 @@ export class UnitEntity extends BaseEntity {
       if (targetEntity.owner && this.owner && targetEntity.owner.id === this.owner.id) {
         return { success: false, message: "Cannot attack friendly entity!" };
       }
-      const dist = distance(this, targetCell || targetEntity);
+      const dist = HexGrid.distance(this, targetCell || targetEntity);
       if (dist > (this.state.range || 1)) return { success: false, message: "Target out of range." };
       if (this.state.movementPoints < 1) return { success: false, message: "No movement points left to attack." };
 

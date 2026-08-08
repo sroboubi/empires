@@ -1,5 +1,5 @@
 import { ConstructEntity } from './constructEntity.js';
-import { distance } from '../hexMath.js';
+import { HexGrid } from '../hexGrid.js';
 
 export default class VillageController extends ConstructEntity {
   constructor(entityData, ownerPlayer, gridProxy, cell, initialState = null) {
@@ -25,7 +25,7 @@ export default class VillageController extends ConstructEntity {
     const actions = super.getActions(targetCell, targetEntity);
     if (!targetCell) return actions;
 
-    const dist = distance(this, targetCell);
+    const dist = HexGrid.distance(this, targetCell);
 
     // If target cell is adjacent, empty of entities, and valid land, offer unit spawning
     if (dist === 1 && (!targetEntity || targetEntity === this) && this.canStandOn(targetCell.terrain)) {
@@ -48,7 +48,7 @@ export default class VillageController extends ConstructEntity {
     if (this.spawnables[actionName]) {
       const config = this.spawnables[actionName];
       if (!targetCell) return { success: false, message: "No target cell selected." };
-      const dist = distance(this, targetCell);
+      const dist = HexGrid.distance(this, targetCell);
       if (dist !== 1) return { success: false, message: "Unit must be spawned on an adjacent cell." };
       if (!this.canStandOn(targetCell.terrain)) return { success: false, message: "Cannot spawn unit on water terrain." };
       if (targetEntity && targetEntity !== this) return { success: false, message: "Target cell already occupied by another entity." };
