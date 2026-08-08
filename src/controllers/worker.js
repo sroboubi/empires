@@ -5,75 +5,68 @@ export default class WorkerController extends UnitEntity {
   constructor(entityData, ownerPlayer, gridProxy, cell, initialState = null) {
     super(entityData, ownerPlayer, gridProxy, cell, initialState);
 
-    if (!initialState) {
-      this.state.maxMovementPoints = 2;
-      this.state.movementPoints = 2;
-      this.state.attackPower = 4;
-      this.state.range = 1;
-      this.state.armor = 0;
-      this.state.maxHealth = 60;
-      this.state.health = 60;
-    }
-
-    // Dynamic construct build definitions with cost maps
+    // Dynamic construct build definitions with default cost maps
     this.buildables = {
-      "Build Farm": { construct: "farm", cost: { wood: 20 } },
-      "Build Mine": { construct: "mine", cost: { wood: 30, gold: 20 } },
-      "Build Lumber Mill": { construct: "lumber_mill", cost: { gold: 20 } },
-      "Build Forge": { construct: "forge", cost: { wood: 40, iron: 10 } }
+      "Build Farm": { construct: "farm" },
+      "Build Mine": { construct: "mine" },
+      "Build Lumber Mill": { construct: "lumber_mill" },
+      "Build Forge": { construct: "forge" }
     };
   }
 
   getActions(targetCell, targetEntity) {
     const actions = super.getActions(targetCell, targetEntity);
-    if (!targetCell) return actions;
 
-    const dist = HexGrid.distance(this, targetCell);
+    for (const [actionName, config] of Object.entries(this.buildables)) {
+      actions.push({
+        name: actionName,
+        description: `Construct ${config.construct.toUpperCase()} on target cell.`,
+        canDo: (cell, entity) => {
+          if (!this.active) return { possible: false, reason: "Worker is inactive." };
+          if (!cell) return { possible: false, reason: "No target cell selected." };
+          if (entity && entity !== this) return { possible: false, reason: "Target cell is occupied." };
+          if (!this.canStandOn(cell)) return { possible: false, reason: "Cannot build construct on water." };
 
-    // If target cell is adjacent, empty of entities, and land, worker can build constructs
-    if (dist === 1 && (!targetEntity || targetEntity === this) && this.canStandOn(targetCell.terrain) && this.state.movementPoints >= 1) {
-      for (const [actionName, config] of Object.entries(this.buildables)) {
-        const canAfford = this.owner ? this.owner.hasResources(config.cost) : false;
-        const costStr = Object.entries(config.cost).map(([k, v]) => `${v} ${k}`).join(', ');
+          const dist = HexGrid.distance(this, cell);
+          if (dist !== 1) return { possible: false, reason: "Construct target must be adjacent (1 cell away)." };
+          if (this.actionPoints < 1) return { possible: false, reason: "Insufficient Action Points (1 AP required)." };
 
-        actions.push({
-          name: actionName,
-          description: `Construct ${config.construct.toUpperCase()} on cell (${targetCell.q}, ${targetCell.r})`,
-          preview: `Cost: ${costStr} ${canAfford ? '(Affordable)' : '(Insufficient Funds)'}`
-        });
-      }
+          const meta = this.grid && this.grid.manifestData ? this.grid.manifestData.entities[config.construct] : null;
+          const cost = (meta && meta.spawnCost) || { wood: 20 };
+
+          if (this.owner && !this.owner.hasResources(cost)) {
+            const costStr = Object.entries(cost).map(([k, v]) => `${v} ${k}`).join(', ');
+            return { possible: false, reason: `Insufficient resources to build ${config.construct} (${costStr} required).` };
+          }
+
+          const costStr = Object.entries(cost).map(([k, v]) => `${v} ${k}`).join(', ');
+          return {
+            possible: true,
+            reason: `Build ${config.construct.toUpperCase()} on (${cell.q}, ${cell.r}) costing ${costStr} and 1 AP.`,
+            cost: cost
+          };
+        },
+        do: (cell, entity) => {
+          const actionObj = actions.find(a => a.name === actionName);
+          const check = actionObj.canDo(cell, entity);
+          if (!check.possible) return false;
+
+          if (this.owner) {
+            this.owner.consumeResources(check.cost);
+          }
+
+          this.actionPoints -= 1;
+
+          if (this.grid) {
+            this.grid.spawnEntity(config.construct, cell, this.owner);
+          }
+
+          return true;
+        }
+      });
     }
 
     return actions;
   }
-
-  doAction(actionName, targetCell, targetEntity) {
-    if (this.buildables[actionName]) {
-      const config = this.buildables[actionName];
-      if (!targetCell) return { success: false, message: "No target cell selected." };
-      const dist = HexGrid.distance(this, targetCell);
-      if (dist !== 1) return { success: false, message: "Construct target must be adjacent." };
-      if (!this.canStandOn(targetCell.terrain)) return { success: false, message: "Cannot build on water." };
-      if (this.state.movementPoints < 1) return { success: false, message: "No movement points remaining." };
-
-      if (this.owner && !this.owner.hasResources(config.cost)) {
-        return { success: false, message: "Insufficient player resources to build construct." };
-      }
-
-      // Consume resources & deduct MP
-      if (this.owner) {
-        this.owner.consumeResources(config.cost);
-      }
-      this.state.movementPoints -= 1;
-
-      // Spawn construct entity on target cell
-      if (this.grid) {
-        this.grid.spawnEntity(config.construct, targetCell, this.owner);
-      }
-
-      return { success: true, message: `Successfully built ${config.construct.toUpperCase()}!` };
-    }
-
-    return super.doAction(actionName, targetCell, targetEntity);
-  }
 }
+

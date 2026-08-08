@@ -304,6 +304,15 @@ export async function preloadModels(entityMetadata) {
   console.log("GLTF model preloading complete.");
 }
 
+const FACING_ROTATIONS = {
+  E: 0,
+  NE: Math.PI / 3,
+  NW: (2 * Math.PI) / 3,
+  W: Math.PI,
+  SW: -(2 * Math.PI) / 3,
+  SE: -Math.PI / 3
+};
+
 /**
  * Reconciles 3D meshes for entities in GameState.
  * Loops through all active entities in gameState.entities, positions their 3D groups based on cell coordinates,
@@ -319,14 +328,16 @@ export function reconcileEntities(gameState) {
     const cell = entity.cell || gameState.cells[`${entity.q},${entity.r}`];
     const terrainHeight = cell && cell.terrain ? cell.terrain.height : 1.0;
     const { x, z } = HexGrid.axialToPixel(entity.q, entity.r, hexSize);
+    const rotationY = FACING_ROTATIONS[entity.facing] || 0;
 
     if (!entityMeshMap[entity.id]) {
       // Spawn new 3D mesh
       spawnEntityMesh(entity, gameState, x, terrainHeight, z);
     } else {
-      // Update position of existing mesh
+      // Update position and rotation of existing mesh
       const meshGroup = entityMeshMap[entity.id];
       meshGroup.position.set(x, terrainHeight, z);
+      meshGroup.rotation.y = rotationY;
     }
   });
 
@@ -350,6 +361,7 @@ function spawnEntityMesh(entity, gameState, x, terrainHeight, z) {
   const meta = gameState.manifestData ? gameState.manifestData.entities[entity.name] : null;
 
   const group = new THREE.Group();
+  group.rotation.y = FACING_ROTATIONS[entity.facing] || 0;
 
   // 1. Draw Player-Colored Base Ring
   if (entity.owner) {

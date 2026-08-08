@@ -27,62 +27,137 @@
       "category": "unit",
       "modelUrl": "./assets/units/swordsman-optimized.glb",
       "size": 2,
-      "controllerUrl": "./src/controllers/swordsman.js"
+      "controllerUrl": "./src/controllers/swordsman.js",
+      "health": 120,
+      "maxHealth": 120,
+      "actionPoints": 2,
+      "maxActionPoints": 2,
+      "attackCostScale": 1.0,
+      "damage": { "value": 25, "type": "slashing" },
+      "range": null,
+      "armor": { "value": 2, "type": "slashing" },
+      "maintenance": { "food": 1 },
+      "spawnCost": { "food": 40, "gold": 30, "iron": 10 }
     },
     {
       "name": "worker",
       "category": "unit",
       "modelUrl": "./assets/units/worker-optimized.glb",
       "size": 1.2,
-      "controllerUrl": "./src/controllers/worker.js"
+      "controllerUrl": "./src/controllers/worker.js",
+      "health": 60,
+      "maxHealth": 60,
+      "actionPoints": 2,
+      "maxActionPoints": 2,
+      "attackCostScale": 1.0,
+      "damage": { "value": 5, "type": "blunt" },
+      "range": null,
+      "armor": { "value": 0, "type": "none" },
+      "maintenance": { "food": 1 },
+      "spawnCost": { "food": 20, "gold": 10 }
     },
     {
       "name": "settler",
       "category": "unit",
       "modelUrl": "./assets/units/settler-optimized.glb",
-      "controllerUrl": "./src/controllers/settler.js"
+      "controllerUrl": "./src/controllers/settler.js",
+      "health": 50,
+      "maxHealth": 50,
+      "actionPoints": 2,
+      "maxActionPoints": 2,
+      "attackCostScale": 1.0,
+      "damage": { "value": 0, "type": "blunt" },
+      "range": null,
+      "armor": { "value": 0, "type": "none" },
+      "maintenance": { "food": 1 },
+      "spawnCost": { "food": 60, "gold": 50 }
     },
     {
       "name": "bowman",
       "category": "unit",
       "modelUrl": "./assets/units/bowman-optimized.glb",
-      "controllerUrl": "./src/controllers/bowman.js"
+      "controllerUrl": "./src/controllers/bowman.js",
+      "health": 80,
+      "maxHealth": 80,
+      "actionPoints": 2,
+      "maxActionPoints": 2,
+      "attackCostScale": 1.0,
+      "damage": { "value": 18, "type": "piercing" },
+      "range": { "minCells": 1, "maxCells": 3, "arcHeight": 1.5 },
+      "armor": { "value": 0, "type": "slashing" },
+      "maintenance": { "food": 1 },
+      "spawnCost": { "food": 30, "gold": 20, "wood": 10 }
     },
     {
       "name": "horseman",
       "category": "unit",
       "modelUrl": "./assets/units/horseman-optimized.glb",
-      "controllerUrl": "./src/controllers/horseman.js"
+      "controllerUrl": "./src/controllers/horseman.js",
+      "health": 100,
+      "maxHealth": 100,
+      "actionPoints": 4,
+      "maxActionPoints": 4,
+      "attackCostScale": 1.0,
+      "damage": { "value": 20, "type": "piercing" },
+      "range": null,
+      "armor": { "value": 1, "type": "piercing" },
+      "maintenance": { "food": 2 },
+      "spawnCost": { "food": 50, "gold": 40 }
     },
     {
       "name": "village",
       "category": "construct",
       "modelUrl": "./assets/constructs/village-optimized.glb",
-      "controllerUrl": "./src/controllers/village.js"
+      "controllerUrl": "./src/controllers/village.js",
+      "health": 200,
+      "maxHealth": 200,
+      "maintenance": {},
+      "spawnCost": { "gold": 30, "food": 20 },
+      "yields": { "gold": 10, "food": 5 }
     },
     {
       "name": "forge",
       "category": "construct",
       "modelUrl": "./assets/constructs/forge-optimized.glb",
-      "controllerUrl": "./src/controllers/forge.js"
+      "controllerUrl": "./src/controllers/forge.js",
+      "health": 150,
+      "maxHealth": 150,
+      "maintenance": {},
+      "spawnCost": { "wood": 40, "iron": 10 },
+      "yields": { "iron": 5 }
     },
     {
       "name": "lumber_mill",
       "category": "construct",
       "modelUrl": "./assets/constructs/lumber_mill-optimized.glb",
-      "controllerUrl": "./src/controllers/lumber_mill.js"
+      "controllerUrl": "./src/controllers/lumber_mill.js",
+      "health": 100,
+      "maxHealth": 100,
+      "maintenance": {},
+      "spawnCost": { "gold": 20 },
+      "yields": { "wood": 10 }
     },
     {
       "name": "mine",
       "category": "construct",
       "modelUrl": "./assets/constructs/mine-optimized.glb",
-      "controllerUrl": "./src/controllers/mine.js"
+      "controllerUrl": "./src/controllers/mine.js",
+      "health": 150,
+      "maxHealth": 150,
+      "maintenance": {},
+      "spawnCost": { "wood": 30, "gold": 20 },
+      "yields": { "gold": 15, "gems": 1 }
     },
     {
       "name": "farm",
       "category": "construct",
       "modelUrl": "./assets/constructs/farm-optimized.glb",
-      "controllerUrl": "./src/controllers/farm.js"
+      "controllerUrl": "./src/controllers/farm.js",
+      "health": 100,
+      "maxHealth": 100,
+      "maintenance": {},
+      "spawnCost": { "wood": 20 },
+      "yields": { "food": 15 }
     }
   ],
   "initialization": {

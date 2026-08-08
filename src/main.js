@@ -184,7 +184,7 @@ function deselectEntity() {
 }
 
 /**
- * Shows context menu popup with actions and preview text.
+ * Shows context menu popup with actions and preview text / validation reasons.
  */
 function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
   const menu = document.getElementById('entity-context-menu');
@@ -196,27 +196,56 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
 
   if (actions && actions.length > 0) {
     actions.forEach(action => {
+      const check = action.canDo ? action.canDo(targetCell, targetEntity) : { possible: true, reason: action.description || '' };
+      const isPossible = check.possible !== false;
+      const previewText = check.reason || action.preview || action.description || '';
+
       const btn = document.createElement('button');
       btn.className = 'context-action-btn';
+      if (!isPossible) {
+        btn.style.opacity = '0.5';
+        btn.style.cursor = 'not-allowed';
+      }
+
       btn.innerHTML = `
         <div style="display: flex; flex-direction: column;">
-          <strong style="font-size: 12px; color: #ffffff;">${action.name}</strong>
-          ${action.preview ? `<span style="font-size: 10px; color: #a78bfa;">${action.preview}</span>` : ''}
+          <strong style="font-size: 12px; color: ${isPossible ? '#ffffff' : '#999999'};">${action.name}</strong>
+          <span style="font-size: 10px; color: ${isPossible ? '#a78bfa' : '#ff6b6b'};">${previewText}</span>
         </div>
-        <span style="font-size: 10px; color: var(--accent-color);">►</span>
+        <span style="font-size: 10px; color: ${isPossible ? 'var(--accent-color)' : '#666666'};">►</span>
       `;
 
       btn.addEventListener('click', (ev) => {
         ev.stopPropagation();
         hideContextMenu();
 
-        const result = entity.doAction(action.name, targetCell, targetEntity);
-        showToast(result.message, !result.success);
+        if (!isPossible) {
+          showToast(check.reason || 'Action cannot be performed.', true);
+          return;
+        }
+
+        let success = false;
+        if (action.do) {
+          success = action.do(targetCell, targetEntity);
+        } else if (entity.doAction) {
+          const res = entity.doAction(action.name, targetCell, targetEntity);
+          success = res.success;
+        }
+
+        if (success) {
+          showToast(check.reason || `Executed ${action.name}`);
+        } else {
+          showToast(`Failed to execute ${action.name}`, true);
+        }
 
         // Reconcile 3D visual scene & update UI
         reconcileEntities(gameState);
         updatePlayersUI();
-        if (selectedEntity) {
+
+        // Check if selected entity was destroyed
+        if (selectedEntity && !gameState.entities.includes(selectedEntity)) {
+          deselectEntity();
+        } else if (selectedEntity) {
           selectEntity(selectedEntity);
         }
       });
@@ -226,8 +255,8 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
     actionsDiv.innerHTML = '<div style="font-size: 11px; color: var(--text-muted); padding: 4px;">No actions available for target cell</div>';
   }
 
-  const menuWidth = 240;
-  const menuHeight = 180;
+  const menuWidth = 260;
+  const menuHeight = 220;
   const posX = Math.min(x, window.innerWidth - menuWidth - 10);
   const posY = Math.min(y, window.innerHeight - menuHeight - 10);
 

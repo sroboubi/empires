@@ -83,3 +83,35 @@ Task: Phase 7 - Refactor Hex Grid
    - directionTo(source, target) - this will determine direction given a source and target cell. This will return the direction that will see the target from the source (E, NE, NW, W, SW, SE) and see the source from the target.
    - movementCostTo(source, target) - this will calculate the minimum movement cost of cells between the source and target, but only considering cells that are progressively closer to the target, never moving away from the target. It will return the cost and the list of cells along the best path.
    - visiblePath(source, target) - this will determine if and along what path the source cell can see that target based on elevation, but only considering cells that are progressively closer to the target, never moving away from the target. For each path, if there is a cell that has a higher elevation than the source then the target can't be seen along that path. If no path exists, return nil, otherwise return the shortest path (list of cells) along which the target is visible.
+
+Task: Phase 8 - Entity refactor and game logic
+
+1. Update the base entity class to have the following attributes and functions:
++ health : number
++ active : bool // set to true on each step() unless maintenace resources not met - if false then can NOT do actions or produce resources
++ receiveDamage(damage{value, type, source})
++ getActions(target{cell, entity}) : array
++ canStandOn(target{cell}) : boolean
++ getCostToMaintain() : object // returns an object e.g. {food: 2, wood: 3, ...} with the cost to maintain the entity on the map, this will be deducted from the player's resources on each step()
++ getCostToSpawn() : object // returns an object e.g. {food: 2, wood: 3, ...} with the cost to create the entity
++ step()
+2. Update the unit entity to have the following attributes and functions:
++ actionPoints : number // any action points not used in the last turn are added to health in the following turn (on step)
++ maxActionPoints : number // the maximum action points a unit can have
++ attackCostScale : number // value to multiply the movement cost to target cell for an attack action
++ damage: object {value: number, type: string}
++ range : object {minCells: number, maxCells: number, arcHeight: number} // if null then can only attack adjacent cell
++ armor: object {value: number, type: string} // damage of matching type is divided by this value
++ facing : enum // one of 6 directions, set based on "face" action, previous "movement", or "attack" (E, NE, NW, W, SW, SE) - use this when rendering unit
+3. All entity attributes should be defined in the manifest (e.g. health, damage, range, armor, actionPoints, maxActionPoints, etc)
+4. Each entity should have a list of actions with
+   - canDo(target{cell, entity}) : object // return object with bool indicating if action can be performed, and string description of effect if it can be performed, or description of why it can't be performed otherwise
+   - do(target{cell, entity}) : boolean // return true if action was performed, false otherwise - first call canDo() inside of do() and return false if action not possible
+   - name : string // name of the action
+   - description : string // description of the action
+5. getActions() simply return all available actions to the entity. The game logic can then use canDo() to display which ones are possible and their preview or reason for not being possible.
+6. To perform an action, call the action.do() method. This will change the state of the entity and adjust its action points accordingly.
+7. for military units add attack action. The type and value of the damage is determined by the entity damage attribute, but adjusted based on target facing - if the damage is coming from behind it does 2x damage, if coming from the side it does 1.5x damage and from the front it does normal damage. Call the target receiveDamage to apply damage. The attack should change the facing direction of the attacker towards the target.
+   - if the unit does not have a range attribute then the attack is melee, and the cost is equal to the attackCostScale * the movement cost to the target cell
+   - if the unit has a range attribute then the attack is ranged - call getSightAndTrajectory() for target cell. The attack is possible if the target cell is within range and is either visible OR the maxObstructionDelta is less than the range's arcHeight. The attack cost is equal to attackCostScale * distance to target.  
+8. for all units add a move action that uses the movementCostTo() function to determine the cost of moving to a target cell and moving the entity to that cell if possible and updates the entity's action points and facing based on the direction of movement

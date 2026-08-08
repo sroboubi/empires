@@ -5,71 +5,66 @@ export default class VillageController extends ConstructEntity {
   constructor(entityData, ownerPlayer, gridProxy, cell, initialState = null) {
     super(entityData, ownerPlayer, gridProxy, cell, initialState);
 
-    if (!initialState) {
-      this.state.maxHealth = 200;
-      this.state.health = 200;
-      this.state.yields = { gold: 10, food: 5 };
-    }
-
-    // Units trainable at a Village with resource costs
+    // Dynamic trainable units mapped to unit entity name
     this.spawnables = {
-      "Spawn Worker": { unit: "worker", cost: { food: 20, gold: 10 } },
-      "Spawn Swordsman": { unit: "swordsman", cost: { food: 40, gold: 30, iron: 10 } },
-      "Spawn Bowman": { unit: "bowman", cost: { food: 30, gold: 20, wood: 10 } },
-      "Spawn Horseman": { unit: "horseman", cost: { food: 50, gold: 40 } },
-      "Spawn Settler": { unit: "settler", cost: { food: 60, gold: 50 } }
+      "Spawn Worker": "worker",
+      "Spawn Swordsman": "swordsman",
+      "Spawn Bowman": "bowman",
+      "Spawn Horseman": "horseman",
+      "Spawn Settler": "settler"
     };
   }
 
   getActions(targetCell, targetEntity) {
     const actions = super.getActions(targetCell, targetEntity);
-    if (!targetCell) return actions;
 
-    const dist = HexGrid.distance(this, targetCell);
+    for (const [actionName, unitName] of Object.entries(this.spawnables)) {
+      actions.push({
+        name: actionName,
+        description: `Train and spawn ${unitName.toUpperCase()} on target adjacent cell.`,
+        canDo: (cell, entity) => {
+          if (!this.active) return { possible: false, reason: "Village is inactive." };
+          if (!cell) return { possible: false, reason: "No target cell selected." };
+          if (entity && entity !== this) return { possible: false, reason: "Target cell is occupied." };
+          if (!this.canStandOn(cell)) return { possible: false, reason: "Cannot spawn unit on water terrain." };
 
-    // If target cell is adjacent, empty of entities, and valid land, offer unit spawning
-    if (dist === 1 && (!targetEntity || targetEntity === this) && this.canStandOn(targetCell.terrain)) {
-      for (const [actionName, config] of Object.entries(this.spawnables)) {
-        const canAfford = this.owner ? this.owner.hasResources(config.cost) : false;
-        const costStr = Object.entries(config.cost).map(([k, v]) => `${v} ${k}`).join(', ');
+          const dist = HexGrid.distance(this, cell);
+          if (dist !== 1) return { possible: false, reason: "Unit must be spawned on an adjacent cell (1 cell away)." };
 
-        actions.push({
-          name: actionName,
-          description: `Spawn ${config.unit.toUpperCase()} on (${targetCell.q}, ${targetCell.r})`,
-          preview: `Cost: ${costStr} ${canAfford ? '(Affordable)' : '(Insufficient Funds)'}`
-        });
-      }
+          const meta = this.grid && this.grid.manifestData ? this.grid.manifestData.entities[unitName] : null;
+          const cost = (meta && meta.spawnCost) || { food: 20, gold: 10 };
+
+          if (this.owner && !this.owner.hasResources(cost)) {
+            const costStr = Object.entries(cost).map(([k, v]) => `${v} ${k}`).join(', ');
+            return { possible: false, reason: `Insufficient resources to train ${unitName} (${costStr} required).` };
+          }
+
+          const costStr = Object.entries(cost).map(([k, v]) => `${v} ${k}`).join(', ');
+          return {
+            possible: true,
+            reason: `Spawn ${unitName.toUpperCase()} on (${cell.q}, ${cell.r}) costing ${costStr}.`,
+            cost: cost
+          };
+        },
+        do: (cell, entity) => {
+          const actionObj = actions.find(a => a.name === actionName);
+          const check = actionObj.canDo(cell, entity);
+          if (!check.possible) return false;
+
+          if (this.owner) {
+            this.owner.consumeResources(check.cost);
+          }
+
+          if (this.grid) {
+            this.grid.spawnEntity(unitName, cell, this.owner);
+          }
+
+          return true;
+        }
+      });
     }
 
     return actions;
   }
-
-  doAction(actionName, targetCell, targetEntity) {
-    if (this.spawnables[actionName]) {
-      const config = this.spawnables[actionName];
-      if (!targetCell) return { success: false, message: "No target cell selected." };
-      const dist = HexGrid.distance(this, targetCell);
-      if (dist !== 1) return { success: false, message: "Unit must be spawned on an adjacent cell." };
-      if (!this.canStandOn(targetCell.terrain)) return { success: false, message: "Cannot spawn unit on water terrain." };
-      if (targetEntity && targetEntity !== this) return { success: false, message: "Target cell already occupied by another entity." };
-
-      if (this.owner && !this.owner.hasResources(config.cost)) {
-        return { success: false, message: "Insufficient resources to train unit." };
-      }
-
-      // Consume resources
-      if (this.owner) {
-        this.owner.consumeResources(config.cost);
-      }
-
-      // Spawn unit
-      if (this.grid) {
-        this.grid.spawnEntity(config.unit, targetCell, this.owner);
-      }
-
-      return { success: true, message: `Successfully spawned ${config.unit.toUpperCase()} at (${targetCell.q}, ${targetCell.r})!` };
-    }
-
-    return super.doAction(actionName, targetCell, targetEntity);
-  }
 }
+

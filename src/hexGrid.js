@@ -411,7 +411,7 @@ export class HexGrid {
    *   distance: number,
    *   path: Array<Object>,
    *   maxObstructionHeight: number,
-   *   maxObstructionDelta: number
+   *   maxObstructionDelta: number  
    * }}
    */
   getSightAndTrajectory(source, target) {
@@ -524,8 +524,8 @@ export class HexGrid {
       visible: isDirectlyVisible,
       distance: distance,
       path: pathList,
-      maxObstructionHeight: maxObstructionHeight === -Infinity ? 0 : maxObstructionHeight,
-      maxObstructionDelta: maxObstructionDelta
+      maxObstructionHeight: maxObstructionHeight === -Infinity ? 0 : maxObstructionHeight,  // highest terrain elevation along intermediate tiles
+      maxObstructionDelta: maxObstructionDelta  // highest elevation exceedance above direct visual ray
     };
   }
 }

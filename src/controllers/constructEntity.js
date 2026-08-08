@@ -16,12 +16,12 @@ export class ConstructEntity extends BaseEntity {
   }
 
   /**
-   * Turn step hook: adds resource yields to owner's pool.
+   * Turn step hook: adds resource yields to owner's pool if active.
    */
   step(globalContext) {
     super.step(globalContext);
 
-    if (this.owner && this.state.yields) {
+    if (this.active && this.owner && this.state.yields) {
       this.owner.addResources(this.state.yields);
     }
   }

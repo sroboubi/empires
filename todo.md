@@ -1,7 +1,13 @@
-- unit lighting and shahows
-- resources init on grid?
+- unit lighting and shadows
+- skybox and sun
+- resources init on grid
 - frame drop and lagging?
-- civ resource pool
 - camera controls and set target to selected cell, smooth move
-- move units
 - when AI is thinking, do a day/night cycle
+
+- adjust melee and ranged attack damage based on source to target delta elevation
+- village action to spawn units
+- players have orders per turn
+- each player has a list of cells that are "explored" and a subset that are "visible" - fully hide unexplored cells and other player units on non-visible cells
+- score: military (add military unit power) + economic (resource accumulated and income) + territory (villages and other constructs)
+- win condition: total score is 2X the next largest score 
