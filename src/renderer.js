@@ -119,7 +119,7 @@ export function initRenderer(canvas, size) {
   scene.add(highlightMesh);
 
   // Entity Selection Ring Mesh (Animated cyan ring)
-  const entityRingGeom = new THREE.RingGeometry(0.42, 0.54, 32);
+  const entityRingGeom = new THREE.RingGeometry(hexSize * 0.8, hexSize * 1, 16);
   entityRingGeom.rotateX(-Math.PI / 2);
   const entityRingMat = new THREE.MeshBasicMaterial({
     color: 0x00ffff,
@@ -393,7 +393,7 @@ export function reconcileEntities(gameState) {
       const { x, z } = HexGrid.axialToPixel(entity.q, entity.r, hexSize);
 
       const facingRot = FACING_ROTATIONS[entity.facing] || 0;
-      const rotOffset = entity.rotationOffset || 0;
+      const rotOffset = THREE.MathUtils.degToRad(entity.rotationOffset) || 0;
       const totalRotationY = facingRot + rotOffset;
 
       if (!entityMeshMap[entity.id]) {
@@ -432,7 +432,7 @@ function spawnEntityMesh(entity, gameState, x, terrainHeight, z, rotationY) {
   // 1. Draw Player-Colored Base Ring
   if (entity.owner) {
     const colorHex = entity.owner.color || '#ffffff';
-    const ringGeom = new THREE.RingGeometry(0.3, 0.4, 16);
+    const ringGeom = new THREE.RingGeometry(hexSize * 0.6, hexSize * 0.8, 16);
     ringGeom.rotateX(-Math.PI / 2);
     const ringMat = new THREE.MeshBasicMaterial({
       color: new THREE.Color(colorHex),
@@ -454,7 +454,7 @@ function spawnEntityMesh(entity, gameState, x, terrainHeight, z, rotationY) {
     const size = box.getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
     const targetSize = (meta && meta.size) ? meta.size : 1;
-    const scale = targetSize / (maxDim || 1);
+    const scale = hexSize * targetSize / (maxDim || 1);
     modelClone.scale.set(scale, scale, scale);
 
     const localBox = new THREE.Box3().setFromObject(modelClone);

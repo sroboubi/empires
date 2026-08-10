@@ -31,7 +31,11 @@
                         "type": "string"
                     },
                     "controller": {
-                        "type": ["object", "string", "null"]
+                        "type": [
+                            "object",
+                            "string",
+                            "null"
+                        ]
                     }
                 }
             }
@@ -90,7 +94,7 @@
                     },
                     "rotationOffset": {
                         "type": "number",
-                        "description": "Y-axis rotation offset in radians to orient GLB model correctly"
+                        "description": "Y-axis rotation offset in degrees to orient GLB model correctly"
                     },
                     "sightRange": {
                         "type": "integer",
