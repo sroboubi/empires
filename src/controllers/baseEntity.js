@@ -8,14 +8,14 @@ export class BaseEntity {
   /**
    * @param {Object} entityData - Static metadata from manifest
    * @param {Player|null} ownerPlayer - Owning Player instance
-   * @param {GameState} gridProxy - GameState / Grid reference
+   * @param {GameState} gameState - GameState reference
    * @param {Object} [cell] - The hex cell object this entity stands on
    * @param {Object} [initialState] - Optional state override (e.g. deserialization)
    */
-  constructor(entityData, ownerPlayer, gridProxy, cell = null, initialState = null) {
+  constructor(entityData, ownerPlayer, gameState, cell = null, initialState = null) {
     this.data = entityData || {};
     this.owner = ownerPlayer || null;
-    this.grid = gridProxy;
+    this.gameState = gameState;
     this.cell = cell;
     this.q = cell ? cell.q : (initialState ? initialState.q : 0);
     this.r = cell ? cell.r : (initialState ? initialState.r : 0);
@@ -24,18 +24,42 @@ export class BaseEntity {
     this.name = this.data.name || 'entity';
     this.category = this.data.category || 'unit';
 
-    // Dynamic runtime state (health, active, facing, etc.)
-    this.state = initialState ? { ...initialState } : {
-      health: this.data.health || this.data.maxHealth || 100,
-      maxHealth: this.data.maxHealth || 100,
-      active: true,
-      facing: 'E'
+    // 1. Dynamic state via JS spread notation: defaults -> manifest data -> initialState
+    this.state = {
+      ...this.getDefaults(),
+      ...(entityData || {}),
+      ...(initialState || {})
     };
 
-    if (this.state.active === undefined) this.state.active = true;
-    if (this.state.facing === undefined) this.state.facing = 'E';
-    if (this.state.health === undefined) this.state.health = this.data.health || this.data.maxHealth || 100;
-    if (this.state.maxHealth === undefined) this.state.maxHealth = this.data.maxHealth || 100;
+    // Actions list defined on BaseEntity instance
+    this.actions = [];
+
+    // Visible cells set tracked by entity
+    this.visibleCells = new Set();
+
+    // Initial vision update
+    if (this.gameState && this.gameState.hexGrid) {
+      this.updateVisibility();
+    }
+  }
+
+  /**
+   * Class level default attributes overrideable by manifest and initialState via spread.
+   * @returns {Object}
+   */
+  getDefaults() {
+    return {
+      health: 100,
+      maxHealth: 100,
+      active: true,
+      facing: 'E',
+      sightRange: 2,
+      rotationOffset: 0,
+      armor: {},
+      maintenance: {},
+      spawnCost: {},
+      yields: {}
+    };
   }
 
   get health() {
@@ -47,7 +71,7 @@ export class BaseEntity {
   }
 
   get maxHealth() {
-    return this.state.maxHealth;
+    return this.state.maxHealth || 100;
   }
 
   get active() {
@@ -66,12 +90,20 @@ export class BaseEntity {
     this.state.facing = val;
   }
 
+  get sightRange() {
+    return this.state.sightRange !== undefined ? this.state.sightRange : 2;
+  }
+
+  get rotationOffset() {
+    return this.state.rotationOffset || 0;
+  }
+
   /**
    * Returns object e.g. {food: 2, wood: 3} with maintenance cost deducted on each step().
    * @returns {Object}
    */
   getCostToMaintain() {
-    return { ...(this.data.maintenance || {}) };
+    return { ...(this.state.maintenance || {}) };
   }
 
   /**
@@ -79,7 +111,7 @@ export class BaseEntity {
    * @returns {Object}
    */
   getCostToSpawn() {
-    return { ...(this.data.spawnCost || {}) };
+    return { ...(this.state.spawnCost || {}) };
   }
 
   /**
@@ -93,6 +125,23 @@ export class BaseEntity {
     const terrain = target.terrain ? target.terrain : target;
     if (!terrain) return false;
     return terrain.elevation > SeaLevel;
+  }
+
+  /**
+   * Calculates visible cells from current cell and updates owner's visibility list.
+   */
+  updateVisibility() {
+    this.visibleCells.clear();
+    const currentCell = this.cell || (this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.getCell(this.q, this.r) : null);
+
+    if (currentCell && this.gameState && this.gameState.hexGrid) {
+      const visList = this.gameState.hexGrid.visibleCells(currentCell, this.sightRange);
+      visList.forEach(c => this.visibleCells.add(`${c.q},${c.r}`));
+    }
+
+    if (this.owner) {
+      this.owner.updateVisibility(this.gameState);
+    }
   }
 
   /**
@@ -133,18 +182,8 @@ export class BaseEntity {
       damageType = damage.type || 'blunt';
     }
 
-    let effectiveDamage = rawValue;
-    const armor = this.state.armor || this.data.armor;
-
-    if (armor && typeof armor === 'object') {
-      if (armor.type === damageType && armor.value > 0) {
-        effectiveDamage = rawValue / armor.value;
-      } else {
-        effectiveDamage = rawValue;
-      }
-    } else if (typeof armor === 'number') {
-      effectiveDamage = Math.max(1, rawValue - armor);
-    }
+    const armor = this.state.armor[damageType] || 1;
+    let effectiveDamage = rawValue / armor;
 
     // Round to 1 decimal place for clean stats
     effectiveDamage = Math.round(effectiveDamage * 10) / 10;
@@ -152,48 +191,26 @@ export class BaseEntity {
     this.state.health -= effectiveDamage;
     const destroyed = this.state.health <= 0;
 
-    if (destroyed && this.grid) {
-      this.grid.removeEntity(this.id);
+    if (destroyed) {
+      this.visibleCells.clear();
+      if (this.owner && this.gameState) {
+        this.owner.updateVisibility(this.gameState);
+      }
+      if (this.gameState) {
+        this.gameState.removeEntity(this.id);
+      }
     }
 
     return { damageDealt: effectiveDamage, destroyed };
   }
 
   /**
-   * Evaluates and returns possible actions for a given target cell and/or target entity.
-   * Each action object contains: { name, description, canDo(targetCell, targetEntity), do(targetCell, targetEntity) }
-   * @param {Object} [targetCell] - Target cell clicked by user
-   * @param {BaseEntity} [targetEntity] - Target entity standing on target cell
+   * Returns list of available action objects for this entity.
+   * Parameterless — returns this.actions array defined on BaseEntity.
    * @returns {Array<Object>} List of candidate action objects
    */
-  getActions(targetCell, targetEntity) {
-    return [];
-  }
-
-  /**
-   * Compatibility wrapper to execute action by name.
-   * @param {string} actionName
-   * @param {Object} [targetCell]
-   * @param {BaseEntity} [targetEntity]
-   * @returns {Object} { success: boolean, message: string }
-   */
-  doAction(actionName, targetCell, targetEntity) {
-    const actions = this.getActions(targetCell, targetEntity);
-    const action = actions.find(a => a.name === actionName);
-    if (!action) {
-      return { success: false, message: `Action "${actionName}" not available.` };
-    }
-
-    const check = action.canDo(targetCell, targetEntity);
-    if (!check.possible) {
-      return { success: false, message: check.reason || 'Action cannot be performed.' };
-    }
-
-    const result = action.do(targetCell, targetEntity);
-    return {
-      success: result,
-      message: result ? `Executed ${action.name}.` : `Failed to execute ${action.name}.`
-    };
+  getActions() {
+    return this.actions;
   }
 
   /**
@@ -202,7 +219,7 @@ export class BaseEntity {
   info() {
     const ownerName = this.owner ? this.owner.name : 'Neutral';
     const activeStr = this.active ? 'ACTIVE' : 'INACTIVE (No Maintenance)';
-    return `${this.name.toUpperCase()} (${this.category}). Owner: ${ownerName}. HP: ${Math.max(0, Math.round(this.state.health))}/${this.state.maxHealth}. Status: ${activeStr}. Facing: ${this.facing}`;
+    return `${this.name.toUpperCase()} (${this.category}). Owner: ${ownerName}. HP: ${Math.max(0, Math.round(this.state.health))}/${this.maxHealth}. Status: ${activeStr}. Facing: ${this.facing}`;
   }
 
   /**

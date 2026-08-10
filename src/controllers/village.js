@@ -2,8 +2,8 @@ import { ConstructEntity } from './constructEntity.js';
 import { HexGrid } from '../hexGrid.js';
 
 export default class VillageController extends ConstructEntity {
-  constructor(entityData, ownerPlayer, gridProxy, cell, initialState = null) {
-    super(entityData, ownerPlayer, gridProxy, cell, initialState);
+  constructor(entityData, ownerPlayer, gameState, cell, initialState = null) {
+    super(entityData, ownerPlayer, gameState, cell, initialState);
 
     // Dynamic trainable units mapped to unit entity name
     this.spawnables = {
@@ -13,13 +13,13 @@ export default class VillageController extends ConstructEntity {
       "Spawn Horseman": "horseman",
       "Spawn Settler": "settler"
     };
+
+    this.setupVillageActions();
   }
 
-  getActions(targetCell, targetEntity) {
-    const actions = super.getActions(targetCell, targetEntity);
-
+  setupVillageActions() {
     for (const [actionName, unitName] of Object.entries(this.spawnables)) {
-      actions.push({
+      this.actions.push({
         name: actionName,
         description: `Train and spawn ${unitName.toUpperCase()} on target adjacent cell.`,
         canDo: (cell, entity) => {
@@ -31,7 +31,7 @@ export default class VillageController extends ConstructEntity {
           const dist = HexGrid.distance(this, cell);
           if (dist !== 1) return { possible: false, reason: "Unit must be spawned on an adjacent cell (1 cell away)." };
 
-          const meta = this.grid && this.grid.manifestData ? this.grid.manifestData.entities[unitName] : null;
+          const meta = this.gameState && this.gameState.manifestData ? this.gameState.manifestData.entities[unitName] : null;
           const cost = (meta && meta.spawnCost) || { food: 20, gold: 10 };
 
           if (this.owner && !this.owner.hasResources(cost)) {
@@ -47,7 +47,7 @@ export default class VillageController extends ConstructEntity {
           };
         },
         do: (cell, entity) => {
-          const actionObj = actions.find(a => a.name === actionName);
+          const actionObj = this.actions.find(a => a.name === actionName);
           const check = actionObj.canDo(cell, entity);
           if (!check.possible) return false;
 
@@ -55,16 +55,13 @@ export default class VillageController extends ConstructEntity {
             this.owner.consumeResources(check.cost);
           }
 
-          if (this.grid) {
-            this.grid.spawnEntity(unitName, cell, this.owner);
+          if (this.gameState) {
+            this.gameState.spawnEntity(unitName, cell, this.owner);
           }
 
           return true;
         }
       });
     }
-
-    return actions;
   }
 }
-

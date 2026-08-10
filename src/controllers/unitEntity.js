@@ -5,27 +5,26 @@ const DIRECTIONS_LIST = ['E', 'NE', 'NW', 'W', 'SW', 'SE'];
 
 /**
  * UnitEntity - Base Class for all mobile, combat-capable units.
- * Extends BaseEntity with action points, range, attack, facing, and armor attributes.
+ * Extends BaseEntity with action points, range, attack, facing attributes.
  */
 export class UnitEntity extends BaseEntity {
-  constructor(entityData, ownerPlayer, gridProxy, cell, initialState = null) {
-    super(entityData, ownerPlayer, gridProxy, cell, initialState);
+  constructor(entityData, ownerPlayer, gameState, cell, initialState = null) {
+    super(entityData, ownerPlayer, gameState, cell, initialState);
 
-    // Initialize unit attributes in state
-    if (!initialState) {
-      this.state.maxActionPoints = this.data.maxActionPoints || this.data.maxMovementPoints || 2;
-      this.state.actionPoints = this.data.actionPoints || this.state.maxActionPoints;
-      this.state.attackCostScale = this.data.attackCostScale !== undefined ? this.data.attackCostScale : 1.0;
-      this.state.damage = this.data.damage || { value: this.data.attackPower || 10, type: 'slashing' };
-      this.state.range = this.data.range !== undefined ? this.data.range : null;
-      this.state.armor = this.data.armor || { value: 0, type: 'none' };
-      this.state.facing = this.data.facing || 'E';
-    }
+    // Populate actions array directly in constructor
+    this.setupUnitActions();
+  }
 
-    if (this.state.actionPoints === undefined) this.state.actionPoints = this.state.maxActionPoints || 2;
-    if (this.state.maxActionPoints === undefined) this.state.maxActionPoints = 2;
-    if (this.state.attackCostScale === undefined) this.state.attackCostScale = 1.0;
-    if (this.state.facing === undefined) this.state.facing = 'E';
+  getDefaults() {
+    return {
+      ...super.getDefaults(),
+      maxActionPoints: 2,
+      actionPoints: 2,
+      attackCostScale: 1.0,
+      damage: { value: 0, type: 'blunt' },
+      range: null,
+      facing: 'E'
+    };
   }
 
   get actionPoints() {
@@ -52,10 +51,6 @@ export class UnitEntity extends BaseEntity {
     return this.state.range || null;
   }
 
-  get armor() {
-    return this.state.armor || { value: 0, type: 'none' };
-  }
-
   /**
    * Resets action points at the start of a turn step.
    * Any action points not used in the previous turn are added to health.
@@ -73,13 +68,11 @@ export class UnitEntity extends BaseEntity {
   }
 
   /**
-   * Returns list of action objects: { name, description, canDo, do }
+   * Populates move, attack, and face actions into this.actions array.
    */
-  getActions(targetCell, targetEntity) {
-    const actions = [];
-
+  setupUnitActions() {
     // 1. Move Action
-    actions.push({
+    this.actions.push({
       name: "Move",
       description: "Move unit to target hex cell.",
       canDo: (cell, entity) => {
@@ -88,7 +81,7 @@ export class UnitEntity extends BaseEntity {
         if (entity && entity !== this) return { possible: false, reason: "Target cell is occupied." };
         if (!this.canStandOn(cell)) return { possible: false, reason: "Cannot stand on water terrain." };
 
-        const pathRes = this.grid && this.grid.hexGrid ? this.grid.hexGrid.movementCostTo(this, cell) : null;
+        const pathRes = this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.movementCostTo(this, cell) : null;
         if (!pathRes) return { possible: false, reason: "No valid path to target cell." };
 
         const cost = pathRes.cost;
@@ -104,11 +97,12 @@ export class UnitEntity extends BaseEntity {
         };
       },
       do: (cell, entity) => {
-        const check = actions[0].canDo(cell, entity);
+        const actionObj = this.actions.find(a => a.name === "Move");
+        const check = actionObj.canDo(cell, entity);
         if (!check.possible) return false;
 
-        if (this.grid && this.grid.hexGrid) {
-          const dirInfo = this.grid.hexGrid.directionTo(this, cell);
+        if (this.gameState && this.gameState.hexGrid) {
+          const dirInfo = this.gameState.hexGrid.directionTo(this, cell);
           this.facing = dirInfo.fromSource;
         }
 
@@ -117,13 +111,16 @@ export class UnitEntity extends BaseEntity {
         this.q = cell.q;
         this.r = cell.r;
 
+        // Update entity vision & player visibility on move
+        this.updateVisibility();
+
         return true;
       }
     });
 
     // 2. Attack Action (if unit has positive damage value)
     if (this.damage && this.damage.value > 0) {
-      actions.push({
+      this.actions.push({
         name: "Attack",
         description: "Attack target enemy entity.",
         canDo: (cell, entity) => {
@@ -144,8 +141,8 @@ export class UnitEntity extends BaseEntity {
               return { possible: false, reason: `Target out of range (${dist} cells away, range ${minD}-${maxD}).` };
             }
 
-            if (this.grid && this.grid.hexGrid) {
-              const sight = this.grid.hexGrid.getSightAndTrajectory(this, cell || entity);
+            if (this.gameState && this.gameState.hexGrid) {
+              const sight = this.gameState.hexGrid.getSightAndTrajectory(this, cell || entity);
               const isTrajectoryValid = sight.visible || (sight.maxObstructionDelta < (this.range.arcHeight || 0));
               if (!isTrajectoryValid) {
                 return { possible: false, reason: "Ranged trajectory blocked by terrain height." };
@@ -154,7 +151,7 @@ export class UnitEntity extends BaseEntity {
             cost = Math.ceil(this.attackCostScale * dist);
           } else {
             // Melee attack
-            const pathRes = this.grid && this.grid.hexGrid ? this.grid.hexGrid.movementCostTo(this, cell || entity) : null;
+            const pathRes = this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.movementCostTo(this, cell || entity) : null;
             if (!pathRes) {
               return { possible: false, reason: "No valid path to target for melee attack." };
             }
@@ -167,8 +164,8 @@ export class UnitEntity extends BaseEntity {
 
           // Directional damage multiplier
           let multiplier = 1.0;
-          if (this.grid && this.grid.hexGrid && entity.facing) {
-            const dirFromTargetToAttacker = this.grid.hexGrid.directionTo(entity, this).fromSource;
+          if (this.gameState && this.gameState.hexGrid && entity.facing) {
+            const dirFromTargetToAttacker = this.gameState.hexGrid.directionTo(entity, this).fromSource;
             const idxTarget = DIRECTIONS_LIST.indexOf(entity.facing);
             const idxAttacker = DIRECTIONS_LIST.indexOf(dirFromTargetToAttacker);
 
@@ -193,13 +190,13 @@ export class UnitEntity extends BaseEntity {
           };
         },
         do: (cell, entity) => {
-          const actionObj = actions.find(a => a.name === "Attack");
+          const actionObj = this.actions.find(a => a.name === "Attack");
           const check = actionObj.canDo(cell, entity);
           if (!check.possible) return false;
 
           // Update attacker facing towards target
-          if (this.grid && this.grid.hexGrid) {
-            const dirToTarget = this.grid.hexGrid.directionTo(this, cell || entity);
+          if (this.gameState && this.gameState.hexGrid) {
+            const dirToTarget = this.gameState.hexGrid.directionTo(this, cell || entity);
             this.facing = dirToTarget.fromSource;
           }
 
@@ -211,32 +208,40 @@ export class UnitEntity extends BaseEntity {
       });
     }
 
-    // 3. Face Action
-    actions.push({
+    // 3. Face Action (Costs AP equal to half the movement cost of the current cell)
+    this.actions.push({
       name: "Face Direction",
       description: "Rotate unit facing direction towards selected hex.",
       canDo: (cell, entity) => {
         if (!this.active) return { possible: false, reason: "Unit is inactive." };
         if (!cell) return { possible: false, reason: "No target cell selected." };
 
-        const dirToTarget = this.grid && this.grid.hexGrid ? this.grid.hexGrid.directionTo(this, cell).fromSource : 'E';
+        const currentCell = this.cell || (this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.getCell(this.q, this.r) : null);
+        const cellMovementCost = currentCell && currentCell.terrain ? currentCell.terrain.movementCost : 1;
+        const cost = Math.ceil(cellMovementCost / 2);
+
+        if (this.actionPoints < cost) {
+          return { possible: false, reason: `Insufficient Action Points to turn facing (${this.actionPoints}/${cost} AP required).` };
+        }
+
+        const dirToTarget = this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.directionTo(this, cell).fromSource : 'E';
         return {
           possible: true,
-          reason: `Face direction ${dirToTarget}`,
+          reason: `Face direction ${dirToTarget} costing ${cost} AP`,
+          cost: cost,
           facingDir: dirToTarget
         };
       },
       do: (cell, entity) => {
-        const actionObj = actions.find(a => a.name === "Face Direction");
+        const actionObj = this.actions.find(a => a.name === "Face Direction");
         const check = actionObj.canDo(cell, entity);
         if (!check.possible) return false;
 
+        this.actionPoints -= check.cost;
         this.facing = check.facingDir;
         return true;
       }
     });
-
-    return actions;
   }
 
   info() {
@@ -246,4 +251,3 @@ export class UnitEntity extends BaseEntity {
     return `${this.name.toUpperCase()} (Unit). Owner: ${ownerName}. HP: ${Math.max(0, Math.round(this.health))}/${this.maxHealth}. AP: ${this.actionPoints}/${this.maxActionPoints}. Atk: ${this.damage.value} (${this.damage.type}, ${rangeStr}). Status: ${activeStr}. Facing: ${this.facing}`;
   }
 }
-

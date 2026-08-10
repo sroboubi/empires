@@ -1,13 +1,22 @@
+Visual:
 - unit lighting and shadows
 - skybox and sun
-- resources init on grid
 - frame drop and lagging?
-- camera controls and set target to selected cell, smooth move
+- smooth move
 - when AI is thinking, do a day/night cycle
 
+Game:
+- make worker and village buildables dynaic per manifest (pass in required manifest info)
+- entities add/remove themselves from gamestate?
+
+- resources init on grid
+- adjacency logic; village next to each other, resource extractors next to resources
+
 - adjust melee and ranged attack damage based on source to target delta elevation
-- village action to spawn units
+- unit vision considers center of cell, some cells that are partly visible are hidden - fix?
 - players have orders per turn
-- each player has a list of cells that are "explored" and a subset that are "visible" - fully hide unexplored cells and other player units on non-visible cells
+
+- make entity armor an array (not just a single type)
+
 - score: military (add military unit power) + economic (resource accumulated and income) + territory (villages and other constructs)
 - win condition: total score is 2X the next largest score 

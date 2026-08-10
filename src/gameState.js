@@ -2,15 +2,26 @@ import { HexGrid } from './hexGrid.js';
 import { Player } from './player.js';
 
 /**
- * GameState tracks players, the hex grid, and active entity instances.
+ * GameState tracks players, turn cycle, the hex grid, and active entity instances.
  * It is fully serializable to and from JSON.
  */
 export class GameState {
   constructor() {
     this.players = [];
+    this.activePlayerIndex = 0;
+    this.currentRound = 1;
     this.hexGrid = null;  // HexGrid instance
     this.entities = [];   // List of active BaseEntity instances
     this.manifestData = null;
+  }
+
+  /**
+   * Returns the currently active Player instance.
+   * @returns {Player|null}
+   */
+  get activePlayer() {
+    if (!this.players || this.players.length === 0) return null;
+    return this.players[this.activePlayerIndex] || this.players[0];
   }
 
   /**
@@ -30,8 +41,10 @@ export class GameState {
   generateMap(radius) {
     this.hexGrid = new HexGrid(radius);
     this.entities = [];
+    this.activePlayerIndex = 0;
+    this.currentRound = 1;
 
-    // Default placeholder players
+    // Default placeholder players if manifest not initialized yet
     this.players = [
       new Player(1, 'Red Empire', '#ff4d4d'),
       new Player(2, 'Blue Alliance', '#3399ff')
@@ -39,8 +52,8 @@ export class GameState {
   }
 
   /**
-   * Initializes player starting resources and spawns starting units on valid terrain.
-   * Uses entity canStandOn() via a function predicate passed to hexGrid.findStartingCell.
+   * Initializes player starting resources, instantiates players defined in manifest,
+   * and spawns starting units on valid terrain.
    * @param {Object} manifestData - Loaded game manifest metadata
    */
   initializeManifest(manifestData) {
@@ -55,12 +68,27 @@ export class GameState {
       });
     }
 
-    this.players = [
-      new Player(1, 'Red Empire', '#ff4d4d', startingResources),
-      new Player(2, 'Blue Alliance', '#3399ff', startingResources)
-    ];
+    // 2. Instantiate players from manifest definitions array
+    if (manifestData.players && Array.isArray(manifestData.players) && manifestData.players.length > 0) {
+      this.players = manifestData.players.map(pDef => new Player(
+        pDef.id,
+        pDef.name,
+        pDef.color,
+        startingResources,
+        pDef.description,
+        pDef.controller
+      ));
+    } else {
+      this.players = [
+        new Player(1, 'Red Empire', '#ff4d4d', startingResources),
+        new Player(2, 'Blue Alliance', '#3399ff', startingResources)
+      ];
+    }
 
-    // 2. Determine starting coordinates based on grid radius
+    this.activePlayerIndex = 0;
+    this.currentRound = 1;
+
+    // 3. Determine starting coordinates based on grid radius
     const radius = this.hexGrid.radius;
 
     // Target coords on opposite sides of the map
@@ -69,7 +97,7 @@ export class GameState {
     const p2TargetQ = Math.round(radius / 4);
     const p2TargetR = -Math.round(radius / 4);
 
-    // 3. Spawn starting units for each player
+    // 4. Spawn starting units for each player
     this.entities = [];
     if (manifestData.initialization && manifestData.initialization.startingUnits) {
       const startingUnits = manifestData.initialization.startingUnits;
@@ -123,6 +151,33 @@ export class GameState {
         });
       });
     }
+
+    // Start turn for the initial player
+    this.startTurn();
+  }
+
+  /**
+   * Starts turn for the active player.
+   */
+  startTurn() {
+    if (this.activePlayer) {
+      this.activePlayer.step(this);
+    }
+  }
+
+  /**
+   * Advances game turn to the next player.
+   * If all players have taken a turn, increments currentRound.
+   */
+  endTurn() {
+    if (this.players.length === 0) return;
+
+    this.activePlayerIndex = (this.activePlayerIndex + 1) % this.players.length;
+    if (this.activePlayerIndex === 0) {
+      this.currentRound++;
+    }
+
+    this.startTurn();
   }
 
   /**
@@ -161,7 +216,16 @@ export class GameState {
    * @param {string} entityId
    */
   removeEntity(entityId) {
+    const targetEntity = this.entities.find(e => e.id === entityId);
+    if (targetEntity && targetEntity.owner) {
+      targetEntity.visibleCells.clear();
+    }
+
     this.entities = this.entities.filter(e => e.id !== entityId);
+
+    if (targetEntity && targetEntity.owner) {
+      targetEntity.owner.updateVisibility(this);
+    }
   }
 
   /**
@@ -175,23 +239,12 @@ export class GameState {
   }
 
   /**
-   * Turn progression hook: steps all active entities and updates global turn context.
-   */
-  stepTurn() {
-    this.entities.forEach(entity => {
-      try {
-        entity.step({ gameState: this });
-      } catch (err) {
-        console.error(`Error during step on entity ${entity.name}:`, err);
-      }
-    });
-  }
-
-  /**
    * Serializes the game state to JSON string.
    */
   serialize() {
     return JSON.stringify({
+      activePlayerIndex: this.activePlayerIndex,
+      currentRound: this.currentRound,
       players: this.players.map(p => p.toJSON()),
       entities: this.entities.map(e => e.toJSON()),
       cells: this.cells
@@ -206,6 +259,13 @@ export class GameState {
     try {
       const data = JSON.parse(jsonString);
 
+      if (data.activePlayerIndex !== undefined) {
+        this.activePlayerIndex = data.activePlayerIndex;
+      }
+      if (data.currentRound !== undefined) {
+        this.currentRound = data.currentRound;
+      }
+
       // Re-hydrate Players
       if (data.players) {
         this.players = data.players.map(p => Player.fromJSON(p));
@@ -213,14 +273,12 @@ export class GameState {
 
       // Re-hydrate Cells into the HexGrid
       if (data.cells) {
-        // Reconstruct HexGrid from serialized cell data
         const cellKeys = Object.keys(data.cells);
         let maxQ = 0;
         for (const key of cellKeys) {
           const cell = data.cells[key];
           maxQ = Math.max(maxQ, Math.abs(cell.q));
         }
-        // Create a new HexGrid but overwrite its cells with deserialized data
         this.hexGrid = new HexGrid(maxQ);
         this.hexGrid.cells.clear();
         for (const key of cellKeys) {
@@ -239,6 +297,8 @@ export class GameState {
           }
         });
       }
+
+      this.players.forEach(p => p.updateVisibility(this));
     } catch (e) {
       console.error('Failed to deserialize GameState:', e);
     }

@@ -393,32 +393,27 @@ export class HexGrid {
   }
 
   // ---------------------------------------------------------------------------
-  // getSightAndTrajectory — Comprehensive Raycast & Ballistics Analysis
+  // getSightAndTrajectory — Geometric Seam-Safe Raycasting
   // ---------------------------------------------------------------------------
 
   /**
-   * Performs 3D raycasting along the center-top surface of cells to calculate
-   * line-of-sight and ballistic trajectory parameters.
+   * Evaluates line-of-sight and ballistic trajectory metrics using threshold sight ceilings
+   * and geometric candidate distance weighting for shared hex boundaries.
    *
-   * Handles edge boundary cases by taking the minimum elevation along shared edges
-   * (preventing cliff wall "bleed"), and returns detailed metrics for direct and
-   * indirect (curved) fire evaluation.
-   *
-   * @param {{q: number, r: number}} source - Source cell coordinates
-   * @param {{q: number, r: number}} target - Target cell coordinates
+   * @param {{q: number, r: number}} source - Axial coordinates of origin
+   * @param {{q: number, r: number}} target - Axial coordinates of target
    * @returns {{
    *   visible: boolean,
    *   distance: number,
    *   path: Array<Object>,
    *   maxObstructionHeight: number,
-   *   maxObstructionDelta: number  
+   *   maxObstructionDelta: number
    * }}
    */
   getSightAndTrajectory(source, target) {
     const sourceCell = this.getCell(source.q, source.r);
     const targetCell = this.getCell(target.q, target.r);
 
-    // Handle out-of-bounds or invalid cell inputs
     if (!sourceCell || !targetCell) {
       return {
         visible: false,
@@ -429,92 +424,105 @@ export class HexGrid {
       };
     }
 
-    // Distance in hex cell steps
     const distance = HexGrid.distance(source, target);
+    const getHeight = (cell) => cell.terrain.height ?? cell.terrain.elevation ?? 0;
 
-    // Handle source === target (same cell)
+    const sourceHeight = getHeight(sourceCell);
+    const targetHeight = getHeight(targetCell);
+
     if (distance === 0) {
       return {
         visible: true,
         distance: 0,
         path: [sourceCell],
-        maxObstructionHeight: sourceCell.terrain.elevation,
+        maxObstructionHeight: sourceHeight,
         maxObstructionDelta: 0
       };
     }
 
-    const sourceElev = sourceCell.terrain.elevation;
-    const targetElev = targetCell.terrain.elevation;
+    // Maximum allowable intermediate terrain height before direct LOS is obstructed
+    const sightCeiling = Math.max(sourceHeight, targetHeight);
 
-    // Convert axial (q, r) to cube (q, r, s) coordinates for linear interpolation
+    // Convert axial (q, r) to 3D cube coordinates (q, r, s)
     const aCube = { q: source.q, r: source.r, s: -source.q - source.r };
     const bCube = { q: target.q, r: target.r, s: -target.q - target.r };
 
-    const pathSet = new Set();
     const pathList = [];
-
     let maxObstructionHeight = -Infinity;
     let maxObstructionDelta = 0;
     let isDirectlyVisible = true;
 
-    // Sampling steps along the ray (over-sampled to prevent skipping hexes)
+    const isEndpoint = (c) => (c.q === source.q && c.r === source.r) || (c.q === target.q && c.r === target.r);
+
+    // Sample along the ray
     const sampleSteps = distance * 6;
 
     for (let i = 0; i <= sampleSteps; i++) {
       const t = i / sampleSteps;
 
-      // Linear interpolation in 3D cube coordinate space
+      // Continuous cube point along the ray
       const curQ = aCube.q + (bCube.q - aCube.q) * t;
       const curR = aCube.r + (bCube.r - aCube.r) * t;
       const curS = aCube.s + (bCube.s - aCube.s) * t;
 
-      // Determine the primary hex cell at this point on the ray
-      const roundedPrimary = HexGrid.hexRound(curQ, curR);
-      const primaryCell = this.getCell(roundedPrimary.q, roundedPrimary.r);
-
-      // Collect unique cells crossed by the ray to build the visual path array
-      if (primaryCell && !pathSet.has(`${primaryCell.q},${primaryCell.r}`)) {
-        pathSet.add(`${primaryCell.q},${primaryCell.r}`);
+      // Find primary hex for path collection
+      const primaryCell = this.getCell(HexGrid.hexRound(curQ, curR).q, HexGrid.hexRound(curQ, curR).r);
+      if (primaryCell && !pathList.includes(primaryCell)) {
         pathList.push(primaryCell);
       }
 
-      // Evaluate terrain elevations along intermediate points (excluding start and target cells)
-      if (t > 0.01 && t < 0.99) {
-        // Calculate the height of the direct 3D visual ray at progress t
-        const rayHeightAtStep = sourceElev + t * (targetElev - sourceElev);
+      // Evaluate intermediate steps (exclude endpoints)
+      if (t > 0.02 && t < 0.98) {
+        // 1. Generate all candidate integer cube coordinates touching this continuous point
+        const qCandidates = [Math.floor(curQ), Math.ceil(curQ)];
+        const rCandidates = [Math.floor(curR), Math.ceil(curR)];
+        const sCandidates = [Math.floor(curS), Math.ceil(curS)];
 
-        let effectiveStepElevation = primaryCell ? primaryCell.terrain.elevation : 0;
+        const candidateEntries = [];
 
-        // Check if sample point lies on or near a shared edge boundary (near half-integers)
-        const qDiff = Math.abs(curQ - Math.round(curQ));
-        const rDiff = Math.abs(curR - Math.round(curR));
-        const sDiff = Math.abs(curS - Math.round(curS));
-
-        if (Math.abs(qDiff - 0.5) < 0.05 || Math.abs(rDiff - 0.5) < 0.05 || Math.abs(sDiff - 0.5) < 0.05) {
-          // Sample candidate cells on both sides of the shared edge
-          const alt1 = HexGrid.hexRound(curQ + 0.02, curR - 0.02);
-          const alt2 = HexGrid.hexRound(curQ - 0.02, curR + 0.02);
-
-          const cell1 = this.getCell(alt1.q, alt1.r);
-          const cell2 = this.getCell(alt2.q, alt2.r);
-
-          // Take the lower elevation along the edge seam to prevent cliff walls from bleeding into clear air corridors
-          if (cell1 && cell2) {
-            effectiveStepElevation = Math.min(cell1.terrain.elevation, cell2.terrain.elevation);
+        for (const Q of qCandidates) {
+          for (const R of rCandidates) {
+            for (const S of sCandidates) {
+              // Valid hex coordinates must satisfy Q + R + S = 0
+              if (Q + R + S === 0) {
+                const cell = this.getCell(Q, R);
+                if (cell && !isEndpoint(cell)) {
+                  // Distance in cube space from continuous point to hex center
+                  const distToCenter = Math.max(
+                    Math.abs(curQ - Q),
+                    Math.abs(curR - R),
+                    Math.abs(curS - S)
+                  );
+                  candidateEntries.push({ cell, dist: distToCenter });
+                }
+              }
+            }
           }
         }
 
-        // Track the highest absolute terrain elevation along the intermediate path
-        if (effectiveStepElevation > maxObstructionHeight) {
-          maxObstructionHeight = effectiveStepElevation;
-        }
+        if (candidateEntries.length > 0) {
+          // 2. Find closest hex center distance
+          const minDist = Math.min(...candidateEntries.map(e => e.dist));
 
-        // Check if the terrain elevation exceeds the direct line-of-sight ray height
-        const delta = effectiveStepElevation - rayHeightAtStep;
-        if (delta > 0) {
-          isDirectlyVisible = false;
-          if (delta > maxObstructionDelta) {
-            maxObstructionDelta = delta;
+          // 3. Keep candidates that are on or near the shared boundary seam (within 0.12 of minDist)
+          const seamCandidates = candidateEntries
+            .filter(e => e.dist <= minDist + 0.12)
+            .map(e => e.cell);
+
+          // 4. Take the minimum height along the seam to preserve open sight corridors
+          const effectiveStepHeight = Math.min(...seamCandidates.map(getHeight));
+
+          if (effectiveStepHeight > maxObstructionHeight) {
+            maxObstructionHeight = effectiveStepHeight;
+          }
+
+          // Check if effective step height exceeds allowable sight ceiling
+          if (effectiveStepHeight > sightCeiling) {
+            isDirectlyVisible = false;
+            const delta = effectiveStepHeight - sightCeiling;
+            if (delta > maxObstructionDelta) {
+              maxObstructionDelta = delta;
+            }
           }
         }
       }
@@ -524,8 +532,55 @@ export class HexGrid {
       visible: isDirectlyVisible,
       distance: distance,
       path: pathList,
-      maxObstructionHeight: maxObstructionHeight === -Infinity ? 0 : maxObstructionHeight,  // highest terrain elevation along intermediate tiles
-      maxObstructionDelta: maxObstructionDelta  // highest elevation exceedance above direct visual ray
+      maxObstructionHeight: maxObstructionHeight === -Infinity ? sourceHeight : maxObstructionHeight,
+      maxObstructionDelta: maxObstructionDelta
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // visibleCells — Determines all cells visible from a source within a range
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Calculates all cells within a given vision radius that have direct line-of-sight
+   * from the source coordinates, evaluated using getSightAndTrajectory().
+   *
+   * @param {{q: number, r: number}} source - Origin cell coordinates (e.g., unit position)
+   * @param {number} range - Maximum sight range in hex steps
+   * @returns {Array<Object>} Array of cell objects visible to the source
+   */
+  visibleCells(source, range) {
+    const sourceCell = this.getCell(source.q, source.r);
+    if (!sourceCell || range < 0) return [];
+
+    const visible = [];
+
+    // Iterate through all candidate coordinates within the hexagonal vision disk
+    for (let dq = -range; dq <= range; dq++) {
+      const rMin = Math.max(-range, -dq - range);
+      const rMax = Math.min(range, -dq + range);
+
+      for (let dr = rMin; dr <= rMax; dr++) {
+        const targetQ = source.q + dq;
+        const targetR = source.r + dr;
+
+        const targetCell = this.getCell(targetQ, targetR);
+        if (!targetCell) continue; // Skip out-of-bounds cells
+
+        // Same cell is always visible
+        if (dq === 0 && dr === 0) {
+          visible.push(targetCell);
+          continue;
+        }
+
+        // Evaluate direct line of sight using 3D raycasting
+        const sight = this.getSightAndTrajectory(source, targetCell);
+        if (sight.visible) {
+          visible.push(targetCell);
+        }
+      }
+    }
+
+    return visible;
   }
 }

@@ -1,14 +1,99 @@
 /**
  * Player class representing a participant in the game.
- * Resource types are dynamic and based on manifest configuration.
+ * Tracks resources, control type (human vs AI), explored and visible hex cells.
  */
 export class Player {
-  constructor(id, name, color, startingResources = {}) {
+  /**
+   * @param {number|string} id
+   * @param {string} name
+   * @param {string} color
+   * @param {Object} [startingResources]
+   * @param {string} [description]
+   * @param {Object|string|null} [controller]
+   */
+  constructor(id, name, color, startingResources = {}, description = '', controller = null) {
     this.id = id;
     this.name = name;
     this.color = color;
+    this.description = description || '';
+    this.controller = controller || null;
     this.resources = { ...startingResources };
     this.startCoord = { q: 0, r: 0 };
+
+    // Fog of war tracking sets (stores coordinate key strings "q,r")
+    this.exploredCells = new Set();
+    this.visibleCells = new Set();
+  }
+
+  /**
+   * True if player is AI controlled.
+   * @returns {boolean}
+   */
+  get isAI() {
+    return this.controller !== null && this.controller !== undefined;
+  }
+
+  /**
+   * Turn lifecycle step called at the start of this player's turn.
+   * Steps all entities owned by this player.
+   * @param {GameState} gameState
+   */
+  step(gameState) {
+    if (!gameState || !gameState.entities) return;
+
+    const ownedEntities = gameState.entities.filter(e => e.owner && e.owner.id === this.id);
+    ownedEntities.forEach(entity => {
+      try {
+        entity.step({ gameState });
+      } catch (err) {
+        console.error(`Error stepping entity ${entity.name} during turn step:`, err);
+      }
+    });
+
+    this.updateVisibility(gameState);
+  }
+
+  /**
+   * Updates player's visible and explored sets by taking the union of all
+   * owned active entities' visible cells. Cells added to visibleCells are also added
+   * to exploredCells (which are never removed).
+   * @param {GameState} gameState
+   */
+  updateVisibility(gameState) {
+    this.visibleCells.clear();
+
+    if (!gameState || !gameState.entities) return;
+
+    const ownedEntities = gameState.entities.filter(e => e.owner && e.owner.id === this.id);
+    ownedEntities.forEach(entity => {
+      // Ensure entity has updated visible cells
+      if (entity.visibleCells) {
+        entity.visibleCells.forEach(coordKey => {
+          this.visibleCells.add(coordKey);
+          this.exploredCells.add(coordKey);
+        });
+      }
+    });
+  }
+
+  /**
+   * Checks if a hex coordinate (q, r) has been explored by this player.
+   * @param {number} q
+   * @param {number} r
+   * @returns {boolean}
+   */
+  isExplored(q, r) {
+    return this.exploredCells.has(`${q},${r}`);
+  }
+
+  /**
+   * Checks if a hex coordinate (q, r) is currently visible to this player.
+   * @param {number} q
+   * @param {number} r
+   * @returns {boolean}
+   */
+  isVisible(q, r) {
+    return this.visibleCells.has(`${q},${r}`);
   }
 
   /**
@@ -67,8 +152,12 @@ export class Player {
       id: this.id,
       name: this.name,
       color: this.color,
+      description: this.description,
+      controller: this.controller,
       resources: this.resources,
-      startCoord: this.startCoord
+      startCoord: this.startCoord,
+      exploredCells: Array.from(this.exploredCells),
+      visibleCells: Array.from(this.visibleCells)
     };
   }
 
@@ -76,9 +165,15 @@ export class Player {
    * Re-hydrates a Player instance from serialized JSON object.
    */
   static fromJSON(data) {
-    const player = new Player(data.id, data.name, data.color, data.resources);
+    const player = new Player(data.id, data.name, data.color, data.resources, data.description, data.controller);
     if (data.startCoord) {
       player.startCoord = { ...data.startCoord };
+    }
+    if (data.exploredCells && Array.isArray(data.exploredCells)) {
+      player.exploredCells = new Set(data.exploredCells);
+    }
+    if (data.visibleCells && Array.isArray(data.visibleCells)) {
+      player.visibleCells = new Set(data.visibleCells);
     }
     return player;
   }

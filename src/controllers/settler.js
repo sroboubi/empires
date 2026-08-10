@@ -2,14 +2,14 @@ import { UnitEntity } from './unitEntity.js';
 import { HexGrid } from '../hexGrid.js';
 
 export default class SettlerController extends UnitEntity {
-  constructor(entityData, ownerPlayer, gridProxy, cell, initialState = null) {
-    super(entityData, ownerPlayer, gridProxy, cell, initialState);
+  constructor(entityData, ownerPlayer, gameState, cell, initialState = null) {
+    super(entityData, ownerPlayer, gameState, cell, initialState);
+
+    this.setupSettlerActions();
   }
 
-  getActions(targetCell, targetEntity) {
-    const actions = super.getActions(targetCell, targetEntity);
-
-    actions.push({
+  setupSettlerActions() {
+    this.actions.push({
       name: "Found Village",
       description: "Found a new Village settlement on target cell.",
       canDo: (cell, entity) => {
@@ -22,7 +22,7 @@ export default class SettlerController extends UnitEntity {
         if (dist > 1) return { possible: false, reason: "Village must be founded on current or adjacent cell." };
         if (this.actionPoints < 1) return { possible: false, reason: "Insufficient Action Points (1 AP required)." };
 
-        const villageMeta = this.grid && this.grid.manifestData ? this.grid.manifestData.entities['village'] : null;
+        const villageMeta = this.gameState && this.gameState.manifestData ? this.gameState.manifestData.entities['village'] : null;
         const cost = (villageMeta && villageMeta.spawnCost) || { gold: 30, food: 20 };
 
         if (this.owner && !this.owner.hasResources(cost)) {
@@ -38,7 +38,7 @@ export default class SettlerController extends UnitEntity {
         };
       },
       do: (cell, entity) => {
-        const actionObj = actions.find(a => a.name === "Found Village");
+        const actionObj = this.actions.find(a => a.name === "Found Village");
         const check = actionObj.canDo(cell, entity);
         if (!check.possible) return false;
 
@@ -48,15 +48,13 @@ export default class SettlerController extends UnitEntity {
 
         this.actionPoints -= 1;
 
-        if (this.grid) {
-          this.grid.spawnEntity("village", cell, this.owner);
-          this.grid.removeEntity(this.id);
+        if (this.gameState) {
+          this.gameState.spawnEntity("village", cell, this.owner);
+          this.gameState.removeEntity(this.id);
         }
 
         return true;
       }
     });
-
-    return actions;
   }
 }

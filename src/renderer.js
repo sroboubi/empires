@@ -18,6 +18,12 @@ let gltfLoader = null;
 
 // Material caches to reuse materials for performance
 const materialCache = {};
+const desaturatedMaterialCache = {};
+
+const hiddenTerrain = {
+  material: new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.5, metalness: 0.1, transparent: true, opacity: 0.5, flatShading: true }),
+  height: 3
+};
 
 // Animation & Update hooks
 let updateCallback = null;
@@ -209,7 +215,6 @@ function animate() {
 
   // Animate selection ring
   if (entitySelectionMesh && entitySelectionMesh.visible) {
-    entitySelectionMesh.rotation.z += deltaTime * 1.5;
     entitySelectionMesh.material.opacity = 0.6 + 0.35 * Math.sin(clock.getElapsedTime() * 5);
   }
 
@@ -223,7 +228,7 @@ function animate() {
 }
 
 /**
- * Helper to get or create material for terrain.
+ * Helper to get or create material for normal terrain.
  */
 function getTerrainMaterial(terrain) {
   if (materialCache[terrain.name]) {
@@ -235,9 +240,35 @@ function getTerrainMaterial(terrain) {
 }
 
 /**
- * Draws the 3D hexagonal grid from cell data.
+ * Helper to get or create a desaturated material for explored, non-visible terrain.
  */
-export function drawGrid(cells) {
+function getDesaturatedTerrainMaterial(terrain) {
+  if (desaturatedMaterialCache[terrain.name]) {
+    return desaturatedMaterialCache[terrain.name];
+  }
+
+  const baseMatProps = { ...terrain.material };
+  const baseColor = new THREE.Color(baseMatProps.color || 0x888888);
+
+  const hsl = { h: 0, s: 0, l: 0 };
+  baseColor.getHSL(hsl);
+  baseColor.setHSL(hsl.h, hsl.s * 0.15, hsl.l * 0.45);
+
+  const material = new THREE.MeshStandardMaterial({
+    ...baseMatProps,
+    color: baseColor
+  });
+
+  desaturatedMaterialCache[terrain.name] = material;
+  return material;
+}
+
+/**
+ * Draws the 3D hexagonal grid from cell data, accounting for active player's Fog of War visibility.
+ * @param {Object} cells - Map of cells keyed by "q,r"
+ * @param {Player|null} activePlayer - Currently active viewing player
+ */
+export function drawGrid(cells, activePlayer = null) {
   while (hexGroup.children.length > 0) {
     const child = hexGroup.children[0];
     hexGroup.remove(child);
@@ -247,7 +278,25 @@ export function drawGrid(cells) {
   const geometryCache = {};
 
   Object.values(cells).forEach(cell => {
-    const height = cell.terrain.height;
+    const isExplored = activePlayer ? activePlayer.isExplored(cell.q, cell.r) : true;
+    const isVisible = activePlayer ? activePlayer.isVisible(cell.q, cell.r) : true;
+
+    let height = cell.terrain.height;
+    let material;
+
+    if (!isExplored) {
+      // Fully hidden unexplored tile
+      height = hiddenTerrain.height;
+      material = hiddenTerrain.material;
+    } else if (!isVisible) {
+      // Explored but non-visible tile (fog of war desaturated)
+      height = cell.terrain.height;
+      material = getDesaturatedTerrainMaterial(cell.terrain);
+    } else {
+      // Explored and currently visible tile
+      height = cell.terrain.height;
+      material = getTerrainMaterial(cell.terrain);
+    }
 
     let geometry = geometryCache[height];
     if (!geometry) {
@@ -255,7 +304,6 @@ export function drawGrid(cells) {
       geometryCache[height] = geometry;
     }
 
-    const material = getTerrainMaterial(cell.terrain);
     const mesh = new THREE.Mesh(geometry, material);
 
     const { x, z } = HexGrid.axialToPixel(cell.q, cell.r, hexSize);
@@ -264,7 +312,13 @@ export function drawGrid(cells) {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
 
-    mesh.userData = { q: cell.q, r: cell.r, terrain: cell.terrain };
+    mesh.userData = {
+      q: cell.q,
+      r: cell.r,
+      terrain: cell.terrain,
+      isExplored: isExplored,
+      isVisible: isVisible
+    };
 
     hexGroup.add(mesh);
     cellMeshMap[`${cell.q},${cell.r}`] = mesh;
@@ -315,36 +369,48 @@ const FACING_ROTATIONS = {
 
 /**
  * Reconciles 3D meshes for entities in GameState.
- * Loops through all active entities in gameState.entities, positions their 3D groups based on cell coordinates,
- * and removes meshes for entities that were destroyed.
+ * Only renders entities that are visible to the active player.
+ * Applies entity.rotationOffset to GLB mesh rotation.
  * @param {GameState} gameState
  */
 export function reconcileEntities(gameState) {
   const activeIds = new Set();
+  const activePlayer = gameState.activePlayer;
 
   gameState.entities.forEach(entity => {
-    activeIds.add(entity.id);
+    // Fog of war check: is entity visible to active player?
+    const isVisibleToActivePlayer = activePlayer ? activePlayer.isVisible(entity.q, entity.r) : true;
+    const isOwnedByActivePlayer = activePlayer && entity.owner && entity.owner.id === activePlayer.id;
 
-    const cell = entity.cell || gameState.cells[`${entity.q},${entity.r}`];
-    const terrainHeight = cell && cell.terrain ? cell.terrain.height : 1.0;
-    const { x, z } = HexGrid.axialToPixel(entity.q, entity.r, hexSize);
-    const rotationY = FACING_ROTATIONS[entity.facing] || 0;
+    // Show owned entities on explored cells, and other entities ONLY on visible cells
+    const isEntityVisibleInScene = isOwnedByActivePlayer ? (activePlayer ? activePlayer.isExplored(entity.q, entity.r) : true) : isVisibleToActivePlayer;
 
-    if (!entityMeshMap[entity.id]) {
-      // Spawn new 3D mesh
-      spawnEntityMesh(entity, gameState, x, terrainHeight, z);
-    } else {
-      // Update position and rotation of existing mesh
-      const meshGroup = entityMeshMap[entity.id];
-      meshGroup.position.set(x, terrainHeight, z);
-      meshGroup.rotation.y = rotationY;
+    if (isEntityVisibleInScene) {
+      activeIds.add(entity.id);
+
+      const cell = entity.cell || gameState.cells[`${entity.q},${entity.r}`];
+      const terrainHeight = cell && cell.terrain ? cell.terrain.height : 1.0;
+      const { x, z } = HexGrid.axialToPixel(entity.q, entity.r, hexSize);
+
+      const facingRot = FACING_ROTATIONS[entity.facing] || 0;
+      const rotOffset = entity.rotationOffset || 0;
+      const totalRotationY = facingRot + rotOffset;
+
+      if (!entityMeshMap[entity.id]) {
+        // Spawn new 3D mesh
+        spawnEntityMesh(entity, gameState, x, terrainHeight, z, totalRotationY);
+      } else {
+        // Update position and rotation of existing mesh
+        const meshGroup = entityMeshMap[entity.id];
+        meshGroup.position.set(x, terrainHeight, z);
+        meshGroup.rotation.y = totalRotationY;
+      }
     }
   });
 
-  // Remove meshes of entities that no longer exist
+  // Remove meshes of entities that no longer exist or are hidden by Fog of War
   for (const id in entityMeshMap) {
     if (!activeIds.has(id)) {
-      console.log(`Removing 3D mesh for destroyed entity: ${id}`);
       const meshGroup = entityMeshMap[id];
       if (meshGroup) {
         scene.remove(meshGroup);
@@ -357,11 +423,11 @@ export function reconcileEntities(gameState) {
 /**
  * Helper to spawn 3D visual group for an entity.
  */
-function spawnEntityMesh(entity, gameState, x, terrainHeight, z) {
+function spawnEntityMesh(entity, gameState, x, terrainHeight, z, rotationY) {
   const meta = gameState.manifestData ? gameState.manifestData.entities[entity.name] : null;
 
   const group = new THREE.Group();
-  group.rotation.y = FACING_ROTATIONS[entity.facing] || 0;
+  group.rotation.y = rotationY;
 
   // 1. Draw Player-Colored Base Ring
   if (entity.owner) {

@@ -48,8 +48,8 @@ async function init() {
     await preloadModels(manifestData.entities);
     reconcileEntities(gameState);
 
-    // 6. Draw Hex Grid
-    drawGrid(gameState.cells);
+    // 6. Draw Hex Grid with Fog of War for Active Player
+    drawGrid(gameState.cells, gameState.activePlayer);
 
     // 7. Update UI
     updatePlayersUI();
@@ -109,7 +109,7 @@ async function init() {
 }
 
 /**
- * Left click: selects entity at clicked hex cell or deselects.
+ * Left click: selects entity at clicked hex cell if owned by active human player, or deselects.
  */
 function handleLeftClick(event) {
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
@@ -118,26 +118,47 @@ function handleLeftClick(event) {
   const hovered = raycastHex(mouse);
   hideContextMenu();
 
-  if (hovered) {
-    const entity = gameState.getEntityAt(hovered.q, hovered.r);
-    if (entity) {
-      selectEntity(entity);
-    } else {
-      deselectEntity();
-    }
+  if (!hovered) {
+    deselectEntity();
+    return;
+  }
+
+  const activePlayer = gameState.activePlayer;
+  if (!activePlayer || activePlayer.isAI) {
+    // AI players cannot be controlled by user
+    deselectEntity();
+    return;
+  }
+
+  // Check if target cell is visible to active player
+  if (!activePlayer.isVisible(hovered.q, hovered.r)) {
+    deselectEntity();
+    return;
+  }
+
+  const entity = gameState.getEntityAt(hovered.q, hovered.r);
+  // User can only select and control entities owned by the active human player
+  if (entity && entity.owner && entity.owner.id === activePlayer.id) {
+    selectEntity(entity);
   } else {
     deselectEntity();
   }
 }
 
 /**
- * Right click: if an entity is selected, queries entity.getActions(targetCell, targetEntity)
- * and displays action context menu with action names and preview info.
+ * Right click: if an entity is selected and belongs to active player,
+ * queries entity.getActions() and displays action context menu.
  */
 function handleRightClick(event) {
   event.preventDefault();
 
   if (!selectedEntity) {
+    hideContextMenu();
+    return;
+  }
+
+  const activePlayer = gameState.activePlayer;
+  if (!activePlayer || activePlayer.isAI || !selectedEntity.owner || selectedEntity.owner.id !== activePlayer.id) {
     hideContextMenu();
     return;
   }
@@ -154,7 +175,7 @@ function handleRightClick(event) {
   const targetCell = gameState.cells[`${hovered.q},${hovered.r}`];
   const targetEntity = gameState.getEntityAt(hovered.q, hovered.r);
 
-  const candidateActions = selectedEntity.getActions(targetCell, targetEntity);
+  const candidateActions = selectedEntity.getActions();
   showContextMenu(event.clientX, event.clientY, selectedEntity, candidateActions, targetCell, targetEntity);
 }
 
@@ -198,7 +219,7 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
     actions.forEach(action => {
       const check = action.canDo ? action.canDo(targetCell, targetEntity) : { possible: true, reason: action.description || '' };
       const isPossible = check.possible !== false;
-      const previewText = check.reason || action.preview || action.description || '';
+      const previewText = check.reason || action.description || '';
 
       const btn = document.createElement('button');
       btn.className = 'context-action-btn';
@@ -224,13 +245,7 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
           return;
         }
 
-        let success = false;
-        if (action.do) {
-          success = action.do(targetCell, targetEntity);
-        } else if (entity.doAction) {
-          const res = entity.doAction(action.name, targetCell, targetEntity);
-          success = res.success;
-        }
+        const success = action.do ? action.do(targetCell, targetEntity) : false;
 
         if (success) {
           showToast(check.reason || `Executed ${action.name}`);
@@ -238,7 +253,8 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
           showToast(`Failed to execute ${action.name}`, true);
         }
 
-        // Reconcile 3D visual scene & update UI
+        // Re-draw grid & reconcile 3D visual scene & update UI
+        drawGrid(gameState.cells, gameState.activePlayer);
         reconcileEntities(gameState);
         updatePlayersUI();
 
@@ -271,19 +287,35 @@ function hideContextMenu() {
 }
 
 /**
- * Updates players and dynamic resources list in UI.
+ * Updates players and dynamic resources list in UI, highlighting active player and turn round.
  */
 function updatePlayersUI() {
   const container = document.getElementById('players-list');
   container.innerHTML = '';
 
+  const activePlayer = gameState.activePlayer;
+
+  // Add turn header info
+  const header = document.createElement('div');
+  header.style.marginBottom = '10px';
+  header.style.fontSize = '12px';
+  header.style.fontWeight = 'bold';
+  header.style.color = 'var(--accent-color)';
+  header.textContent = `ROUND ${gameState.currentRound} — TURN: ${activePlayer ? activePlayer.name.toUpperCase() : ''}${activePlayer && activePlayer.isAI ? ' (AI)' : ''}`;
+  container.appendChild(header);
+
   gameState.players.forEach(player => {
+    const isActive = activePlayer && activePlayer.id === player.id;
     const li = document.createElement('li');
     li.style.display = 'flex';
     li.style.flexDirection = 'column';
     li.style.alignItems = 'flex-start';
     li.style.gap = '2px';
     li.style.marginBottom = '8px';
+    li.style.padding = '6px';
+    li.style.borderRadius = '6px';
+    li.style.background = isActive ? 'rgba(167, 139, 250, 0.15)' : 'transparent';
+    li.style.border = isActive ? '1px solid var(--accent-color)' : '1px solid transparent';
 
     let resourceStr = '';
     if (player.resources) {
@@ -295,7 +327,7 @@ function updatePlayersUI() {
     li.innerHTML = `
       <div style="display: flex; align-items: center; gap: 8px;">
         <span class="player-color-dot" style="background-color: ${player.color};"></span>
-        <strong style="font-size: 14px;">${player.name}</strong>
+        <strong style="font-size: 14px; color: ${isActive ? '#ffffff' : 'var(--text-muted)'};">${player.name} ${isActive ? '◀ ACTIVE' : ''}</strong>
       </div>
       ${resourceStr ? `<div style="font-size: 11px; color: var(--text-muted); margin-left: 18px;">${resourceStr}</div>` : ''}
     `;
@@ -304,20 +336,23 @@ function updatePlayersUI() {
 }
 
 /**
- * Next Turn: triggers stepTurn on gameState, resetting unit movement and gathering construct resources.
+ * Next Turn: triggers endTurn on gameState, cycling to next player turn and updating Fog of War.
  */
 function nextTurn() {
-  gameState.stepTurn();
+  deselectEntity();
+  hideContextMenu();
+
+  gameState.endTurn();
+
+  drawGrid(gameState.cells, gameState.activePlayer);
   reconcileEntities(gameState);
   updatePlayersUI();
-  if (selectedEntity) {
-    selectEntity(selectedEntity);
-  }
-  showToast('Advanced to next turn!');
+
+  showToast(`Turn passed to ${gameState.activePlayer ? gameState.activePlayer.name : ''} (Round ${gameState.currentRound})`);
 }
 
 /**
- * Handles mouse movement for hovering inspection.
+ * Handles mouse movement for hovering inspection, respecting Fog of War.
  */
 function onMouseMove(event) {
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
@@ -325,22 +360,41 @@ function onMouseMove(event) {
 
   const hovered = raycastHex(mouse);
   const infoPanel = document.getElementById('inspect-panel');
+  const activePlayer = gameState.activePlayer;
 
   if (hovered) {
-    highlightCell(hovered.q, hovered.r, hovered.terrain.height);
+    const isExplored = activePlayer ? activePlayer.isExplored(hovered.q, hovered.r) : true;
+    const isVisible = activePlayer ? activePlayer.isVisible(hovered.q, hovered.r) : true;
+
+    highlightCell(hovered.q, hovered.r, isExplored ? hovered.terrain.height : 3.0);
 
     document.getElementById('inspect-coords').textContent = `(${hovered.q}, ${hovered.r})`;
-    document.getElementById('inspect-terrain').textContent = hovered.terrain.name;
-    document.getElementById('inspect-height').textContent = hovered.terrain.height.toFixed(2);
-    document.getElementById('inspect-elevation').textContent = hovered.terrain.elevation.toFixed(2);
-    document.getElementById('inspect-temperature').textContent = hovered.terrain.temperature.toFixed(2);
-    document.getElementById('inspect-humidity').textContent = hovered.terrain.humidity.toFixed(2);
+
+    if (!isExplored) {
+      document.getElementById('inspect-terrain').textContent = 'Unexplored (Fog of War)';
+      document.getElementById('inspect-height').textContent = '?';
+      document.getElementById('inspect-elevation').textContent = '?';
+      document.getElementById('inspect-temperature').textContent = '?';
+      document.getElementById('inspect-humidity').textContent = '?';
+    } else {
+      document.getElementById('inspect-terrain').textContent = `${hovered.terrain.name}${!isVisible ? ' (Fog of War)' : ''}`;
+      document.getElementById('inspect-height').textContent = hovered.terrain.height.toFixed(2);
+      document.getElementById('inspect-elevation').textContent = hovered.terrain.elevation.toFixed(2);
+      document.getElementById('inspect-temperature').textContent = hovered.terrain.temperature.toFixed(2);
+      document.getElementById('inspect-humidity').textContent = hovered.terrain.humidity.toFixed(2);
+    }
 
     const entity = gameState.getEntityAt(hovered.q, hovered.r);
     const entitiesDiv = document.getElementById('inspect-entities');
     entitiesDiv.innerHTML = '';
 
-    if (entity) {
+    // Show entity only if explored and visible, or if owned by active player on explored tile
+    const showEntityInInspect = entity && (
+      (entity.owner && activePlayer && entity.owner.id === activePlayer.id && isExplored) ||
+      isVisible
+    );
+
+    if (showEntityInInspect) {
       const isSelected = selectedEntity && selectedEntity.id === entity.id;
 
       const entityRow = document.createElement('div');
@@ -364,7 +418,7 @@ function onMouseMove(event) {
       `;
       entitiesDiv.appendChild(entityRow);
     } else {
-      entitiesDiv.textContent = 'None';
+      entitiesDiv.textContent = isExplored ? 'None' : 'Unknown';
     }
 
     infoPanel.classList.add('active');
@@ -387,8 +441,8 @@ function regenerateMap() {
   gameState.generateMap(CONFIG.GRID_RADIUS);
   gameState.initializeManifest(manifestData);
 
+  drawGrid(gameState.cells, gameState.activePlayer);
   reconcileEntities(gameState);
-  drawGrid(gameState.cells);
   updatePlayersUI();
 
   document.getElementById('inspect-panel').classList.remove('active');
@@ -426,8 +480,8 @@ function deserializeState() {
     gameState.deserialize(jsonString);
     gameState.manifestData = manifestData;
 
+    drawGrid(gameState.cells, gameState.activePlayer);
     reconcileEntities(gameState);
-    drawGrid(gameState.cells);
     updatePlayersUI();
     showToast('State successfully deserialized!');
   } catch (err) {

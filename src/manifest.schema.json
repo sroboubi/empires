@@ -7,6 +7,35 @@
         "entities"
     ],
     "properties": {
+        "players": {
+            "type": "array",
+            "description": "List of player configurations participating in the game.",
+            "items": {
+                "type": "object",
+                "required": [
+                    "id",
+                    "name",
+                    "color"
+                ],
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "color": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "controller": {
+                        "type": ["object", "string", "null"]
+                    }
+                }
+            }
+        },
         "resources": {
             "type": "array",
             "description": "Global resources tracked by the game engine.",
@@ -58,6 +87,15 @@
                         "type": "string",
                         "format": "uri",
                         "description": "Path to the JS module defining the controller class"
+                    },
+                    "rotationOffset": {
+                        "type": "number",
+                        "description": "Y-axis rotation offset in radians to orient GLB model correctly"
+                    },
+                    "sightRange": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Vision sight range in hex cell radius"
                     }
                 }
             }

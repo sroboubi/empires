@@ -5,6 +5,7 @@
 
 export const entityMetadata = {};
 export const globalResources = [];
+export const playerDefinitions = [];
 export let initializationSettings = null;
 
 /**
@@ -24,6 +25,7 @@ export async function loadGameManifest(manifestUrl) {
 
   // Clear previous caches
   globalResources.length = 0;
+  playerDefinitions.length = 0;
   for (const key in entityMetadata) {
     delete entityMetadata[key];
   }
@@ -31,6 +33,11 @@ export async function loadGameManifest(manifestUrl) {
   // Cache global resources
   if (manifest.resources) {
     globalResources.push(...manifest.resources);
+  }
+
+  // Cache player definitions
+  if (manifest.players) {
+    playerDefinitions.push(...manifest.players);
   }
 
   // Cache initialization settings
@@ -62,6 +69,7 @@ export async function loadGameManifest(manifestUrl) {
   }
 
   return {
+    players: playerDefinitions,
     resources: globalResources,
     entities: entityMetadata,
     initialization: initializationSettings

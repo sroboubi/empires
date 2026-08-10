@@ -5,14 +5,18 @@ import { BaseEntity } from './baseEntity.js';
  * Extends BaseEntity with passive resource production hooks on turn step.
  */
 export class ConstructEntity extends BaseEntity {
-  constructor(entityData, ownerPlayer, gridProxy, cell, initialState = null) {
-    super(entityData, ownerPlayer, gridProxy, cell, initialState);
+  constructor(entityData, ownerPlayer, gameState, cell, initialState = null) {
+    super(entityData, ownerPlayer, gameState, cell, initialState);
 
     this.category = 'construct';
+  }
 
-    if (!initialState) {
-      this.state.yields = this.data.yields || {};
-    }
+  getDefaults() {
+    return {
+      ...super.getDefaults(),
+      category: 'construct',
+      yields: {}
+    };
   }
 
   /**
@@ -21,19 +25,21 @@ export class ConstructEntity extends BaseEntity {
   step(globalContext) {
     super.step(globalContext);
 
-    if (this.active && this.owner && this.state.yields) {
-      this.owner.addResources(this.state.yields);
+    const yields = this.state.yields || this.data.yields;
+    if (this.active && this.owner && yields) {
+      this.owner.addResources(yields);
     }
   }
 
   info() {
     const ownerName = this.owner ? this.owner.name : 'Neutral';
+    const yields = this.state.yields || this.data.yields;
     let yieldStr = '';
-    if (this.state.yields) {
-      yieldStr = Object.entries(this.state.yields)
+    if (yields) {
+      yieldStr = Object.entries(yields)
         .map(([k, v]) => `+${v} ${k}`)
         .join(', ');
     }
-    return `${this.name.toUpperCase()} (Construct). Owner: ${ownerName}. HP: ${this.state.health}/${this.state.maxHealth}.${yieldStr ? ` Income/turn: ${yieldStr}` : ''}`;
+    return `${this.name.toUpperCase()} (Construct). Owner: ${ownerName}. HP: ${Math.round(this.state.health)}/${this.maxHealth}.${yieldStr ? ` Income/turn: ${yieldStr}` : ''}`;
   }
 }

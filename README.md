@@ -115,3 +115,23 @@ Task: Phase 8 - Entity refactor and game logic
    - if the unit does not have a range attribute then the attack is melee, and the cost is equal to the attackCostScale * the movement cost to the target cell
    - if the unit has a range attribute then the attack is ranged - call getSightAndTrajectory() for target cell. The attack is possible if the target cell is within range and is either visible OR the maxObstructionDelta is less than the range's arcHeight. The attack cost is equal to attackCostScale * distance to target.  
 8. for all units add a move action that uses the movementCostTo() function to determine the cost of moving to a target cell and moving the entity to that cell if possible and updates the entity's action points and facing based on the direction of movement
+
+Task: Phase 9 - Cleanup
+
+1. Identify and remove unused code: e.g. hexMath, entity.doAction
+2. When constructing entity, use the JS spread notation to get default data defined in the class, then override with manifest data, then override with initialState - do NOT set values individually (e.g. if a new value is added to the manifest it should be included in the entity without any code change)
+3. Add a rotation offset to each entity in the manifest so that their glb model rotation can be corrected
+4. getActions and the action list should only be defined in baseEntity. Subclasses should just add the actions they want to the list. getActions() does not need any parameters.
+5. "face" action should cost action points equal to half the movement cost of the cell the unit is on
+6. entity.gridProxy is not a grid, it is GameState. Rename to entity.gameState
+7. add action to worker to repair constructs. It will consume all action points and repair an adjacent construct increasing the target construct health by 2x the worker's action points, up to max health
+
+Task: Phase 10 - Player and visiblity
+
+1. Add a step() function to the player class that will be called at the start of the players turn
+2. Add player definitions to the manifest as an array with player attributes. This will define the name, color, and description. A new player should be instantiated for each player in the manifest. 
+3. Each turn only one player can perform actions, determined by the order in the manifest array. When all players have taken a turn then game round ends and another begins, with the players taking turns again. 
+4. Add a controller object to the player, which will be defined in the manifest. If it is null then the player is controlled by the user, otherwise it will be an AI controlled player - which will be implemented later. AI controller player units should not be selectable or actionable by the user.
+5. Each player has a list of cells that are "explored" and a subset that are "visible" - fully hide unexplored cells and other player units on non-visible cells
+   - when rendering, for each cell check if it is in the current player's explored list - if not then render the hidden terrain from the terrainProvider.getHiddenTerrain(). If it is in the explored list then check if it is in the visible list - if not then render the cell with a desaturated version of its terrain color and without any entities on it, otherwise render the cell normally with its entities on it   
+6. Add a sight range to each entity, provided in the manifest, defining the cell distance that it can see. Add a list of visible cells to the entity and determine these cells by calling hexGrid.visibleCells() on spawn and move. On spawn, move, and destruction of an entity, update the player visible list by taking the union of all player owned entities visible cells. Any cells added to the visible list are also added to the explored list, but no cells are ever removed from the explored list.   
