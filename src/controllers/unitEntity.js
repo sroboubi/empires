@@ -10,16 +10,13 @@ const DIRECTIONS_LIST = ['E', 'NE', 'NW', 'W', 'SW', 'SE'];
 export class UnitEntity extends BaseEntity {
   constructor(entityData, ownerPlayer, gameState, cell, initialState = null) {
     super(entityData, ownerPlayer, gameState, cell, initialState);
-
-    // Populate actions array directly in constructor
-    this.setupUnitActions();
   }
 
   getDefaults() {
     return {
       ...super.getDefaults(),
-      maxActionPoints: 2,
-      actionPoints: 2,
+      maxActionPoints: 10,
+      actionPoints: 10,
       attackCostScale: 1.0,
       damage: { value: 0, type: 'blunt' },
       range: null,
@@ -70,7 +67,8 @@ export class UnitEntity extends BaseEntity {
   /**
    * Populates move, attack, and face actions into this.actions array.
    */
-  setupUnitActions() {
+  setupActions() {
+    super.setupActions();
     // 1. Move Action
     this.actions.push({
       name: "Move",
@@ -245,9 +243,7 @@ export class UnitEntity extends BaseEntity {
   }
 
   info() {
-    const ownerName = this.owner ? this.owner.name : 'Neutral';
-    const activeStr = this.active ? 'ACTIVE' : 'INACTIVE';
     const rangeStr = this.range ? `Rng:${this.range.minCells}-${this.range.maxCells}` : 'Melee';
-    return `${this.name.toUpperCase()} (Unit). Owner: ${ownerName}. HP: ${Math.max(0, Math.round(this.health))}/${this.maxHealth}. AP: ${this.actionPoints}/${this.maxActionPoints}. Atk: ${this.damage.value} (${this.damage.type}, ${rangeStr}). Status: ${activeStr}. Facing: ${this.facing}`;
+    return super.info() + ` AP: ${this.actionPoints}/${this.maxActionPoints}. Atk: ${this.damage.value} (${this.damage.type}, ${rangeStr}). Facing: ${this.facing}`;
   }
 }

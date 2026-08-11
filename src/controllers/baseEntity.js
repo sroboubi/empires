@@ -1,4 +1,6 @@
 import { SeaLevel } from '../terrainProvider.js';
+import { camelToTitle } from '../utils.js';
+import { HexGrid } from '../hexGrid.js';
 
 /**
  * BaseEntity - Standard Base Class for all dynamic entity instances in the game.
@@ -22,7 +24,6 @@ export class BaseEntity {
 
     this.id = (initialState && initialState.id) || `${this.data.name || 'entity'}_${this.owner ? this.owner.id : 'neutral'}_${Math.random().toString(36).substr(2, 9)}`;
     this.name = this.data.name || 'entity';
-    this.category = this.data.category || 'unit';
 
     // 1. Dynamic state via JS spread notation: defaults -> manifest data -> initialState
     this.state = {
@@ -33,6 +34,7 @@ export class BaseEntity {
 
     // Actions list defined on BaseEntity instance
     this.actions = [];
+    this.setupActions();
 
     // Visible cells set tracked by entity
     this.visibleCells = new Set();
@@ -163,6 +165,11 @@ export class BaseEntity {
     } else {
       this.active = true;
     }
+
+    const yields = this.state.yields;
+    if (this.active && this.owner && yields) {
+      this.owner.addResources(yields);
+    }
   }
 
   /**
@@ -213,13 +220,97 @@ export class BaseEntity {
     return this.actions;
   }
 
+  setupActions() {
+    if (this.state.repairables && this.state.repairables.length > 0) {
+      this.actions.push({
+        name: "Repair",
+        description: "Repair an adjacent entity, consuming all AP to restore HP.",
+        canDo: (cell, target) => {
+          if (!target) return { possible: false, reason: "No target to repair." };
+          if (!this.active) return { possible: false, reason: "Entity is inactive." };
+          if (this.actionPoints <= 0) return { possible: false, reason: "Entity has no Action Points left." };
+          if (!this.state.repairables.includes(target.name.toLowerCase())) return { possible: false, reason: "Target is not repairable by this entity." };
+          if (target.health >= target.maxHealth) return { possible: false, reason: "Target is already at full health." };
+          const dist = HexGrid.distance(this, cell || target);
+          if (dist !== 1) return { possible: false, reason: "Target must be adjacent (1 cell away)." };
+          const healAmount = 2 * this.actionPoints;
+          return {
+            possible: true,
+            reason: `Repair ${target.name.toUpperCase()} for +${healAmount} HP consuming all ${this.actionPoints} AP.`,
+            cost: this.actionPoints,
+            healAmount: healAmount
+          };
+        },
+        do: (cell, target) => {
+          const actionObj = this.actions.find(a => a.name === "Repair");
+          const check = actionObj.canDo(cell, target);
+          if (!check.possible) return false;
+          this.actionPoints = 0;
+          target.health = Math.min(target.maxHealth, target.health + check.healAmount);
+          return true;
+        }
+      });
+    }
+
+    for (const buildable of this.state.buildables || []) {
+      const targetName = camelToTitle(buildable);
+      const actionName = `Build ${targetName}`;
+      this.actions.push({
+        name: actionName,
+        canDo: (cell, entity) => {
+          if (!this.active) return { possible: false, reason: "Worker is inactive." };
+          if (!cell) return { possible: false, reason: "No target cell selected." };
+          if (entity && entity !== this) return { possible: false, reason: "Target cell is occupied." };
+
+          if (!this.canStandOn(cell)) return { possible: false, reason: "Cannot build construct on water." };  // FIXME
+
+          const dist = HexGrid.distance(this, cell);
+          if (dist !== 1) return { possible: false, reason: "target must be adjacent (1 cell away)." };
+          if (this.actionPoints < 1) return { possible: false, reason: "Insufficient Action Points (1 AP required)." };
+
+          const meta = this.gameState && this.gameState.manifestData ? this.gameState.manifestData.entities[buildable] : null;
+          const cost = (meta && meta.spawnCost) || {};
+          const costStr = Object.entries(cost).map(([k, v]) => `${v} ${k}`).join(', ');
+          if (this.owner && !this.owner.hasResources(cost)) {
+            return { possible: false, reason: `Insufficient resources to build ${targetName} (${costStr} required).` };
+          }
+          return {
+            possible: true,
+            reason: `Build ${targetName} on (${cell.q}, ${cell.r}) costing ${costStr} and 1 AP.`,
+            cost: cost
+          };
+        },
+        do: (cell, entity) => {
+          const actionObj = this.actions.find(a => a.name === actionName);
+          const check = actionObj.canDo(cell, entity);
+          if (!check.possible) return false;
+          if (this.owner) {
+            this.owner.consumeResources(check.cost);
+          }
+          this.actionPoints -= 1;
+          if (this.gameState) {
+            this.gameState.spawnEntity(buildable, cell, this.owner);
+            if (this.state.destroyOnBuild) {
+              this.gameState.removeEntity(this.id);
+            }
+          }
+          return true;
+        }
+      });
+    }
+  }
+
   /**
    * Descriptive summary for inspect panel UI.
    */
   info() {
     const ownerName = this.owner ? this.owner.name : 'Neutral';
     const activeStr = this.active ? 'ACTIVE' : 'INACTIVE (No Maintenance)';
-    return `${this.name.toUpperCase()} (${this.category}). Owner: ${ownerName}. HP: ${Math.max(0, Math.round(this.state.health))}/${this.maxHealth}. Status: ${activeStr}. Facing: ${this.facing}`;
+    let yieldStr = '';
+    if (this.state.yields) {
+      yieldStr = Object.entries(this.state.yields).map(([k, v]) => `+${v} ${k}`).join(', ');
+    }
+    return `${camelToTitle(this.name)}. Owner: ${ownerName}. HP: ${Math.max(0, Math.round(this.state.health))}/${this.maxHealth}. Status: ${activeStr}.${yieldStr ? ` Income/turn: ${yieldStr}` : ''}`;
   }
 
   /**
@@ -229,7 +320,6 @@ export class BaseEntity {
     return {
       id: this.id,
       name: this.name,
-      category: this.category,
       ownerId: this.owner ? this.owner.id : null,
       q: this.q,
       r: this.r,

@@ -16,7 +16,5 @@ Game:
 - unit vision considers center of cell, some cells that are partly visible are hidden - fix?
 - players have orders per turn
 
-- make entity armor an array (not just a single type)
-
 - score: military (add military unit power) + economic (resource accumulated and income) + territory (villages and other constructs)
 - win condition: total score is 2X the next largest score 

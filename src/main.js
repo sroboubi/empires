@@ -191,7 +191,7 @@ function selectEntity(entity) {
     setEntitySelectionHighlight(x, cell.terrain ? cell.terrain.height : 1.0, z);
   }
 
-  showToast(`Selected ${entity.name.toUpperCase()} (${entity.category})`);
+  showToast(`Selected ${entity.name.toUpperCase()}`);
 }
 
 /**
@@ -410,7 +410,7 @@ function onMouseMove(event) {
       entityRow.innerHTML = `
         <div style="font-weight: 600; color: ${isSelected ? '#00ffff' : 'var(--text-main)'}; display: flex; align-items: center;">
           <span class="player-color-dot" style="background-color: ${playerColor}; margin-right: 6px;"></span>
-          ${entity.name.toUpperCase()} (${entity.category})${isSelected ? ' ★ SELECTED' : ''}
+          ${entity.name.toUpperCase()} ${isSelected ? ' ★ SELECTED' : ''}
         </div>
         <div style="font-size: 11px; color: var(--text-muted); margin-left: 16px; margin-top: 2px;">
           ${entity.info()}

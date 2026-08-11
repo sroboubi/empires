@@ -69,7 +69,6 @@
                 "type": "object",
                 "required": [
                     "name",
-                    "category",
                     "modelUrl",
                     "controllerUrl"
                 ],
@@ -77,10 +76,6 @@
                     "name": {
                         "type": "string",
                         "description": "Unique name (e.g., 'swordsman', 'mine')"
-                    },
-                    "category": {
-                        "type": "string",
-                        "description": "e.g. construct or unit"
                     },
                     "modelUrl": {
                         "type": "string",
@@ -146,7 +141,7 @@
                         "properties": {
                             "name": {
                                 "type": "string",
-                                "description": "Must match an entity name defined in 'entities' where category is 'unit'."
+                                "description": "Must match an entity name defined in 'entities'."
                             },
                             "quantity": {
                                 "type": "integer",

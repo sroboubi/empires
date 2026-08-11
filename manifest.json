@@ -100,7 +100,20 @@
         "gold": 10
       },
       "rotationOffset": 90,
-      "sightRange": 3
+      "sightRange": 3,
+      "buildables": [
+        "mine",
+        "lumberMill",
+        "farm",
+        "forge"
+      ],
+      "repairables": [
+        "mine",
+        "lumberMill",
+        "farm",
+        "forge",
+        "village"
+      ]
     },
     {
       "name": "settler",
@@ -132,7 +145,11 @@
         "gold": 50
       },
       "rotationOffset": 180,
-      "sightRange": 5
+      "sightRange": 5,
+      "buildables": [
+        "village"
+      ],
+      "destroyOnBuild": true
     },
     {
       "name": "bowman",
@@ -152,7 +169,7 @@
       "range": {
         "minCells": 1,
         "maxCells": 3,
-        "arcHeight": 1.5
+        "arcHeight": 0.3
       },
       "armor": {
         "slashing": 1,
@@ -222,7 +239,14 @@
         "gems": 10
       },
       "rotationOffset": 0,
-      "sightRange": 8
+      "sightRange": 8,
+      "buildables": [
+        "swordsman",
+        "bowman",
+        "worker",
+        "settler",
+        "horseman"
+      ]
     },
     {
       "name": "forge",
@@ -304,23 +328,23 @@
     "startingResources": [
       {
         "name": "gold",
-        "quantity": 100
+        "quantity": 1000
       },
       {
         "name": "wood",
-        "quantity": 100
+        "quantity": 1000
       },
       {
         "name": "iron",
-        "quantity": 100
+        "quantity": 1000
       },
       {
         "name": "food",
-        "quantity": 100
+        "quantity": 1000
       },
       {
         "name": "gems",
-        "quantity": 0
+        "quantity": 10
       }
     ],
     "startingUnits": [
