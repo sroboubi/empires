@@ -3,10 +3,10 @@ Visual:
 - skybox and sun
 - frame drop and lagging?
 - smooth move
+- animations and effects (damage, attack)
 - when AI is thinking, do a day/night cycle
 
 Game:
-- make worker and village buildables dynaic per manifest (pass in required manifest info)
 - entities add/remove themselves from gamestate?
 
 - resources init on grid
