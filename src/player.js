@@ -20,6 +20,10 @@ export class Player {
     this.controller = controller || null;
     this.resources = { ...startingResources };
     this.startCoord = { q: 0, r: 0 };
+    this.score = {
+      military: 0,
+      economic: 0
+    };
 
     this.maxOrders = ordersConfig?.max ?? 0;
     this.ordersPerTurn = ordersConfig?.perTurn ?? 0;
@@ -47,15 +51,17 @@ export class Player {
     if (!gameState || !gameState.entities) return;
 
     this.refillOrders();
-
+    this.score = {military: 0, economic: 0};
     const ownedEntities = gameState.entities.filter(e => e.owner && e.owner.id === this.id);
-    ownedEntities.forEach(entity => {
-      try {
+    for (const entity of ownedEntities) {
+      this.score.military += entity.state.score.military;
+      this.score.economic += entity.state.score.economic;
+      try {        
         entity.step({ gameState });
       } catch (err) {
         console.error(`Error stepping entity ${entity.name} during turn step:`, err);
       }
-    });
+    }
 
     this.updateVisibility(gameState);
   }

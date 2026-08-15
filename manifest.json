@@ -65,7 +65,11 @@
         "iron": 30
       },
       "rotationOffset": 90,
-      "sightRange": 4
+      "sightRange": 4,
+      "score": {
+        "military": 10,
+        "economic": 0
+      }
     },
     {
       "name": "worker",
@@ -109,7 +113,11 @@
         "farm",
         "forge",
         "village"
-      ]
+      ],
+      "score": {
+        "military": 1,
+        "economic": 2
+      }
     },
     {
       "name": "settler",
@@ -145,7 +153,11 @@
       "buildables": [
         "village"
       ],
-      "destroyOnBuild": true
+      "destroyOnBuild": true,
+      "score": {
+        "military": 1,
+        "economic": 4
+      }
     },
     {
       "name": "bowman",
@@ -183,7 +195,11 @@
         "wood": 20
       },
       "rotationOffset": 90,
-      "sightRange": 5
+      "sightRange": 5,
+      "score": {
+        "military": 10,
+        "economic": 0
+      }
     },
     {
       "name": "horseman",
@@ -215,7 +231,11 @@
         "gold": 60
       },
       "rotationOffset": 180,
-      "sightRange": 5
+      "sightRange": 5,
+      "score": {
+        "military": 15,
+        "economic": 0
+      }
     },
     {
       "name": "village",
@@ -242,7 +262,11 @@
         "worker",
         "settler",
         "horseman"
-      ]
+      ],
+      "score": {
+        "military": 2,
+        "economic": 10
+      }
     },
     {
       "name": "forge",
@@ -261,7 +285,11 @@
         "iron": 10
       },
       "rotationOffset": 0,
-      "sightRange": 3
+      "sightRange": 3,
+      "score": {
+        "military": 4,
+        "economic": 4
+      }
     },
     {
       "name": "lumberMill",
@@ -279,7 +307,11 @@
         "wood": 10
       },
       "rotationOffset": 0,
-      "sightRange": 3
+      "sightRange": 3,
+      "score": {
+        "military": 3,
+        "economic": 5
+      }
     },
     {
       "name": "mine",
@@ -298,7 +330,11 @@
         "gems": 1
       },
       "rotationOffset": 0,
-      "sightRange": 3
+      "sightRange": 3,
+      "score": {
+        "military": 2,
+        "economic": 8
+      }
     },
     {
       "name": "farm",
@@ -317,7 +353,11 @@
         "food": 20
       },
       "rotationOffset": 0,
-      "sightRange": 3
+      "sightRange": 3,
+      "score": {
+        "military": 2,
+        "economic": 3
+      }
     }
   ],
   "initialization": {

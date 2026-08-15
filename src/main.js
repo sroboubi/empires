@@ -349,12 +349,15 @@ function updatePlayersUI() {
       ? `orders: ${player.orders}/${player.maxOrders}`
       : '';
 
+    const scoreStr = `military score: ${player.score.military} - econimic score: ${player.score.economic}`;  
+
     li.innerHTML = `
       <div style="display: flex; align-items: center; gap: 8px;">
         <span class="player-color-dot" style="background-color: ${player.color};"></span>
         <strong style="font-size: 14px; color: ${isActive ? '#ffffff' : 'var(--text-muted)'};">${player.name} ${isActive ? '◀ ACTIVE' : ''}</strong>
       </div>
       ${ordersStr ? `<div style="font-size: 11px; color: var(--accent-color); margin-left: 18px;">${ordersStr}</div>` : ''}
+      ${scoreStr ? `<div style="font-size: 11px; color: var(--accent-color); margin-left: 18px;">${scoreStr}</div>` : ''}
       ${resourceStr ? `<div style="font-size: 11px; color: var(--text-muted); margin-left: 18px;">${resourceStr}</div>` : ''}
     `;
     container.appendChild(li);
