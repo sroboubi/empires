@@ -117,6 +117,52 @@ export class BaseEntity {
   }
 
   /**
+   * Orders consumed per action.
+   * @returns {number}
+   */
+  getOrdersRequired() {
+    return 1;
+  }
+
+  /**
+   * Checks whether the entity can afford an action, including orders.
+   * @param {number} [apCost=0] - Action points required; skipped when entity has no AP.
+   * @returns {{possible: boolean, reason?: string, ordersRequired?: number}}
+   */
+  checkActionAffordability(apCost = 0) {
+    if (apCost > 0 && this.state.actionPoints !== undefined) {
+      const currentAP = this.state.actionPoints;
+      if (currentAP < apCost) {
+        return { possible: false, reason: `Insufficient Action Points (${currentAP}/${apCost} AP required).` };
+      }
+    }
+
+    const ordersRequired = this.getOrdersRequired();
+    if (!this.owner) {
+      return { possible: false, reason: "No owner to issue orders." };
+    }
+    if (!this.owner.hasOrders(ordersRequired)) {
+      return { possible: false, reason: `Insufficient Orders (${this.owner.orders}/${ordersRequired} required).` };
+    }
+
+    return { possible: true, ordersRequired };
+  }
+
+  /**
+   * Spends action points and orders for a completed action.
+   * @param {number} [apCost=0]
+   * @param {number} [ordersRequired=1]
+   */
+  spendActionCost(apCost = 0, ordersRequired = 1) {
+    if (apCost > 0 && this.state.actionPoints !== undefined) {
+      this.state.actionPoints -= apCost;
+    }
+    if (ordersRequired > 0 && this.owner) {
+      this.owner.consumeOrders(ordersRequired);
+    }
+  }
+
+  /**
    * Determines if entity can stand on a given terrain or cell.
    * Standard condition: terrain elevation is above SeaLevel.
    * @param {Object} target - Cell object or Terrain object
@@ -233,11 +279,15 @@ export class BaseEntity {
           if (target.health >= target.maxHealth) return { possible: false, reason: "Target is already at full health." };
           const dist = HexGrid.distance(this, cell || target);
           if (dist !== 1) return { possible: false, reason: "Target must be adjacent (1 cell away)." };
-          const healAmount = 2 * this.actionPoints;
+          const cost = this.actionPoints;
+          const affordability = this.checkActionAffordability(cost);
+          if (!affordability.possible) return affordability;
+          const healAmount = 2 * cost;
           return {
             possible: true,
-            reason: `Repair ${target.name.toUpperCase()} for +${healAmount} HP consuming all ${this.actionPoints} AP.`,
-            cost: this.actionPoints,
+            reason: `Repair ${target.name.toUpperCase()} for +${healAmount} HP consuming all ${cost} AP and 1 order.`,
+            cost: cost,
+            ordersRequired: affordability.ordersRequired,
             healAmount: healAmount
           };
         },
@@ -245,7 +295,7 @@ export class BaseEntity {
           const actionObj = this.actions.find(a => a.name === "Repair");
           const check = actionObj.canDo(cell, target);
           if (!check.possible) return false;
-          this.actionPoints = 0;
+          this.spendActionCost(check.cost, check.ordersRequired);
           target.health = Math.min(target.maxHealth, target.health + check.healAmount);
           return true;
         }
@@ -266,7 +316,10 @@ export class BaseEntity {
 
           const dist = HexGrid.distance(this, cell);
           if (dist !== 1) return { possible: false, reason: "target must be adjacent (1 cell away)." };
-          if (this.actionPoints < 1) return { possible: false, reason: "Insufficient Action Points (1 AP required)." };
+
+          const apCost = this.state.actionPoints !== undefined ? 1 : 0;
+          const affordability = this.checkActionAffordability(apCost);
+          if (!affordability.possible) return affordability;
 
           const meta = this.gameState && this.gameState.manifestData ? this.gameState.manifestData.entities[buildable] : null;
           const cost = (meta && meta.spawnCost) || {};
@@ -274,10 +327,13 @@ export class BaseEntity {
           if (this.owner && !this.owner.hasResources(cost)) {
             return { possible: false, reason: `Insufficient resources to build ${targetName} (${costStr} required).` };
           }
+          const apStr = apCost > 0 ? ', 1 AP' : '';
           return {
             possible: true,
-            reason: `Build ${targetName} on (${cell.q}, ${cell.r}) costing ${costStr} and 1 AP.`,
-            cost: cost
+            reason: `Build ${targetName} on (${cell.q}, ${cell.r}) costing ${costStr}${apStr} and 1 order.`,
+            cost: cost,
+            apCost: apCost,
+            ordersRequired: affordability.ordersRequired
           };
         },
         do: (cell, entity) => {
@@ -287,7 +343,7 @@ export class BaseEntity {
           if (this.owner) {
             this.owner.consumeResources(check.cost);
           }
-          this.actionPoints -= 1;
+          this.spendActionCost(check.apCost, check.ordersRequired);
           if (this.gameState) {
             this.gameState.spawnEntity(buildable, cell, this.owner);
             if (this.state.destroyOnBuild) {

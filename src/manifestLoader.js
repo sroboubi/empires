@@ -3,11 +3,6 @@
  * Preloads dynamic classes for entity controllers.
  */
 
-export const entityMetadata = {};
-export const globalResources = [];
-export const playerDefinitions = [];
-export let initializationSettings = null;
-
 /**
  * Loads the game manifest from a JSON URL, preloading controller classes.
  * @param {string} manifestUrl - URL to the manifest JSON file
@@ -23,32 +18,11 @@ export async function loadGameManifest(manifestUrl) {
 
   const manifest = await response.json();
 
-  // Clear previous caches
-  globalResources.length = 0;
-  playerDefinitions.length = 0;
-  for (const key in entityMetadata) {
-    delete entityMetadata[key];
-  }
-
-  // Cache global resources
-  if (manifest.resources) {
-    globalResources.push(...manifest.resources);
-  }
-
-  // Cache player definitions
-  if (manifest.players) {
-    playerDefinitions.push(...manifest.players);
-  }
-
-  // Cache initialization settings
-  if (manifest.initialization) {
-    initializationSettings = manifest.initialization;
-  }
-
   // Asynchronously preload entity metadata and dynamic JS controller classes
   if (manifest.entities) {
     const baseUri = new URL(manifestUrl, window.location.href);
-
+    const entityMetadata = {};
+    
     for (const entity of manifest.entities) {
       // Resolve path relative to the manifest location
       const absoluteControllerUrl = new URL(entity.controllerUrl, baseUri).href;
@@ -66,12 +40,9 @@ export async function loadGameManifest(manifestUrl) {
 
       entityMetadata[entity.name] = { ...entity, modelUrl: absoluteModelUrl, controllerUrl: absoluteControllerUrl, controllerClass: controllerClass };
     }
+
+    manifest.entities = entityMetadata;
   }
 
-  return {
-    players: playerDefinitions,
-    resources: globalResources,
-    entities: entityMetadata,
-    initialization: initializationSettings
-  };
+  return manifest;
 }

@@ -61,12 +61,9 @@ export class GameState {
     this.manifestData = manifestData;
 
     // 1. Setup starting resources dynamically from manifest initialization settings
-    const startingResources = {};
-    if (manifestData.initialization && manifestData.initialization.startingResources) {
-      manifestData.initialization.startingResources.forEach(res => {
-        startingResources[res.name] = res.quantity;
-      });
-    }
+    const init = manifestData.initialization || {};
+    const startingResources = { ...(init.startingResources || {}) };
+    const ordersConfig = init.orders || null;
 
     // 2. Instantiate players from manifest definitions array
     if (manifestData.players && Array.isArray(manifestData.players) && manifestData.players.length > 0) {
@@ -76,12 +73,13 @@ export class GameState {
         pDef.color,
         startingResources,
         pDef.description,
-        pDef.controller
+        pDef.controller,
+        ordersConfig
       ));
     } else {
       this.players = [
-        new Player(1, 'Red Empire', '#ff4d4d', startingResources),
-        new Player(2, 'Blue Alliance', '#3399ff', startingResources)
+        new Player(1, 'Red Empire', '#ff4d4d', startingResources, '', null, ordersConfig),
+        new Player(2, 'Blue Alliance', '#3399ff', startingResources, '', null, ordersConfig)
       ];
     }
 
@@ -99,15 +97,16 @@ export class GameState {
 
     // 4. Spawn starting units for each player
     this.entities = [];
-    if (manifestData.initialization && manifestData.initialization.startingUnits) {
-      const startingUnits = manifestData.initialization.startingUnits;
+    const startingUnits = init.startingUnits || {};
+    const startingUnitNames = Object.keys(startingUnits);
 
+    if (startingUnitNames.length > 0) {
       this.players.forEach((player, playerIdx) => {
         const targetQ = playerIdx === 0 ? p1TargetQ : p2TargetQ;
         const targetR = playerIdx === 0 ? p1TargetR : p2TargetR;
 
         // Create a temporary entity from the first starting unit type to get its canStandOn
-        const firstUnitName = startingUnits[0].name;
+        const firstUnitName = startingUnitNames[0];
         const firstUnitMeta = manifestData.entities[firstUnitName];
         let canStandOnFn = (terrain) => terrain && terrain.elevation > -0.3; // fallback
 
@@ -139,16 +138,16 @@ export class GameState {
         });
 
         let coordIdx = 0;
-        startingUnits.forEach(unitConfig => {
-          for (let i = 0; i < unitConfig.quantity; i++) {
+        for (const [unitName, quantity] of Object.entries(startingUnits)) {
+          for (let i = 0; i < quantity; i++) {
             const coord = openCoords[coordIdx % openCoords.length];
             const cell = this.hexGrid.getCell(coord.q, coord.r);
             if (cell) {
-              this.spawnEntity(unitConfig.name, cell, player);
+              this.spawnEntity(unitName, cell, player);
             }
             coordIdx++;
           }
-        });
+        }
       });
     }
 

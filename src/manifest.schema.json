@@ -107,48 +107,46 @@
                 "startingUnits"
             ],
             "properties": {
-                "startingResources": {
-                    "type": "array",
-                    "description": "The types and amounts of resources every player begins with.",
-                    "items": {
-                        "type": "object",
-                        "required": [
-                            "name",
-                            "quantity"
-                        ],
-                        "properties": {
-                            "name": {
-                                "type": "string",
-                                "description": "Must match a resource name defined in 'resources'."
-                            },
-                            "quantity": {
-                                "type": "integer",
-                                "minimum": 0,
-                                "description": "Starting amount."
-                            }
+                "orders": {
+                    "type": "object",
+                    "description": "Per-player command orders available for unit actions each turn.",
+                    "required": [
+                        "max",
+                        "initial",
+                        "perTurn"
+                    ],
+                    "properties": {
+                        "max": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": "Maximum orders a player can hold."
+                        },
+                        "initial": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": "Orders each player starts with."
+                        },
+                        "perTurn": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": "Orders added at the start of each of the player's turns, capped at max."
                         }
                     }
                 },
+                "startingResources": {
+                    "type": "object",
+                    "description": "Map of resource names to starting quantities for every player.",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "minimum": 0
+                    }
+                },
                 "startingUnits": {
-                    "type": "array",
-                    "description": "The collection of units each player starts with. The engine will place these at or near the player's starting coordinate.",
-                    "items": {
-                        "type": "object",
-                        "required": [
-                            "name",
-                            "quantity"
-                        ],
-                        "properties": {
-                            "name": {
-                                "type": "string",
-                                "description": "Must match an entity name defined in 'entities'."
-                            },
-                            "quantity": {
-                                "type": "integer",
-                                "minimum": 1,
-                                "description": "Number of this unit to spawn."
-                            }
-                        }
+                    "type": "object",
+                    "description": "Map of unit entity names to spawn counts for each player.",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "minimum": 1
                     }
                 }
             }

@@ -15,26 +15,22 @@
       "controller": null
     }
   ],
-  "resources": [
+  "naturalResources": [
     {
       "name": "gold",
-      "iconUrl": "./assets/working/gold.png"
-    },
-    {
-      "name": "wood",
-      "iconUrl": "./assets/working/lumber_mill.png"
+      "iconUrl": "./assets/resources/gold.png"
     },
     {
       "name": "iron",
-      "iconUrl": "./assets/working/iron.png"
+      "iconUrl": "./assets/resources/iron.png"
     },
     {
       "name": "food",
-      "iconUrl": "./assets/working/fish.png"
+      "iconUrl": "./assets/resources/fish.png"
     },
     {
       "name": "gems",
-      "iconUrl": "./assets/working/gems.png"
+      "iconUrl": "./assets/resources/gems.png"
     }
   ],
   "entities": [
@@ -325,49 +321,24 @@
     }
   ],
   "initialization": {
-    "startingResources": [
-      {
-        "name": "gold",
-        "quantity": 1000
-      },
-      {
-        "name": "wood",
-        "quantity": 1000
-      },
-      {
-        "name": "iron",
-        "quantity": 1000
-      },
-      {
-        "name": "food",
-        "quantity": 1000
-      },
-      {
-        "name": "gems",
-        "quantity": 10
-      }
-    ],
-    "startingUnits": [
-      {
-        "name": "settler",
-        "quantity": 1
-      },
-      {
-        "name": "worker",
-        "quantity": 2
-      },
-      {
-        "name": "swordsman",
-        "quantity": 1
-      },
-      {
-        "name": "bowman",
-        "quantity": 1
-      },
-      {
-        "name": "horseman",
-        "quantity": 1
-      }
-    ]
+    "orders": {
+      "max": 8,
+      "initial": 8,
+      "perTurn": 6
+    },
+    "startingResources": {
+      "gold": 1000,
+      "wood": 1000,
+      "iron": 1000,
+      "food": 1000,
+      "gems": 10
+    },
+    "startingUnits": {
+      "settler": 1,
+      "worker": 2,
+      "swordsman": 1,
+      "bowman": 1,
+      "horseman": 1
+    }
   }
 }

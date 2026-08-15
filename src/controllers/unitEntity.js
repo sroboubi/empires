@@ -83,14 +83,16 @@ export class UnitEntity extends BaseEntity {
         if (!pathRes) return { possible: false, reason: "No valid path to target cell." };
 
         const cost = pathRes.cost;
-        if (this.actionPoints < cost) {
-          return { possible: false, reason: `Insufficient Action Points (${this.actionPoints}/${cost} AP required).` };
+        const affordability = this.checkActionAffordability(cost);
+        if (!affordability.possible) {
+          return affordability;
         }
 
         return {
           possible: true,
-          reason: `Move to (${cell.q}, ${cell.r}) for ${cost} AP.`,
+          reason: `Move to (${cell.q}, ${cell.r}) for ${cost} AP and 1 order.`,
           cost: cost,
+          ordersRequired: affordability.ordersRequired,
           path: pathRes.path
         };
       },
@@ -104,7 +106,7 @@ export class UnitEntity extends BaseEntity {
           this.facing = dirInfo.fromSource;
         }
 
-        this.actionPoints -= check.cost;
+        this.spendActionCost(check.cost, check.ordersRequired);
         this.cell = cell;
         this.q = cell.q;
         this.r = cell.r;
@@ -156,8 +158,9 @@ export class UnitEntity extends BaseEntity {
             cost = Math.ceil(this.attackCostScale * pathRes.cost);
           }
 
-          if (this.actionPoints < cost) {
-            return { possible: false, reason: `Insufficient Action Points to attack (${this.actionPoints}/${cost} AP required).` };
+          const affordability = this.checkActionAffordability(cost);
+          if (!affordability.possible) {
+            return affordability;
           }
 
           // Directional damage multiplier
@@ -181,8 +184,9 @@ export class UnitEntity extends BaseEntity {
 
           return {
             possible: true,
-            reason: `Attack ${entity.name.toUpperCase()} for ~${rawDamage} dmg (${multiplier}x directional) costing ${cost} AP.`,
+            reason: `Attack ${entity.name.toUpperCase()} for ~${rawDamage} dmg (${multiplier}x directional) costing ${cost} AP and 1 order.`,
             cost: cost,
+            ordersRequired: affordability.ordersRequired,
             multiplier: multiplier,
             rawDamage: rawDamage
           };
@@ -198,7 +202,7 @@ export class UnitEntity extends BaseEntity {
             this.facing = dirToTarget.fromSource;
           }
 
-          this.actionPoints -= check.cost;
+          this.spendActionCost(check.cost, check.ordersRequired);
           entity.receiveDamage({ value: check.rawDamage, type: this.damage.type, source: this });
 
           return true;
@@ -218,15 +222,17 @@ export class UnitEntity extends BaseEntity {
         const cellMovementCost = currentCell && currentCell.terrain ? currentCell.terrain.movementCost : 1;
         const cost = Math.ceil(cellMovementCost / 2);
 
-        if (this.actionPoints < cost) {
-          return { possible: false, reason: `Insufficient Action Points to turn facing (${this.actionPoints}/${cost} AP required).` };
+        const affordability = this.checkActionAffordability(cost);
+        if (!affordability.possible) {
+          return affordability;
         }
 
         const dirToTarget = this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.directionTo(this, cell).fromSource : 'E';
         return {
           possible: true,
-          reason: `Face direction ${dirToTarget} costing ${cost} AP`,
+          reason: `Face direction ${dirToTarget} costing ${cost} AP and 1 order`,
           cost: cost,
+          ordersRequired: affordability.ordersRequired,
           facingDir: dirToTarget
         };
       },
@@ -235,7 +241,7 @@ export class UnitEntity extends BaseEntity {
         const check = actionObj.canDo(cell, entity);
         if (!check.possible) return false;
 
-        this.actionPoints -= check.cost;
+        this.spendActionCost(check.cost, check.ordersRequired);
         this.facing = check.facingDir;
         return true;
       }

@@ -10,8 +10,9 @@ export class Player {
    * @param {Object} [startingResources]
    * @param {string} [description]
    * @param {Object|string|null} [controller]
+   * @param {Object} [ordersConfig] - { max, initial, perTurn }
    */
-  constructor(id, name, color, startingResources = {}, description = '', controller = null) {
+  constructor(id, name, color, startingResources = {}, description = '', controller = null, ordersConfig = null) {
     this.id = id;
     this.name = name;
     this.color = color;
@@ -19,6 +20,10 @@ export class Player {
     this.controller = controller || null;
     this.resources = { ...startingResources };
     this.startCoord = { q: 0, r: 0 };
+
+    this.maxOrders = ordersConfig?.max ?? 0;
+    this.ordersPerTurn = ordersConfig?.perTurn ?? 0;
+    this.orders = ordersConfig?.initial ?? this.maxOrders;
 
     // Fog of war tracking sets (stores coordinate key strings "q,r")
     this.exploredCells = new Set();
@@ -40,6 +45,8 @@ export class Player {
    */
   step(gameState) {
     if (!gameState || !gameState.entities) return;
+
+    this.refillOrders();
 
     const ownedEntities = gameState.entities.filter(e => e.owner && e.owner.id === this.id);
     ownedEntities.forEach(entity => {
@@ -145,6 +152,34 @@ export class Player {
   }
 
   /**
+   * Checks if player has enough orders for an action.
+   * @param {number} [count=1]
+   * @returns {boolean}
+   */
+  hasOrders(count = 1) {
+    return this.orders >= count;
+  }
+
+  /**
+   * Consumes orders if available.
+   * @param {number} [count=1]
+   * @returns {boolean}
+   */
+  consumeOrders(count = 1) {
+    if (!this.hasOrders(count)) return false;
+    this.orders -= count;
+    return true;
+  }
+
+  /**
+   * Adds per-turn orders up to the maximum.
+   */
+  refillOrders() {
+    if (this.maxOrders <= 0) return;
+    this.orders = Math.min(this.maxOrders, this.orders + this.ordersPerTurn);
+  }
+
+  /**
    * Serializes player state.
    */
   toJSON() {
@@ -155,6 +190,9 @@ export class Player {
       description: this.description,
       controller: this.controller,
       resources: this.resources,
+      orders: this.orders,
+      maxOrders: this.maxOrders,
+      ordersPerTurn: this.ordersPerTurn,
       startCoord: this.startCoord,
       exploredCells: Array.from(this.exploredCells),
       visibleCells: Array.from(this.visibleCells)
@@ -165,7 +203,12 @@ export class Player {
    * Re-hydrates a Player instance from serialized JSON object.
    */
   static fromJSON(data) {
-    const player = new Player(data.id, data.name, data.color, data.resources, data.description, data.controller);
+    const ordersConfig = {
+      max: data.maxOrders ?? 0,
+      initial: data.orders ?? 0,
+      perTurn: data.ordersPerTurn ?? 0
+    };
+    const player = new Player(data.id, data.name, data.color, data.resources, data.description, data.controller, ordersConfig);
     if (data.startCoord) {
       player.startCoord = { ...data.startCoord };
     }
