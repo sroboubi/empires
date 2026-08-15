@@ -8,6 +8,9 @@ export let scene, camera, renderer, controls;
 let hexGroup;
 let cellMeshMap = {}; // Maps "q,r" to Mesh object
 let highlightMesh = null; // Mesh to show selection/hover highlight
+let pathHighlightGroup = null; // Group of meshes showing action path preview
+let pathHighlightGeometry = null;
+let pathHighlightMaterial = null;
 let entitySelectionMesh = null; // Selection ring around active entity
 export let hexSize = 1.0;
 
@@ -117,6 +120,16 @@ export function initRenderer(canvas, size) {
   highlightMesh = new THREE.Mesh(highlightGeometry, highlightMaterial);
   highlightMesh.visible = false;
   scene.add(highlightMesh);
+
+  pathHighlightGroup = new THREE.Group();
+  scene.add(pathHighlightGroup);
+  pathHighlightGeometry = new THREE.CylinderGeometry(hexSize * 0.85, hexSize * 0.85, 0.04, 6);
+  pathHighlightMaterial = new THREE.MeshBasicMaterial({
+    color: 0xa78bfa,
+    transparent: true,
+    opacity: 0.4,    
+    side: THREE.DoubleSide
+  });
 
   // Entity Selection Ring Mesh (Animated cyan ring)
   const entityRingGeom = new THREE.RingGeometry(hexSize * 0.8, hexSize * 1, 16);
@@ -320,6 +333,8 @@ export function drawGrid(cells, activePlayer = null) {
       isVisible: isVisible
     };
 
+    cell.mesh = mesh;
+
     hexGroup.add(mesh);
     cellMeshMap[`${cell.q},${cell.r}`] = mesh;
   });
@@ -508,8 +523,32 @@ export function highlightCell(q, r, height = null) {
   }
 
   const { x, z } = HexGrid.axialToPixel(q, r, hexSize);
-  highlightMesh.position.set(x, height !== null ? height + 0.03 : 0.1, z);
+  highlightMesh.position.set(x, height !== null ? height + hexSize/20 : hexSize/10, z);
   highlightMesh.visible = true;
+}
+
+/**
+ * Highlights hex cells along an action path (e.g. move preview).
+ */
+export function highlightPathCells(cells) {
+  clearPathHighlight();
+  if (!cells || cells.length === 0 || !pathHighlightGroup) return;
+
+  for (const cell of cells) {
+    const mesh = new THREE.Mesh(pathHighlightGeometry, pathHighlightMaterial);
+    const { x, z } = HexGrid.axialToPixel(cell.q, cell.r, hexSize);
+    const height = cell.terrain ? cell.terrain.height : 1.0;
+    mesh.position.set(x, height + hexSize/25, z);
+    pathHighlightGroup.add(mesh);
+  }
+}
+
+export function clearPathHighlight() {
+  if (!pathHighlightGroup) return;
+
+  while (pathHighlightGroup.children.length > 0) {
+    pathHighlightGroup.remove(pathHighlightGroup.children[0]);
+  }
 }
 
 /**

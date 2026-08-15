@@ -4,6 +4,8 @@ import {
   initRenderer,
   drawGrid,
   highlightCell,
+  highlightPathCells,
+  clearPathHighlight,
   raycastHex,
   setEntitySelectionHighlight,
   clearEntitySelectionHighlight,
@@ -214,12 +216,26 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
 
   title.textContent = `${entity.name.toUpperCase()} ACTIONS`;
   actionsDiv.innerHTML = '';
+  clearPathHighlight();
+
+  const pathCellKeys = new Set();
+  const pathCellsToHighlight = [];
 
   if (actions && actions.length > 0) {
     actions.forEach(action => {
       const check = action.canDo ? action.canDo(targetCell, targetEntity) : { possible: true, reason: action.description || '' };
       const isPossible = check.possible !== false;
       const previewText = check.reason || action.description || '';
+
+      if (check.path && check.path.length > 0) {
+        for (const cell of check.path) {
+          const key = `${cell.q},${cell.r}`;
+          if (!pathCellKeys.has(key)) {
+            pathCellKeys.add(key);
+            pathCellsToHighlight.push(cell);
+          }
+        }
+      }
 
       const btn = document.createElement('button');
       btn.className = 'context-action-btn';
@@ -267,6 +283,10 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
       });
       actionsDiv.appendChild(btn);
     });
+
+    if (pathCellsToHighlight.length > 0) {
+      highlightPathCells(pathCellsToHighlight);
+    }
   } else {
     actionsDiv.innerHTML = '<div style="font-size: 11px; color: var(--text-muted); padding: 4px;">No actions available for target cell</div>';
   }
@@ -284,6 +304,7 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
 function hideContextMenu() {
   const menu = document.getElementById('entity-context-menu');
   if (menu) menu.style.display = 'none';
+  clearPathHighlight();
 }
 
 /**
