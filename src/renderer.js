@@ -20,6 +20,8 @@ let groundBaseMesh = null;
 // State tracking for time of day (0 to 24)
 let currentHour = 12; // Starts at Noon
 
+const sunDirection = new THREE.Vector3();
+
 // Time-of-Day Keyframes: Defines lighting atmosphere and color temperatures
 const TIME_KEYFRAMES = [
   { hour: 0, color: 0x112244, intensity: 0.05, hemiSky: 0x081122, hemiGround: 0x020205 }, // Midnight
@@ -236,33 +238,35 @@ export function updateGroundBase(radius) {
   scene.add(groundBaseMesh);
 }
 
-/**
- * Directly sets the scene's position, color, and intensity for a given hour (0 to 24).
- * 0/24 = Midnight (Lowest point), 6 = Sunrise, 12 = Noon (Highest point), 18 = Sunset.
- * @param {number} hour - Target hour from 0 to 24
- */
 export function setTimeOfDay(hour) {
   currentHour = hour % 24;
   if (currentHour < 0) currentHour += 24;
 
-  // 1. Calculate sun orbit angle (-PI/2 at Midnight, 0 at Sunrise, PI/2 at Noon, PI at Sunset)
+  // 1. Calculate normalized direction vector towards the sun
   const angle = ((currentHour - 6) / 24) * Math.PI * 2;
+  sunDirection.set(
+    Math.cos(angle),
+    Math.sin(angle),
+    Math.cos(angle) * 0.3 // Seasonal inclination tilt
+  ).normalize();
 
-  const orbitRadius = 100;
-  const x = orbitRadius * Math.cos(angle);
-  const y = orbitRadius * Math.sin(angle);
-  const z = orbitRadius * Math.cos(angle) * 0.3; // Gentle seasonal inclination
-
-  sunMesh.position.set(x, y, z);
-  dirLight.position.copy(sunMesh.position);
-  dirLight.target.position.set(0, 0, 0);
-  dirLight.target.updateMatrixWorld();
-
-  if (sky) {
-    sky.material.uniforms['sunPosition'].value.copy(sunMesh.position);
+  // 2. Position Sun Mesh relative to CAMERA position to eliminate parallax offset
+  if (sunMesh && camera) {
+    sunMesh.position.copy(camera.position).addScaledVector(sunDirection, 400);
   }
 
-  // 2. Find keyframe interval and interpolate colors/intensities
+  // 3. Position Directional Light relative to camera focus target
+  const targetPos = controls ? controls.target : new THREE.Vector3(0, 0, 0);
+  dirLight.position.copy(targetPos).addScaledVector(sunDirection, 80);
+  dirLight.target.position.copy(targetPos);
+  dirLight.target.updateMatrixWorld();
+
+  // 4. Update Sky Shader (expects a direction vector)
+  if (sky) {
+    sky.material.uniforms['sunPosition'].value.copy(sunDirection);
+  }
+
+  // 5. Interpolate keyframe colors & intensities
   let prevFrame = TIME_KEYFRAMES[0];
   let nextFrame = TIME_KEYFRAMES[TIME_KEYFRAMES.length - 1];
 
@@ -277,12 +281,10 @@ export function setTimeOfDay(hour) {
   const range = nextFrame.hour - prevFrame.hour;
   const factor = range > 0 ? (currentHour - prevFrame.hour) / range : 0;
 
-  // Interpolate Directional Sun Light
   const targetColor = new THREE.Color(prevFrame.color).lerp(new THREE.Color(nextFrame.color), factor);
   dirLight.color.copy(targetColor);
   dirLight.intensity = THREE.MathUtils.lerp(prevFrame.intensity, nextFrame.intensity, factor);
 
-  // Interpolate Ambient Hemisphere Light
   if (hemiLight) {
     const skyCol = new THREE.Color(prevFrame.hemiSky).lerp(new THREE.Color(nextFrame.hemiSky), factor);
     const groundCol = new THREE.Color(prevFrame.hemiGround).lerp(new THREE.Color(nextFrame.hemiGround), factor);
@@ -290,7 +292,6 @@ export function setTimeOfDay(hour) {
     hemiLight.groundColor.copy(groundCol);
   }
 
-  // Disable shadow maps at deep night to maximize rendering performance
   dirLight.castShadow = Math.sin(angle) > -0.2;
 }
 
@@ -502,6 +503,18 @@ function animate() {
     }
 
     controls.update();
+
+    // Keep Sun Mesh aligned with camera viewpoint (eliminates parallax)
+    if (sunMesh && camera) {
+      sunMesh.position.copy(camera.position).addScaledVector(sunDirection, 400);
+    }
+
+    // Keep Directional Light centered over current camera target for accurate shadows
+    if (dirLight) {
+      dirLight.position.copy(controls.target).addScaledVector(sunDirection, 80);
+      dirLight.target.position.copy(controls.target);
+      dirLight.target.updateMatrixWorld();
+    }
   }
 
   // Update animated effects
