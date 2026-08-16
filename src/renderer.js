@@ -22,15 +22,15 @@ let currentHour = 12; // Starts at Noon
 
 // Time-of-Day Keyframes: Defines lighting atmosphere and color temperatures
 const TIME_KEYFRAMES = [
-  { hour: 0, color: 0x112244, intensity: 0.05, hemiSky: 0x111133, hemiGround: 0x050510 }, // Midnight (Cool moonlight)
-  { hour: 5, color: 0x332255, intensity: 0.10, hemiSky: 0x221144, hemiGround: 0x100818 }, // Pre-dawn (Deep violet twilight)
-  { hour: 6, color: 0xff7733, intensity: 0.60, hemiSky: 0xffaa77, hemiGround: 0x331100 }, // Sunrise (Warm reddish orange)
-  { hour: 7, color: 0xffcc66, intensity: 1.00, hemiSky: 0xffeedd, hemiGround: 0x222211 }, // Early Morning (Soft golden yellow)
-  { hour: 12, color: 0xfffaed, intensity: 1.50, hemiSky: 0xddeeff, hemiGround: 0x221100 }, // Noon (Bright daylight white)
-  { hour: 17, color: 0xffbb55, intensity: 1.10, hemiSky: 0xffddaa, hemiGround: 0x221100 }, // Late Afternoon (Warm daylight)
-  { hour: 18, color: 0xff4422, intensity: 0.60, hemiSky: 0xff7755, hemiGround: 0x220500 }, // Sunset (Deep crimson orange)
-  { hour: 19, color: 0x442255, intensity: 0.15, hemiSky: 0x331144, hemiGround: 0x100518 }, // Dusk (Twilight purple)
-  { hour: 24, color: 0x112244, intensity: 0.05, hemiSky: 0x111133, hemiGround: 0x050510 }  // Midnight (Wrap)
+  { hour: 0, color: 0x112244, intensity: 0.05, hemiSky: 0x081122, hemiGround: 0x020205 }, // Midnight
+  { hour: 5, color: 0x332255, intensity: 0.10, hemiSky: 0x1a0f2e, hemiGround: 0x050208 }, // Pre-dawn
+  { hour: 6, color: 0xff7733, intensity: 0.60, hemiSky: 0xffaa77, hemiGround: 0x110802 }, // Sunrise
+  { hour: 7, color: 0xffcc66, intensity: 1.00, hemiSky: 0xffeedd, hemiGround: 0x111108 }, // Early Morning
+  { hour: 12, color: 0xfffaed, intensity: 1.50, hemiSky: 0xddeeff, hemiGround: 0x110c05 }, // Noon
+  { hour: 17, color: 0xffbb55, intensity: 1.10, hemiSky: 0xffddaa, hemiGround: 0x110a05 }, // Late Afternoon
+  { hour: 18, color: 0xff4422, intensity: 0.60, hemiSky: 0xff7755, hemiGround: 0x110300 }, // Sunset
+  { hour: 19, color: 0x442255, intensity: 0.15, hemiSky: 0x1a092b, hemiGround: 0x050208 }, // Dusk
+  { hour: 24, color: 0x112244, intensity: 0.05, hemiSky: 0x081122, hemiGround: 0x020205 }  // Midnight (Wrap)
 ];
 
 // Active Effect Animations
