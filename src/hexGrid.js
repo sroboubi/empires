@@ -1,4 +1,5 @@
 import { TerrainProvider } from './terrainProvider.js';
+import { CONFIG } from './config.js';
 
 /**
  * The six axial direction vectors for a pointy-topped hex grid.
@@ -131,7 +132,7 @@ export class HexGrid {
    * @param {number} size - Outer radius of the hexagon
    * @returns {{x: number, z: number}}
    */
-  static axialToPixel(q, r, size) {
+  static axialToPixel(q, r, size = CONFIG.HEX_SIZE) {
     const x = size * (Math.sqrt(3) * q + (Math.sqrt(3) / 2) * r);
     const z = size * (1.5 * r);
     return { x, z };
@@ -144,7 +145,7 @@ export class HexGrid {
    * @param {number} size - Outer radius of the hexagon
    * @returns {{q: number, r: number}}
    */
-  static pixelToAxial(x, z, size) {
+  static pixelToAxial(x, z, size = CONFIG.HEX_SIZE) {
     const q = ((Math.sqrt(3) / 3) * x - (1 / 3) * z) / size;
     const r = ((2 / 3) * z) / size;
     return HexGrid.hexRound(q, r);
@@ -278,8 +279,8 @@ export class HexGrid {
     }
 
     // For non-adjacent cells, compute angle via pixel positions and find closest direction
-    const sourcePixel = HexGrid.axialToPixel(source.q, source.r, 1);
-    const targetPixel = HexGrid.axialToPixel(target.q, target.r, 1);
+    const sourcePixel = HexGrid.axialToPixel(source.q, source.r);
+    const targetPixel = HexGrid.axialToPixel(target.q, target.r);
 
     const dx = targetPixel.x - sourcePixel.x;
     const dz = targetPixel.z - sourcePixel.z;
@@ -293,7 +294,7 @@ export class HexGrid {
     let bestDiff = Infinity;
 
     for (const [name, dir] of Object.entries(DIRECTIONS)) {
-      const dirPixel = HexGrid.axialToPixel(dir.q, dir.r, 1);
+      const dirPixel = HexGrid.axialToPixel(dir.q, dir.r);
       const dirAngle = Math.atan2(-dirPixel.z, dirPixel.x);
 
       let diff = Math.abs(angle - dirAngle);

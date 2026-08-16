@@ -11,7 +11,7 @@ const terrain = {
             roughness: 0.1,
             metalness: 0.8,
             transparent: true,
-            opacity: 0.5,
+            opacity: 0.8,
             flatShading: true
         },
         conditions: {
@@ -27,7 +27,7 @@ const terrain = {
             roughness: 0.1,
             metalness: 0.6,
             transparent: true,
-            opacity: 0.8,
+            opacity: 0.9,
             flatShading: true
         },
         conditions: {

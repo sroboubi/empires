@@ -1,3 +1,7 @@
+import { animateToTimeOfDay } from "./renderer.js";
+
+const turnHours = { start: 7, end: 17 }
+
 /**
  * Player class representing a participant in the game.
  * Tracks resources, control type (human vs AI), explored and visible hex cells.
@@ -51,12 +55,12 @@ export class Player {
     if (!gameState || !gameState.entities) return;
 
     this.refillOrders();
-    this.score = {military: 0, economic: 0};
+    this.score = { military: 0, economic: 0 };
     const ownedEntities = gameState.entities.filter(e => e.owner && e.owner.id === this.id);
     for (const entity of ownedEntities) {
       this.score.military += entity.state.score.military;
       this.score.economic += entity.state.score.economic;
-      try {        
+      try {
         entity.step({ gameState });
       } catch (err) {
         console.error(`Error stepping entity ${entity.name} during turn step:`, err);
@@ -174,6 +178,7 @@ export class Player {
   consumeOrders(count = 1) {
     if (!this.hasOrders(count)) return false;
     this.orders -= count;
+    this.setTimeOfDay(1);
     return true;
   }
 
@@ -183,6 +188,17 @@ export class Player {
   refillOrders() {
     if (this.maxOrders <= 0) return;
     this.orders = Math.min(this.maxOrders, this.orders + this.ordersPerTurn);
+    this.setTimeOfDay(2);
+  }
+
+  /**
+   * Changes the time of day based on the number of orders remaining.
+   * @param {number} [duration=1] - Duration of the animation in seconds
+   */
+  setTimeOfDay(duration = 1) {
+    const orderFraction = this.orders / this.maxOrders;
+    const timeOfDay = turnHours.end - (turnHours.end - turnHours.start) * orderFraction;
+    animateToTimeOfDay(timeOfDay, duration);
   }
 
   /**

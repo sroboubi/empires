@@ -2,9 +2,12 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { Sky } from 'three/addons/objects/Sky.js';
 import { HexGrid } from './hexGrid.js';
+import { CONFIG } from './config.js';
 
 export let scene, camera, renderer, controls;
+export let dirLight, hemiLight, sky, sunMesh;
 let hexGroup;
 let cellMeshMap = {}; // Maps "q,r" to Mesh object
 let highlightMesh = null; // Mesh to show selection/hover highlight
@@ -12,7 +15,26 @@ let pathHighlightGroup = null; // Group of meshes showing action path preview
 let pathHighlightGeometry = null;
 let pathHighlightMaterial = null;
 let entitySelectionMesh = null; // Selection ring around active entity
-export let hexSize = 1.0;
+let groundBaseMesh = null;
+
+// State tracking for time of day (0 to 24)
+let currentHour = 12; // Starts at Noon
+
+// Time-of-Day Keyframes: Defines lighting atmosphere and color temperatures
+const TIME_KEYFRAMES = [
+  { hour: 0, color: 0x112244, intensity: 0.05, hemiSky: 0x111133, hemiGround: 0x050510 }, // Midnight (Cool moonlight)
+  { hour: 5, color: 0x332255, intensity: 0.10, hemiSky: 0x221144, hemiGround: 0x100818 }, // Pre-dawn (Deep violet twilight)
+  { hour: 6, color: 0xff7733, intensity: 0.60, hemiSky: 0xffaa77, hemiGround: 0x331100 }, // Sunrise (Warm reddish orange)
+  { hour: 7, color: 0xffcc66, intensity: 1.00, hemiSky: 0xffeedd, hemiGround: 0x222211 }, // Early Morning (Soft golden yellow)
+  { hour: 12, color: 0xfffaed, intensity: 1.50, hemiSky: 0xddeeff, hemiGround: 0x221100 }, // Noon (Bright daylight white)
+  { hour: 17, color: 0xffbb55, intensity: 1.10, hemiSky: 0xffddaa, hemiGround: 0x221100 }, // Late Afternoon (Warm daylight)
+  { hour: 18, color: 0xff4422, intensity: 0.60, hemiSky: 0xff7755, hemiGround: 0x220500 }, // Sunset (Deep crimson orange)
+  { hour: 19, color: 0x442255, intensity: 0.15, hemiSky: 0x331144, hemiGround: 0x100518 }, // Dusk (Twilight purple)
+  { hour: 24, color: 0x112244, intensity: 0.05, hemiSky: 0x111133, hemiGround: 0x050510 }  // Midnight (Wrap)
+];
+
+// Active Effect Animations
+const activeEffects = [];
 
 // GLTF model caching and entity mesh map
 const modelCache = {};
@@ -24,9 +46,17 @@ const materialCache = {};
 const desaturatedMaterialCache = {};
 
 const hiddenTerrain = {
-  material: new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.5, metalness: 0.1, transparent: true, opacity: 0.5, flatShading: true }),
+  material: new THREE.MeshStandardMaterial({ color: 0x212121, roughness: 0.4, metalness: 0.5, transparent: true, opacity: 0.7, flatShading: true }),
   height: 3
 };
+
+const cellSizeScale = {
+  normal: 1,
+  highlight: 0.98,
+  path: 0.85,
+  selectionRing: { inner: 0.8, outer: 1 },
+  ownerRing: { inner: 0.6, outer: 0.8 }
+}
 
 // Animation & Update hooks
 let updateCallback = null;
@@ -37,16 +67,12 @@ export function setUpdateCallback(cb) {
 }
 
 /**
- * Initializes the 3D scene, camera, lights, orbit controls, and loaders.
+ * Initializes the 3D scene, camera, lights, skybox, orbit controls, and loaders.
  * @param {HTMLCanvasElement} canvas - Canvas element to render into
- * @param {number} size - Outer radius size of the hexagons
  */
-export function initRenderer(canvas, size) {
-  hexSize = size;
-
+export function initRenderer(canvas) {
   // 1. Setup Scene
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x111216); // Dark space background
 
   // 2. Setup Camera
   camera = new THREE.PerspectiveCamera(
@@ -82,35 +108,53 @@ export function initRenderer(canvas, size) {
     RIGHT: THREE.MOUSE.ROTATE
   };
 
-  // 5. Setup Lights
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
-  scene.add(ambientLight);
+  // 5. Setup Lighting (Single HemisphereLight + Directional Sun)
+  hemiLight = new THREE.HemisphereLight(0xddeeff, 0x221100, 0.4);
+  hemiLight.position.set(0, 50, 0);
+  scene.add(hemiLight);
 
-  const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
-  dirLight.position.set(10, 20, 10);
+  dirLight = new THREE.DirectionalLight(0xfffaed, 1.2);
   dirLight.castShadow = true;
   dirLight.shadow.mapSize.width = 2048;
   dirLight.shadow.mapSize.height = 2048;
-  dirLight.shadow.bias = -0.001;
-  const d = 15;
+  dirLight.shadow.bias = -0.0001;
+  dirLight.shadow.normalBias = 0.02;
+
+  const d = 35;
   dirLight.shadow.camera.left = -d;
   dirLight.shadow.camera.right = d;
   dirLight.shadow.camera.top = d;
   dirLight.shadow.camera.bottom = -d;
-  dirLight.shadow.camera.near = 0.1;
-  dirLight.shadow.camera.far = 40;
+  dirLight.shadow.camera.near = 0.5;
+  dirLight.shadow.camera.far = 150;
   scene.add(dirLight);
+  scene.add(dirLight.target);
 
-  const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.4);
-  hemiLight.position.set(0, 200, 0);
-  scene.add(hemiLight);
+  // 6. Setup Procedural Sky & Sun Mesh
+  sky = new Sky();
+  sky.scale.setScalar(450000);
+  scene.add(sky);
 
-  // Group to hold hex tiles
+  const skyUniforms = sky.material.uniforms;
+  skyUniforms['turbidity'].value = 8;
+  skyUniforms['rayleigh'].value = 1.2;
+  skyUniforms['mieCoefficient'].value = 0.005;
+  skyUniforms['mieDirectionalG'].value = 0.8;
+
+  const sunGeo = new THREE.SphereGeometry(2.5, 32, 32);
+  const sunMat = new THREE.MeshBasicMaterial({ color: 0xfff5cc });
+  sunMesh = new THREE.Mesh(sunGeo, sunMat);
+  scene.add(sunMesh);
+
+  // Set initial time of day
+  setTimeOfDay(currentHour);
+
+  // 7. Groups & Overlays
   hexGroup = new THREE.Group();
   scene.add(hexGroup);
 
-  // Selection Hover Highlight Mesh
-  const highlightGeometry = new THREE.CylinderGeometry(hexSize * 0.98, hexSize * 0.98, 0.05, 6);
+  // Hover Highlight Mesh
+  const highlightGeometry = new THREE.CylinderGeometry(CONFIG.HEX_SIZE * cellSizeScale.highlight, CONFIG.HEX_SIZE * cellSizeScale.highlight, 0.05, 6);
   const highlightMaterial = new THREE.MeshBasicMaterial({
     color: 0xffff00,
     transparent: true,
@@ -123,16 +167,16 @@ export function initRenderer(canvas, size) {
 
   pathHighlightGroup = new THREE.Group();
   scene.add(pathHighlightGroup);
-  pathHighlightGeometry = new THREE.CylinderGeometry(hexSize * 0.85, hexSize * 0.85, 0.04, 6);
+  pathHighlightGeometry = new THREE.CylinderGeometry(CONFIG.HEX_SIZE * cellSizeScale.path, CONFIG.HEX_SIZE * cellSizeScale.path, 0.04, 6);
   pathHighlightMaterial = new THREE.MeshBasicMaterial({
     color: 0xa78bfa,
     transparent: true,
-    opacity: 0.4,    
+    opacity: 0.4,
     side: THREE.DoubleSide
   });
 
-  // Entity Selection Ring Mesh (Animated cyan ring)
-  const entityRingGeom = new THREE.RingGeometry(hexSize * 0.8, hexSize * 1, 16);
+  // Entity Selection Ring Mesh
+  const entityRingGeom = new THREE.RingGeometry(CONFIG.HEX_SIZE * cellSizeScale.selectionRing.inner, CONFIG.HEX_SIZE * cellSizeScale.selectionRing.outer, 16);
   entityRingGeom.rotateX(-Math.PI / 2);
   const entityRingMat = new THREE.MeshBasicMaterial({
     color: 0x00ffff,
@@ -144,7 +188,7 @@ export function initRenderer(canvas, size) {
   entitySelectionMesh.visible = false;
   scene.add(entitySelectionMesh);
 
-  // 6. Setup DRACO & GLTF Loaders
+  // 8. Setup Loaders
   const dracoLoader = new DRACOLoader();
   dracoLoader.setDecoderPath('https://unpkg.com/three@0.160.0/examples/jsm/libs/draco/gltf/');
 
@@ -160,6 +204,244 @@ export function initRenderer(canvas, size) {
   clock.start();
   animate();
 }
+
+/**
+ * Creates or updates a dark ground base beneath the hex grid to block skybox bleed
+ * through semi-transparent tiles (like oceans).
+ * @param {number} radius - Outer spatial radius of the hex map
+ */
+export function updateGroundBase(radius) {
+  if (groundBaseMesh) {
+    scene.remove(groundBaseMesh);
+    groundBaseMesh.geometry.dispose();
+    groundBaseMesh.material.dispose();
+  }
+
+  // Create a flat circular plate
+  const geometry = new THREE.CylinderGeometry(radius, radius, 1, 6);
+  geometry.rotateY(Math.PI / 6);
+
+  // Dark slate/seabed material
+  const material = new THREE.MeshStandardMaterial({
+    color: 0x050811, // Deep ocean floor / dark slate
+    roughness: 0.9,
+    metalness: 0.1
+  });
+
+  groundBaseMesh = new THREE.Mesh(geometry, material);
+  // Position slightly below Y=0 so hex tops/sides sit cleanly on top
+  groundBaseMesh.position.set(0, -0.5, 0);
+  groundBaseMesh.receiveShadow = true;
+
+  scene.add(groundBaseMesh);
+}
+
+/**
+ * Directly sets the scene's position, color, and intensity for a given hour (0 to 24).
+ * 0/24 = Midnight (Lowest point), 6 = Sunrise, 12 = Noon (Highest point), 18 = Sunset.
+ * @param {number} hour - Target hour from 0 to 24
+ */
+export function setTimeOfDay(hour) {
+  currentHour = hour % 24;
+  if (currentHour < 0) currentHour += 24;
+
+  // 1. Calculate sun orbit angle (-PI/2 at Midnight, 0 at Sunrise, PI/2 at Noon, PI at Sunset)
+  const angle = ((currentHour - 6) / 24) * Math.PI * 2;
+
+  const orbitRadius = 100;
+  const x = orbitRadius * Math.cos(angle);
+  const y = orbitRadius * Math.sin(angle);
+  const z = orbitRadius * Math.cos(angle) * 0.3; // Gentle seasonal inclination
+
+  sunMesh.position.set(x, y, z);
+  dirLight.position.copy(sunMesh.position);
+  dirLight.target.position.set(0, 0, 0);
+  dirLight.target.updateMatrixWorld();
+
+  if (sky) {
+    sky.material.uniforms['sunPosition'].value.copy(sunMesh.position);
+  }
+
+  // 2. Find keyframe interval and interpolate colors/intensities
+  let prevFrame = TIME_KEYFRAMES[0];
+  let nextFrame = TIME_KEYFRAMES[TIME_KEYFRAMES.length - 1];
+
+  for (let i = 0; i < TIME_KEYFRAMES.length - 1; i++) {
+    if (currentHour >= TIME_KEYFRAMES[i].hour && currentHour <= TIME_KEYFRAMES[i + 1].hour) {
+      prevFrame = TIME_KEYFRAMES[i];
+      nextFrame = TIME_KEYFRAMES[i + 1];
+      break;
+    }
+  }
+
+  const range = nextFrame.hour - prevFrame.hour;
+  const factor = range > 0 ? (currentHour - prevFrame.hour) / range : 0;
+
+  // Interpolate Directional Sun Light
+  const targetColor = new THREE.Color(prevFrame.color).lerp(new THREE.Color(nextFrame.color), factor);
+  dirLight.color.copy(targetColor);
+  dirLight.intensity = THREE.MathUtils.lerp(prevFrame.intensity, nextFrame.intensity, factor);
+
+  // Interpolate Ambient Hemisphere Light
+  if (hemiLight) {
+    const skyCol = new THREE.Color(prevFrame.hemiSky).lerp(new THREE.Color(nextFrame.hemiSky), factor);
+    const groundCol = new THREE.Color(prevFrame.hemiGround).lerp(new THREE.Color(nextFrame.hemiGround), factor);
+    hemiLight.color.copy(skyCol);
+    hemiLight.groundColor.copy(groundCol);
+  }
+
+  // Disable shadow maps at deep night to maximize rendering performance
+  dirLight.castShadow = Math.sin(angle) > -0.2;
+}
+
+/**
+ * Smoothly animates the time of day from the current hour to a target hour.
+ * @param {number} targetHour - Destination time of day (0 to 24)
+ * @param {number} duration - Animation speed in seconds (default 1.5s)
+ * @param {Function} onComplete - Optional callback when animation finishes
+ */
+export function animateToTimeOfDay(targetHour, duration = 1.5, onComplete = null) {
+  const startHour = currentHour;
+  let endHour = targetHour;
+
+  // Handle forward progression across midnight (e.g. moving from 18 to 6 next morning)
+  if (endHour <= startHour) {
+    endHour += 24;
+  }
+
+  let elapsed = 0;
+
+  activeEffects.push({
+    update: (dt) => {
+      elapsed += dt;
+      const progress = Math.min(elapsed / duration, 1.0);
+      const easeProgress = progress * progress * (3 - 2 * progress); // Smoothstep easing
+
+      const animatedHour = THREE.MathUtils.lerp(startHour, endHour, easeProgress);
+      setTimeOfDay(animatedHour);
+
+      if (progress >= 1.0) {
+        currentHour = targetHour % 24;
+        if (onComplete) onComplete();
+        return false;
+      }
+      return true;
+    }
+  });
+}
+
+/**
+ * Visual Effects Manager Loop.
+ */
+function updateEffects(deltaTime) {
+  for (let i = activeEffects.length - 1; i >= 0; i--) {
+    const alive = activeEffects[i].update(deltaTime);
+    if (!alive) {
+      if (activeEffects[i].object) {
+        scene.remove(activeEffects[i].object);
+      }
+      activeEffects.splice(i, 1);
+    }
+  }
+}
+
+// --- Visual Effect Triggers ---
+
+export function playSpawnAnimation(entityMeshGroup) {
+  let progress = 0;
+  const duration = 0.5;
+  entityMeshGroup.scale.set(0, 0, 0);
+
+  activeEffects.push({
+    object: null,
+    update: (dt) => {
+      progress += dt / duration;
+      if (progress >= 1) {
+        entityMeshGroup.scale.set(1, 1, 1);
+        return false;
+      }
+      const scale = Math.sin(progress * Math.PI * 0.5) * (1 + 0.2 * Math.sin(progress * Math.PI));
+      entityMeshGroup.scale.set(scale, scale, scale);
+      return true;
+    }
+  });
+}
+
+export function spawnDamageText(x, y, z, amount) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = '#ff2222';
+  ctx.font = 'Bold 42px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText(`-${amount}`, 64, 48);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  const spriteMat = new THREE.SpriteMaterial({ map: texture, transparent: true });
+  const sprite = new THREE.Sprite(spriteMat);
+  sprite.position.set(x, y + 1.2, z);
+  sprite.scale.set(1.5, 0.75, 1);
+  scene.add(sprite);
+
+  let elapsed = 0;
+  const duration = 1.0;
+
+  activeEffects.push({
+    object: sprite,
+    update: (dt) => {
+      elapsed += dt;
+      sprite.position.y += dt * 1.2;
+      spriteMat.opacity = 1.0 - (elapsed / duration);
+      return elapsed < duration;
+    }
+  });
+}
+
+export function spawnParticleBurst(x, y, z, colorHex = 0xffaa00) {
+  const count = 20;
+  const geometry = new THREE.BufferGeometry();
+  const positions = new Float32Array(count * 3);
+  const velocities = [];
+
+  for (let i = 0; i < count; i++) {
+    positions[i * 3] = x;
+    positions[i * 3 + 1] = y + 0.5;
+    positions[i * 3 + 2] = z;
+
+    velocities.push(new THREE.Vector3(
+      (Math.random() - 0.5) * 3,
+      Math.random() * 4 + 1,
+      (Math.random() - 0.5) * 3
+    ));
+  }
+
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const material = new THREE.PointsMaterial({ color: colorHex, size: 0.15, transparent: true });
+  const pSystem = new THREE.Points(geometry, material);
+  scene.add(pSystem);
+
+  let elapsed = 0;
+  activeEffects.push({
+    object: pSystem,
+    update: (dt) => {
+      elapsed += dt;
+      const posArr = pSystem.geometry.attributes.position.array;
+      for (let i = 0; i < count; i++) {
+        posArr[i * 3] += velocities[i].x * dt;
+        posArr[i * 3 + 1] += velocities[i].y * dt;
+        posArr[i * 3 + 2] += velocities[i].z * dt;
+        velocities[i].y -= 9.8 * dt;
+      }
+      pSystem.geometry.attributes.position.needsUpdate = true;
+      material.opacity = 1.0 - (elapsed / 0.8);
+      return elapsed < 0.8;
+    }
+  });
+}
+
+// --- Engine Controls & Input Loops ---
 
 const keysPressed = {};
 
@@ -180,15 +462,11 @@ function onWindowResize() {
   renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
-/**
- * Main animation loop.
- */
 function animate() {
   requestAnimationFrame(animate);
 
   const deltaTime = clock.getDelta();
 
-  // WASD Pan & Q/E Rotate
   if (controls) {
     const speed = 15 * deltaTime;
     const rotSpeed = 2.0 * deltaTime;
@@ -202,22 +480,22 @@ function animate() {
     right.crossVectors(forward, camera.up).normalize();
 
     const moveVector = new THREE.Vector3();
-    if (keysPressed['KeyW'] || keysPressed['w'] || keysPressed['W']) moveVector.addScaledVector(forward, speed);
-    if (keysPressed['KeyS'] || keysPressed['s'] || keysPressed['S']) moveVector.addScaledVector(forward, -speed);
-    if (keysPressed['KeyD'] || keysPressed['d'] || keysPressed['D']) moveVector.addScaledVector(right, speed);
-    if (keysPressed['KeyA'] || keysPressed['a'] || keysPressed['A']) moveVector.addScaledVector(right, -speed);
+    if (keysPressed['KeyW'] || keysPressed['w']) moveVector.addScaledVector(forward, speed);
+    if (keysPressed['KeyS'] || keysPressed['s']) moveVector.addScaledVector(forward, -speed);
+    if (keysPressed['KeyD'] || keysPressed['d']) moveVector.addScaledVector(right, speed);
+    if (keysPressed['KeyA'] || keysPressed['a']) moveVector.addScaledVector(right, -speed);
 
     if (moveVector.lengthSq() > 0) {
       camera.position.add(moveVector);
       controls.target.add(moveVector);
     }
 
-    if (keysPressed['KeyQ'] || keysPressed['q'] || keysPressed['Q']) {
+    if (keysPressed['KeyQ'] || keysPressed['q']) {
       const offset = camera.position.clone().sub(controls.target);
       offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotSpeed);
       camera.position.copy(controls.target).add(offset);
     }
-    if (keysPressed['KeyE'] || keysPressed['e'] || keysPressed['E']) {
+    if (keysPressed['KeyE'] || keysPressed['e']) {
       const offset = camera.position.clone().sub(controls.target);
       offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), -rotSpeed);
       camera.position.copy(controls.target).add(offset);
@@ -226,7 +504,9 @@ function animate() {
     controls.update();
   }
 
-  // Animate selection ring
+  // Update animated effects
+  updateEffects(deltaTime);
+
   if (entitySelectionMesh && entitySelectionMesh.visible) {
     entitySelectionMesh.material.opacity = 0.6 + 0.35 * Math.sin(clock.getElapsedTime() * 5);
   }
@@ -240,25 +520,17 @@ function animate() {
   }
 }
 
-/**
- * Helper to get or create material for normal terrain.
- */
+// --- Grid & Model Utilities ---
+
 function getTerrainMaterial(terrain) {
-  if (materialCache[terrain.name]) {
-    return materialCache[terrain.name];
-  }
+  if (materialCache[terrain.name]) return materialCache[terrain.name];
   const material = new THREE.MeshStandardMaterial(terrain.material);
   materialCache[terrain.name] = material;
   return material;
 }
 
-/**
- * Helper to get or create a desaturated material for explored, non-visible terrain.
- */
 function getDesaturatedTerrainMaterial(terrain) {
-  if (desaturatedMaterialCache[terrain.name]) {
-    return desaturatedMaterialCache[terrain.name];
-  }
+  if (desaturatedMaterialCache[terrain.name]) return desaturatedMaterialCache[terrain.name];
 
   const baseMatProps = { ...terrain.material };
   const baseColor = new THREE.Color(baseMatProps.color || 0x888888);
@@ -267,28 +539,19 @@ function getDesaturatedTerrainMaterial(terrain) {
   baseColor.getHSL(hsl);
   baseColor.setHSL(hsl.h, hsl.s * 0.15, hsl.l * 0.45);
 
-  const material = new THREE.MeshStandardMaterial({
-    ...baseMatProps,
-    color: baseColor
-  });
-
+  const material = new THREE.MeshStandardMaterial({ ...baseMatProps, color: baseColor });
   desaturatedMaterialCache[terrain.name] = material;
   return material;
 }
 
-/**
- * Draws the 3D hexagonal grid from cell data, accounting for active player's Fog of War visibility.
- * @param {Object} cells - Map of cells keyed by "q,r"
- * @param {Player|null} activePlayer - Currently active viewing player
- */
 export function drawGrid(cells, activePlayer = null) {
   while (hexGroup.children.length > 0) {
-    const child = hexGroup.children[0];
-    hexGroup.remove(child);
+    hexGroup.remove(hexGroup.children[0]);
   }
   cellMeshMap = {};
-
   const geometryCache = {};
+
+  let maxDistanceSq = 0;
 
   Object.values(cells).forEach(cell => {
     const isExplored = activePlayer ? activePlayer.isExplored(cell.q, cell.r) : true;
@@ -298,65 +561,55 @@ export function drawGrid(cells, activePlayer = null) {
     let material;
 
     if (!isExplored) {
-      // Fully hidden unexplored tile
       height = hiddenTerrain.height;
       material = hiddenTerrain.material;
     } else if (!isVisible) {
-      // Explored but non-visible tile (fog of war desaturated)
       height = cell.terrain.height;
       material = getDesaturatedTerrainMaterial(cell.terrain);
     } else {
-      // Explored and currently visible tile
       height = cell.terrain.height;
       material = getTerrainMaterial(cell.terrain);
     }
 
     let geometry = geometryCache[height];
     if (!geometry) {
-      geometry = new THREE.CylinderGeometry(hexSize * 0.96, hexSize * 0.96, height, 6);
+      geometry = new THREE.CylinderGeometry(CONFIG.HEX_SIZE * cellSizeScale.normal, CONFIG.HEX_SIZE * cellSizeScale.normal, height, 6);
       geometryCache[height] = geometry;
     }
 
     const mesh = new THREE.Mesh(geometry, material);
-
-    const { x, z } = HexGrid.axialToPixel(cell.q, cell.r, hexSize);
+    const { x, z } = HexGrid.axialToPixel(cell.q, cell.r);
     mesh.position.set(x, height / 2, z);
 
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
+    const distSq = x * x + z * z;
+    if (distSq > maxDistanceSq) maxDistanceSq = distSq;
 
-    mesh.userData = {
-      q: cell.q,
-      r: cell.r,
-      terrain: cell.terrain,
-      isExplored: isExplored,
-      isVisible: isVisible
-    };
+    if (isExplored) {
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+    }
 
+    mesh.userData = { q: cell.q, r: cell.r, terrain: cell.terrain, isExplored, isVisible };
     cell.mesh = mesh;
 
     hexGroup.add(mesh);
     cellMeshMap[`${cell.q},${cell.r}`] = mesh;
   });
+
+  // Automatically update dark ground bed based on map extent
+  const maxMapRadius = Math.sqrt(maxDistanceSq) + CONFIG.HEX_SIZE;
+  updateGroundBase(maxMapRadius);
 }
 
-/**
- * Preloads all GLTF models defined in entity metadata in parallel.
- * @param {Object} entityMetadata - Preloaded entity metadata map
- */
 export async function preloadModels(entityMetadata) {
   console.log("Preloading GLTF models...");
   const promises = Object.values(entityMetadata).map(entity => {
     return new Promise((resolve) => {
-      if (!entity.modelUrl) {
-        resolve();
-        return;
-      }
+      if (!entity.modelUrl) { resolve(); return; }
 
       gltfLoader.load(
         entity.modelUrl,
         (gltf) => {
-          console.log(`Preloaded 3D model for: ${entity.name}`);
           modelCache[entity.modelUrl] = gltf.scene;
           resolve();
         },
@@ -382,22 +635,13 @@ const FACING_ROTATIONS = {
   SE: -Math.PI / 3
 };
 
-/**
- * Reconciles 3D meshes for entities in GameState.
- * Only renders entities that are visible to the active player.
- * Applies entity.rotationOffset to GLB mesh rotation.
- * @param {GameState} gameState
- */
 export function reconcileEntities(gameState) {
   const activeIds = new Set();
   const activePlayer = gameState.activePlayer;
 
   gameState.entities.forEach(entity => {
-    // Fog of war check: is entity visible to active player?
     const isVisibleToActivePlayer = activePlayer ? activePlayer.isVisible(entity.q, entity.r) : true;
     const isOwnedByActivePlayer = activePlayer && entity.owner && entity.owner.id === activePlayer.id;
-
-    // Show owned entities on explored cells, and other entities ONLY on visible cells
     const isEntityVisibleInScene = isOwnedByActivePlayer ? (activePlayer ? activePlayer.isExplored(entity.q, entity.r) : true) : isVisibleToActivePlayer;
 
     if (isEntityVisibleInScene) {
@@ -405,17 +649,15 @@ export function reconcileEntities(gameState) {
 
       const cell = entity.cell || gameState.cells[`${entity.q},${entity.r}`];
       const terrainHeight = cell && cell.terrain ? cell.terrain.height : 1.0;
-      const { x, z } = HexGrid.axialToPixel(entity.q, entity.r, hexSize);
+      const { x, z } = HexGrid.axialToPixel(entity.q, entity.r);
 
       const facingRot = FACING_ROTATIONS[entity.facing] || 0;
       const rotOffset = THREE.MathUtils.degToRad(entity.rotationOffset) || 0;
       const totalRotationY = facingRot + rotOffset;
 
       if (!entityMeshMap[entity.id]) {
-        // Spawn new 3D mesh
         spawnEntityMesh(entity, gameState, x, terrainHeight, z, totalRotationY);
       } else {
-        // Update position and rotation of existing mesh
         const meshGroup = entityMeshMap[entity.id];
         meshGroup.position.set(x, terrainHeight, z);
         meshGroup.rotation.y = totalRotationY;
@@ -423,53 +665,40 @@ export function reconcileEntities(gameState) {
     }
   });
 
-  // Remove meshes of entities that no longer exist or are hidden by Fog of War
   for (const id in entityMeshMap) {
     if (!activeIds.has(id)) {
       const meshGroup = entityMeshMap[id];
-      if (meshGroup) {
-        scene.remove(meshGroup);
-      }
+      if (meshGroup) scene.remove(meshGroup);
       delete entityMeshMap[id];
     }
   }
 }
 
-/**
- * Helper to spawn 3D visual group for an entity.
- */
 function spawnEntityMesh(entity, gameState, x, terrainHeight, z, rotationY) {
   const meta = gameState.manifestData ? gameState.manifestData.entities[entity.name] : null;
-
   const group = new THREE.Group();
   group.rotation.y = rotationY;
 
-  // 1. Draw Player-Colored Base Ring
   if (entity.owner) {
     const colorHex = entity.owner.color || '#ffffff';
-    const ringGeom = new THREE.RingGeometry(hexSize * 0.6, hexSize * 0.8, 16);
+    const ringGeom = new THREE.RingGeometry(CONFIG.HEX_SIZE * cellSizeScale.ownerRing.inner, CONFIG.HEX_SIZE * cellSizeScale.ownerRing.outer, 16);
     ringGeom.rotateX(-Math.PI / 2);
-    const ringMat = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(colorHex),
-      side: THREE.DoubleSide
-    });
+    const ringMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(colorHex), side: THREE.DoubleSide });
     const ringMesh = new THREE.Mesh(ringGeom, ringMat);
     ringMesh.position.y = 0.01;
     group.add(ringMesh);
   }
 
-  // 2. Add GLTF model geometry or fallback box
   const modelUrl = meta ? meta.modelUrl : null;
   const originalScene = modelUrl ? modelCache[modelUrl] : null;
 
   if (originalScene) {
     const modelClone = originalScene.clone();
-
     const box = new THREE.Box3().setFromObject(modelClone);
     const size = box.getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
     const targetSize = (meta && meta.size) ? meta.size : 1;
-    const scale = hexSize * targetSize / (maxDim || 1);
+    const scale = CONFIG.HEX_SIZE * targetSize / (maxDim || 1);
     modelClone.scale.set(scale, scale, scale);
 
     const localBox = new THREE.Box3().setFromObject(modelClone);
@@ -484,7 +713,6 @@ function spawnEntityMesh(entity, gameState, x, terrainHeight, z, rotationY) {
 
     group.add(modelClone);
   } else {
-    // Fallback block
     const geom = new THREE.BoxGeometry(0.3, 0.3, 0.3);
     const color = entity.owner ? entity.owner.color : '#cccccc';
     const mat = new THREE.MeshStandardMaterial({ color: color });
@@ -496,79 +724,60 @@ function spawnEntityMesh(entity, gameState, x, terrainHeight, z, rotationY) {
   group.position.set(x, terrainHeight, z);
   entityMeshMap[entity.id] = group;
   scene.add(group);
+
+  // Trigger pop-in scale animation when spawned
+  playSpawnAnimation(group);
 }
 
-/**
- * Clears all entity meshes from Three.js scene.
- */
 export function clearEntityMeshes() {
   for (const id in entityMeshMap) {
-    const meshGroup = entityMeshMap[id];
-    if (meshGroup) {
-      scene.remove(meshGroup);
-    }
+    if (entityMeshMap[id]) scene.remove(entityMeshMap[id]);
   }
   for (const key in entityMeshMap) {
     delete entityMeshMap[key];
   }
 }
 
-/**
- * Highlights a specific cell under cursor.
- */
 export function highlightCell(q, r, height = null) {
   if (q === null || r === null) {
     highlightMesh.visible = false;
     return;
   }
-
-  const { x, z } = HexGrid.axialToPixel(q, r, hexSize);
-  highlightMesh.position.set(x, height !== null ? height + hexSize/20 : hexSize/10, z);
+  const { x, z } = HexGrid.axialToPixel(q, r);
+  highlightMesh.position.set(x, height !== null ? height + CONFIG.HEX_SIZE / 20 : CONFIG.HEX_SIZE / 10, z);
   highlightMesh.visible = true;
 }
 
-/**
- * Highlights hex cells along an action path (e.g. move preview).
- */
 export function highlightPathCells(cells) {
   clearPathHighlight();
   if (!cells || cells.length === 0 || !pathHighlightGroup) return;
 
   for (const cell of cells) {
     const mesh = new THREE.Mesh(pathHighlightGeometry, pathHighlightMaterial);
-    const { x, z } = HexGrid.axialToPixel(cell.q, cell.r, hexSize);
+    const { x, z } = HexGrid.axialToPixel(cell.q, cell.r);
     const height = cell.terrain ? cell.terrain.height : 1.0;
-    mesh.position.set(x, height + hexSize/25, z);
+    mesh.position.set(x, height + CONFIG.HEX_SIZE / 25, z);
     pathHighlightGroup.add(mesh);
   }
 }
 
 export function clearPathHighlight() {
   if (!pathHighlightGroup) return;
-
   while (pathHighlightGroup.children.length > 0) {
     pathHighlightGroup.remove(pathHighlightGroup.children[0]);
   }
 }
 
-/**
- * Raycasts from camera to cursor position.
- */
 export function raycastHex(mouseNormalized) {
   const raycaster = new THREE.Raycaster();
   raycaster.setFromCamera(mouseNormalized, camera);
-
   const intersects = raycaster.intersectObjects(hexGroup.children);
   if (intersects.length > 0) {
-    const mesh = intersects[0].object;
-    return mesh.userData;
+    return intersects[0].object.userData;
   }
   return null;
 }
 
-/**
- * Sets animated entity selection highlight ring.
- */
 export function setEntitySelectionHighlight(x, y, z) {
   if (x === null || y === null || z === null) {
     clearEntitySelectionHighlight();

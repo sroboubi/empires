@@ -1,6 +1,8 @@
 import { SeaLevel } from '../terrainProvider.js';
 import { camelToTitle } from '../utils.js';
 import { HexGrid } from '../hexGrid.js';
+import { spawnDamageText } from '../renderer.js';
+import { spawnParticleBurst } from '../renderer.js';
 
 /**
  * BaseEntity - Standard Base Class for all dynamic entity instances in the game.
@@ -244,6 +246,10 @@ export class BaseEntity {
     this.state.health -= effectiveDamage;
     const destroyed = this.state.health <= 0;
 
+    const { x, z } = HexGrid.axialToPixel(this.cell.q, this.cell.r);
+    spawnDamageText(x, this.cell.terrain.height, z, effectiveDamage);
+    spawnParticleBurst(x, this.cell.terrain.height, z, 0xff3300);
+
     if (destroyed) {
       this.visibleCells.clear();
       if (this.owner && this.gameState) {
@@ -346,6 +352,8 @@ export class BaseEntity {
           this.spendActionCost(check.apCost, check.ordersRequired);
           if (this.gameState) {
             this.gameState.spawnEntity(buildable, cell, this.owner);
+            const { x, z } = HexGrid.axialToPixel(cell.q, cell.r);
+            spawnParticleBurst(x, cell.terrain.height, z, 0xcca055);
             if (this.state.destroyOnBuild) {
               this.gameState.removeEntity(this.id);
             }

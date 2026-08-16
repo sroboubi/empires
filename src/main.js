@@ -15,11 +15,10 @@ import {
 } from './renderer.js';
 import { loadGameManifest } from './manifestLoader.js';
 import { HexGrid } from './hexGrid.js';
-import * as THREE from 'three';
 
 let gameState;
 let manifestData;
-const mouse = new THREE.Vector2();
+const mouse = { x: 0, y: 0 };
 
 let selectedEntity = null;
 let pointerDownPos = { x: 0, y: 0 };
@@ -44,7 +43,7 @@ async function init() {
 
     // 4. Initialize 3D Renderer
     const canvas = document.getElementById('game-canvas');
-    initRenderer(canvas, CONFIG.HEX_SIZE);
+    initRenderer(canvas);
 
     // 5. Preload 3D models & reconcile entities in scene
     await preloadModels(manifestData.entities);
@@ -189,7 +188,7 @@ function selectEntity(entity) {
   const cell = entity.cell || gameState.cells[`${entity.q},${entity.r}`];
 
   if (cell) {
-    const { x, z } = HexGrid.axialToPixel(cell.q, cell.r, CONFIG.HEX_SIZE);
+    const { x, z } = HexGrid.axialToPixel(cell.q, cell.r);
     setEntitySelectionHighlight(x, cell.terrain ? cell.terrain.height : 1.0, z);
   }
 
@@ -349,7 +348,7 @@ function updatePlayersUI() {
       ? `orders: ${player.orders}/${player.maxOrders}`
       : '';
 
-    const scoreStr = `military score: ${player.score.military} - econimic score: ${player.score.economic}`;  
+    const scoreStr = `military score: ${player.score.military} - econimic score: ${player.score.economic}`;
 
     li.innerHTML = `
       <div style="display: flex; align-items: center; gap: 8px;">

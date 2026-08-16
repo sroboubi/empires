@@ -1,5 +1,6 @@
 import { BaseEntity } from './baseEntity.js';
 import { HexGrid } from '../hexGrid.js';
+import { CONFIG } from '../config.js';
 
 const DIRECTIONS_LIST = ['E', 'NE', 'NW', 'W', 'SW', 'SE'];
 
@@ -126,7 +127,7 @@ export class UnitEntity extends BaseEntity {
         canDo: (cell, entity) => {
           if (!this.active) return { possible: false, reason: "Unit is inactive (maintenance unpaid)." };
           if (!entity) return { possible: false, reason: "No target entity specified." };
-          if (entity.owner && this.owner && entity.owner.id === this.owner.id) {
+          if (!CONFIG.FRIENDLY_FIRE && entity.owner && this.owner && entity.owner.id === this.owner.id) {
             return { possible: false, reason: "Cannot attack friendly entities." };
           }
 
