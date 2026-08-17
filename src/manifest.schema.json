@@ -3,7 +3,6 @@
     "title": "GameManifest",
     "type": "object",
     "required": [
-        "resources",
         "entities"
     ],
     "properties": {
@@ -62,6 +61,108 @@
                 }
             }
         },
+        "naturalResources": {
+            "type": "array",
+            "description": "Global resources tracked by the game engine.",
+            "items": {
+                "type": "object",
+                "required": [
+                    "name",
+                    "iconUrl"
+                ],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Unique name (e.g., 'gold', 'wood')"
+                    },
+                    "iconUrl": {
+                        "type": "string",
+                        "format": "uri",
+                        "description": "2D image asset for UIs"
+                    }
+                }
+            }
+        },
+        "terrains": {
+            "type": "array",
+            "description": "Terrain definitions used by the terrain provider and hex grid.",
+            "items": {
+                "type": "object",
+                "required": [
+                    "name",
+                    "height",
+                    "movementCost",
+                    "material",
+                    "conditions"
+                ],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Unique display name of the terrain type."
+                    },
+                    "height": {
+                        "type": "number",
+                        "description": "Height / elevation scale for rendering."
+                    },
+                    "movementCost": {
+                        "type": "number",
+                        "description": "Action points / movement cost to traverse this terrain."
+                    },
+                    "material": {
+                        "type": "object",
+                        "description": "Three.js material properties.",
+                        "properties": {
+                            "color": {
+                                "type": ["string", "integer"],
+                                "description": "Color hex string or hex integer value."
+                            },
+                            "roughness": {
+                                "type": "number"
+                            },
+                            "metalness": {
+                                "type": "number"
+                            },
+                            "transparent": {
+                                "type": "boolean"
+                            },
+                            "opacity": {
+                                "type": "number"
+                            },
+                            "flatShading": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "conditions": {
+                        "type": "object",
+                        "description": "Procedural noise conditions (min/max) for elevation, temperature, and humidity.",
+                        "properties": {
+                            "elevation": {
+                                "type": "object",
+                                "properties": {
+                                    "min": { "type": "number" },
+                                    "max": { "type": "number" }
+                                }
+                            },
+                            "temperature": {
+                                "type": "object",
+                                "properties": {
+                                    "min": { "type": "number" },
+                                    "max": { "type": "number" }
+                                }
+                            },
+                            "humidity": {
+                                "type": "object",
+                                "properties": {
+                                    "min": { "type": "number" },
+                                    "max": { "type": "number" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "entities": {
             "type": "array",
             "description": "Game pieces (Terrain, Units, Constructs) that can occupy the hex grid.",
@@ -95,6 +196,39 @@
                         "type": "integer",
                         "minimum": 0,
                         "description": "Vision sight range in hex cell radius"
+                    },
+                    "spawnConditions": {
+                        "type": "object",
+                        "description": "Conditions required to spawn or build the entity on a hex cell.",
+                        "properties": {
+                            "terrain": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                },
+                                "description": "List of allowed terrain type names the entity can be spawned on."
+                            },
+                            "minSeparation": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Minimum cell distance from any other construct entity."
+                            }
+                        }
+                    },
+                    "damage": {
+                        "type": "object",
+                        "properties": {
+                            "value": {
+                                "type": "number"
+                            },
+                            "type": {
+                                "type": "string"
+                            },
+                            "elevationAdjustment": {
+                                "type": "number",
+                                "description": "Multiplier/divisor applied based on relative elevation between attacker and target."
+                            }
+                        }
                     }
                 }
             }

@@ -102,6 +102,10 @@ export class BaseEntity {
     return this.state.rotationOffset || 0;
   }
 
+  get isConstruct() {
+    return false;
+  }
+
   /**
    * Returns object e.g. {food: 2, wood: 3} with maintenance cost deducted on each step().
    * @returns {Object}
@@ -222,8 +226,8 @@ export class BaseEntity {
 
   /**
    * Processes incoming damage to this entity.
-   * @param {Object|number} damage - Damage payload { value, type, source } or raw amount
-   * @param {BaseEntity} [attacker] - Attacking entity reference if damage is number
+   * @param {Object|number} damage - Damage payload { value, type } or raw amount
+   * @param {BaseEntity} [attacker] - Attacking entity reference
    * @returns {Object} { damageDealt, destroyed }
    */
   receiveDamage(damage, attacker = null) {
@@ -318,16 +322,54 @@ export class BaseEntity {
           if (!cell) return { possible: false, reason: "No target cell selected." };
           if (entity && entity !== this) return { possible: false, reason: "Target cell is occupied." };
 
-          if (!this.canStandOn(cell)) return { possible: false, reason: "Cannot build construct on water." };  // FIXME
+          if (!this.canStandOn(cell)) return { possible: false, reason: "Cannot build construct on water." };
+
+          const meta = this.gameState && this.gameState.manifestData ? this.gameState.manifestData.entities[buildable] : null;
+          const spawnConditions = meta ? meta.spawnConditions : null;
+
+          if (spawnConditions) {
+            // Check terrain condition if present (in addition to canStandOn)
+            if (Array.isArray(spawnConditions.terrain) && spawnConditions.terrain.length > 0) {
+              const terrainName = cell.terrain ? cell.terrain.name : '';
+              const allowed = spawnConditions.terrain.some(t => t.toLowerCase() === terrainName.toLowerCase());
+              if (!allowed) {
+                return { possible: false, reason: `Cannot build ${targetName} on ${terrainName} terrain (requires ${spawnConditions.terrain.join(', ')}).` };
+              }
+            }
+          }
+
+          // Check minSeparation (only if BOTH the new and existing entity have minSeparation defined)
+          const newMinSep = spawnConditions ? spawnConditions.minSeparation : undefined;
+          if (typeof newMinSep === 'number' && this.gameState) {
+            const allEntities = this.gameState.entities || [];
+            const manifestEntities = this.gameState.manifestData?.entities || {};
+
+            for (const e of allEntities) {
+              const eMeta = manifestEntities[e.name];
+              const existingMinSep = eMeta?.spawnConditions?.minSeparation;
+
+              if (typeof existingMinSep === 'number') {
+                const requiredSep = Math.max(newMinSep, existingMinSep);
+                if (requiredSep > 0) {
+                  const dist = HexGrid.distance(cell, e);
+                  if (dist < requiredSep) {
+                    return {
+                      possible: false,
+                      reason: `Too close to existing entity (${camelToTitle(e.name)} at distance ${dist}, required separation is ${requiredSep}).`
+                    };
+                  }
+                }
+              }
+            }
+          }
 
           const dist = HexGrid.distance(this, cell);
-          if (dist !== 1) return { possible: false, reason: "target must be adjacent (1 cell away)." };
+          if (dist !== 1) return { possible: false, reason: "Target must be adjacent (1 cell away)." };
 
           const apCost = this.state.actionPoints !== undefined ? 1 : 0;
           const affordability = this.checkActionAffordability(apCost);
           if (!affordability.possible) return affordability;
 
-          const meta = this.gameState && this.gameState.manifestData ? this.gameState.manifestData.entities[buildable] : null;
           const cost = (meta && meta.spawnCost) || {};
           const costStr = Object.entries(cost).map(([k, v]) => `${v} ${k}`).join(', ');
           if (this.owner && !this.owner.hasResources(cost)) {

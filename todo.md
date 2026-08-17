@@ -4,11 +4,7 @@ Visual:
 - when AI is thinking, do a day/night cycle
 
 Game:
-- resources init on grid
-- adjacency logic; village next to each other, resource extractors next to resources
-
-- adjust melee and ranged attack damage based on source to target delta elevation
-
+- resources init on grid - adjust resource extractor yields next to resources
 - win condition: total score is 2X the next largest score 
 
 Later:

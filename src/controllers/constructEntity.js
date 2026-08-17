@@ -7,4 +7,8 @@ export class ConstructEntity extends BaseEntity {
   constructor(entityData, ownerPlayer, gameState, cell, initialState = null) {
     super(entityData, ownerPlayer, gameState, cell, initialState);
   }
+
+  get isConstruct() {
+    return true;
+  }
 }

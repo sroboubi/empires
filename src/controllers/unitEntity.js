@@ -181,14 +181,30 @@ export class UnitEntity extends BaseEntity {
             }
           }
 
-          const rawDamage = Math.round(this.damage.value * multiplier);
+          // Elevation damage adjustment
+          let elevationFactor = 1.0;
+          if (this.damage && typeof this.damage.elevationAdjustment === 'number' && this.damage.elevationAdjustment > 0) {
+            const attackerCell = this.cell || (this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.getCell(this.q, this.r) : null);
+            const targetCell = cell || (entity && entity.cell) || (this.gameState && this.gameState.hexGrid && entity ? this.gameState.hexGrid.getCell(entity.q, entity.r) : null);
+            const getElev = (c) => (c && c.terrain && (c.terrain.height ?? c.terrain.elevation)) ?? 1.0;
+            const attackerElevation = Math.max(0.1, getElev(attackerCell));
+            const targetElevation = Math.max(0.1, getElev(targetCell));
+            console.log(attackerElevation, targetElevation, this.damage.elevationAdjustment);
+            const ratio = attackerElevation / targetElevation;
+            if (ratio > 1.01) { elevationFactor = ratio * this.damage.elevationAdjustment }
+            else if (ratio < 0.99) { elevationFactor = ratio / this.damage.elevationAdjustment }
+          }
+
+          const rawDamage = Math.round(this.damage.value * multiplier * elevationFactor);
+          const elevStr = this.damage && this.damage.elevationAdjustment ? `, ${elevationFactor.toFixed(2)}x elev` : '';
 
           return {
             possible: true,
-            reason: `Attack ${entity.name.toUpperCase()} for ~${rawDamage} dmg (${multiplier}x directional) costing ${cost} AP and 1 order.`,
+            reason: `Attack ${entity.name.toUpperCase()} for ~${rawDamage} dmg (${multiplier}x dir${elevStr}) costing ${cost} AP and 1 order.`,
             cost: cost,
             ordersRequired: affordability.ordersRequired,
             multiplier: multiplier,
+            elevationFactor: elevationFactor,
             rawDamage: rawDamage
           };
         },
@@ -204,7 +220,7 @@ export class UnitEntity extends BaseEntity {
           }
 
           this.spendActionCost(check.cost, check.ordersRequired);
-          entity.receiveDamage({ value: check.rawDamage, type: this.damage.type, source: this });
+          entity.receiveDamage({ value: check.rawDamage, type: this.damage.type }, this);
 
           return true;
         }

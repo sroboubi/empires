@@ -38,12 +38,13 @@ export class HexGrid {
   /**
    * Generates a hexagonal grid of the given radius using TerrainProvider.
    * @param {number} radius - Grid radius (number of hex rings from center)
+   * @param {Array|Object} [terrainConfig=null] - Optional terrain definitions
    */
-  constructor(radius) {
+  constructor(radius, terrainConfig = null) {
     this.radius = radius;
     this.cells = new Map();
 
-    const terrainProvider = new TerrainProvider(radius);
+    const terrainProvider = new TerrainProvider(radius, terrainConfig);
 
     for (let q = -radius; q <= radius; q++) {
       const rMin = Math.max(-radius, -q - radius);

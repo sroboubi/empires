@@ -38,7 +38,7 @@ async function init() {
 
     // 3. Create Game State and Generate Map
     gameState = new GameState();
-    gameState.generateMap(CONFIG.GRID_RADIUS);
+    gameState.generateMap(CONFIG.GRID_RADIUS, manifestData.terrains);
     gameState.initializeManifest(manifestData);
 
     // 4. Initialize 3D Renderer
@@ -466,7 +466,7 @@ function regenerateMap() {
   hideContextMenu();
   clearEntityMeshes();
 
-  gameState.generateMap(CONFIG.GRID_RADIUS);
+  gameState.generateMap(CONFIG.GRID_RADIUS, manifestData.terrains);
   gameState.initializeManifest(manifestData);
 
   drawGrid(gameState.cells, gameState.activePlayer);

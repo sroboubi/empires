@@ -37,9 +37,11 @@ export class GameState {
   /**
    * Generates a hexagonal map of a given radius filled with terrain.
    * @param {number} radius - Grid radius (number of hex rings from the center)
+   * @param {Array|Object} [terrainConfig=null] - Optional terrain definitions
    */
-  generateMap(radius) {
-    this.hexGrid = new HexGrid(radius);
+  generateMap(radius, terrainConfig = null) {
+    const config = terrainConfig || this.manifestData?.terrains || null;
+    this.hexGrid = new HexGrid(radius, config);
     this.entities = [];
     this.activePlayerIndex = 0;
     this.currentRound = 1;
@@ -101,26 +103,43 @@ export class GameState {
     const startingUnitNames = Object.keys(startingUnits);
 
     if (startingUnitNames.length > 0) {
+      const occupiedCoords = new Set();
+
       this.players.forEach((player, playerIdx) => {
         const targetQ = playerIdx === 0 ? p1TargetQ : p2TargetQ;
         const targetR = playerIdx === 0 ? p1TargetR : p2TargetR;
 
-        // Create a temporary entity from the first starting unit type to get its canStandOn
-        const firstUnitName = startingUnitNames[0];
-        const firstUnitMeta = manifestData.entities[firstUnitName];
-        let canStandOnFn = (terrain) => terrain && terrain.elevation > -0.3; // fallback
-
-        if (firstUnitMeta && firstUnitMeta.controllerClass) {
-          try {
-            const tempEntity = new firstUnitMeta.controllerClass(firstUnitMeta, player, this, null);
-            canStandOnFn = (terrain) => tempEntity.canStandOn(terrain);
-          } catch (e) {
-            console.warn('Could not create temp entity for canStandOn check, using fallback:', e);
+        const getUnitCanStandOnFn = (unitName) => {
+          const uMeta = manifestData.entities[unitName];
+          if (uMeta && uMeta.controllerClass) {
+            try {
+              const tempEntity = new uMeta.controllerClass(uMeta, player, this, null);
+              return (cellOrTerrain) => {
+                const terrain = cellOrTerrain.terrain || cellOrTerrain;
+                if (!tempEntity.canStandOn(terrain)) return false;
+                if (uMeta.spawnConditions && Array.isArray(uMeta.spawnConditions.terrain) && uMeta.spawnConditions.terrain.length > 0) {
+                  return uMeta.spawnConditions.terrain.some(t => t.toLowerCase() === terrain.name?.toLowerCase());
+                }
+                return true;
+              };
+            } catch (e) {
+              console.warn('Could not create temp entity for canStandOn check:', e);
+            }
           }
-        }
+          return (cellOrTerrain) => {
+            const terrain = cellOrTerrain.terrain || cellOrTerrain;
+            return terrain && terrain.elevation > -0.3;
+          };
+        };
+
+        const firstUnitName = startingUnitNames[0];
+        const firstUnitCanStandOn = getUnitCanStandOnFn(firstUnitName);
 
         // Find the starting cell for this player using BFS
-        const startCell = this.hexGrid.findStartingCell(targetQ, targetR, canStandOnFn);
+        const startCell = this.hexGrid.findStartingCell(targetQ, targetR, (terrain) => {
+          return firstUnitCanStandOn(terrain);
+        });
+
         if (!startCell) {
           console.warn(`No valid starting cell found for player ${player.name}`);
           return;
@@ -128,24 +147,44 @@ export class GameState {
 
         player.startCoord = { q: startCell.q, r: startCell.r };
 
-        // Collect open cells near the start: start cell + valid neighbors
-        const openCoords = [startCell];
-        const neighbors = this.hexGrid.getNeighbors(startCell.q, startCell.r);
-        neighbors.forEach(nb => {
-          if (canStandOnFn(nb.terrain)) {
-            openCoords.push(nb);
-          }
-        });
+        // Helper to find next nearest available cell searching outwards from startCoord
+        const findNextAvailableCell = (canStandOnFn) => {
+          const visited = new Set();
+          const queue = [{ q: startCell.q, r: startCell.r }];
+          visited.add(`${startCell.q},${startCell.r}`);
 
-        let coordIdx = 0;
-        for (const [unitName, quantity] of Object.entries(startingUnits)) {
-          for (let i = 0; i < quantity; i++) {
-            const coord = openCoords[coordIdx % openCoords.length];
-            const cell = this.hexGrid.getCell(coord.q, coord.r);
-            if (cell) {
-              this.spawnEntity(unitName, cell, player);
+          while (queue.length > 0) {
+            const current = queue.shift();
+            const key = `${current.q},${current.r}`;
+            const cell = this.hexGrid.getCell(current.q, current.r);
+
+            if (cell && !occupiedCoords.has(key) && canStandOnFn(cell)) {
+              return cell;
             }
-            coordIdx++;
+
+            const neighbors = HexGrid.getNeighborCoords(current.q, current.r);
+            for (const nb of neighbors) {
+              const nbKey = `${nb.q},${nb.r}`;
+              if (!visited.has(nbKey) && this.hexGrid.getCell(nb.q, nb.r)) {
+                visited.add(nbKey);
+                queue.push(nb);
+              }
+            }
+          }
+          return null;
+        };
+
+        for (const [unitName, quantity] of Object.entries(startingUnits)) {
+          const unitCanStandOn = getUnitCanStandOnFn(unitName);
+          for (let i = 0; i < quantity; i++) {
+            const cell = findNextAvailableCell(unitCanStandOn);
+            if (cell) {
+              const key = `${cell.q},${cell.r}`;
+              occupiedCoords.add(key);
+              this.spawnEntity(unitName, cell, player);
+            } else {
+              console.warn(`Could not find valid unoccupied cell to spawn ${unitName} for ${player.name}`);
+            }
           }
         }
       });
