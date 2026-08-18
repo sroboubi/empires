@@ -189,7 +189,6 @@ export class UnitEntity extends BaseEntity {
             const getElev = (c) => (c && c.terrain && (c.terrain.height ?? c.terrain.elevation)) ?? 1.0;
             const attackerElevation = Math.max(0.1, getElev(attackerCell));
             const targetElevation = Math.max(0.1, getElev(targetCell));
-            console.log(attackerElevation, targetElevation, this.damage.elevationAdjustment);
             const ratio = attackerElevation / targetElevation;
             if (ratio > 1.01) { elevationFactor = ratio * this.damage.elevationAdjustment }
             else if (ratio < 0.99) { elevationFactor = ratio / this.damage.elevationAdjustment }

@@ -254,16 +254,7 @@ export class GameState {
    * @param {string} entityId
    */
   removeEntity(entityId) {
-    const targetEntity = this.entities.find(e => e.id === entityId);
-    if (targetEntity && targetEntity.owner) {
-      targetEntity.visibleCells.clear();
-    }
-
     this.entities = this.entities.filter(e => e.id !== entityId);
-
-    if (targetEntity && targetEntity.owner) {
-      targetEntity.owner.updateVisibility(this);
-    }
   }
 
   /**

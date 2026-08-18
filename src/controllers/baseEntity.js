@@ -225,6 +225,20 @@ export class BaseEntity {
   }
 
   /**
+   * Destroys the entity and cleans up all references.
+   */
+  destroy() {
+    this.destroyed = true;
+    this.visibleCells.clear();
+    if (this.owner && this.gameState) {
+      this.owner.updateVisibility(this.gameState);
+    }
+    if (this.gameState) {
+      this.gameState.removeEntity(this.id);
+    }
+  }
+
+  /**
    * Processes incoming damage to this entity.
    * @param {Object|number} damage - Damage payload { value, type } or raw amount
    * @param {BaseEntity} [attacker] - Attacking entity reference
@@ -248,23 +262,15 @@ export class BaseEntity {
     effectiveDamage = Math.round(effectiveDamage * 10) / 10;
 
     this.state.health -= effectiveDamage;
-    const destroyed = this.state.health <= 0;
+    if (this.state.health <= 0) {
+      this.destroy();
+    }
 
     const { x, z } = HexGrid.axialToPixel(this.cell.q, this.cell.r);
     spawnDamageText(x, this.cell.terrain.height, z, effectiveDamage);
     spawnParticleBurst(x, this.cell.terrain.height, z, 0xff3300);
 
-    if (destroyed) {
-      this.visibleCells.clear();
-      if (this.owner && this.gameState) {
-        this.owner.updateVisibility(this.gameState);
-      }
-      if (this.gameState) {
-        this.gameState.removeEntity(this.id);
-      }
-    }
-
-    return { damageDealt: effectiveDamage, destroyed };
+    return { damageDealt: effectiveDamage, destroyed: this.destroyed };
   }
 
   /**
@@ -397,7 +403,7 @@ export class BaseEntity {
             const { x, z } = HexGrid.axialToPixel(cell.q, cell.r);
             spawnParticleBurst(x, cell.terrain.height, z, 0xcca055);
             if (this.state.destroyOnBuild) {
-              this.gameState.removeEntity(this.id);
+              this.destroy();
             }
           }
           return true;
