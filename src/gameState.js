@@ -54,27 +54,29 @@ export class GameState {
   }
 
   /**
-   * Initializes player starting resources, instantiates players defined in manifest,
+   * Initializes player starting resources, instantiates players defined in settings/manifest,
    * and spawns starting units on valid terrain.
    * @param {Object} manifestData - Loaded game manifest metadata
+   * @param {Object} [settings=null] - Loaded or configured game settings
    */
-  initializeManifest(manifestData) {
+  initializeManifest(manifestData, settings = null) {
     if (!manifestData) return;
     this.manifestData = manifestData;
 
-    // 1. Setup starting resources dynamically from manifest initialization settings
-    const init = manifestData.initialization || {};
+    // 1. Setup starting resources dynamically from settings or manifest initialization
+    const init = settings?.initialization || manifestData.initialization || {};
     const startingResources = { ...(init.startingResources || {}) };
     const ordersConfig = init.orders || null;
 
-    // 2. Instantiate players from manifest definitions array
-    if (manifestData.players && Array.isArray(manifestData.players) && manifestData.players.length > 0) {
-      this.players = manifestData.players.map(pDef => new Player(
-        pDef.id,
+    // 2. Instantiate players from settings or manifest definitions array
+    const playersList = settings?.players || manifestData.players;
+    if (playersList && Array.isArray(playersList) && playersList.length > 0) {
+      this.players = playersList.map((pDef, idx) => new Player(
+        pDef.id || (idx + 1),
         pDef.name,
         pDef.color,
         startingResources,
-        pDef.description,
+        pDef.description || '',
         pDef.controller,
         ordersConfig
       ));
@@ -88,14 +90,10 @@ export class GameState {
     this.activePlayerIndex = 0;
     this.currentRound = 1;
 
-    // 3. Determine starting coordinates based on grid radius
+    // 3. Determine starting coordinates based on grid radius and player count
     const radius = this.hexGrid.radius;
-
-    // Target coords on opposite sides of the map
-    const p1TargetQ = -Math.round(radius / 4);
-    const p1TargetR = Math.round(radius / 4);
-    const p2TargetQ = Math.round(radius / 4);
-    const p2TargetR = -Math.round(radius / 4);
+    const numPlayers = this.players.length;
+    const targetRadius = Math.round(radius * 0.5);
 
     // 4. Spawn starting units for each player
     this.entities = [];
@@ -106,8 +104,9 @@ export class GameState {
       const occupiedCoords = new Set();
 
       this.players.forEach((player, playerIdx) => {
-        const targetQ = playerIdx === 0 ? p1TargetQ : p2TargetQ;
-        const targetR = playerIdx === 0 ? p1TargetR : p2TargetR;
+        const angle = (2 * Math.PI * playerIdx) / numPlayers - Math.PI / 2;
+        const targetQ = Math.round(targetRadius * Math.cos(angle));
+        const targetR = Math.round(targetRadius * Math.sin(angle));
 
         const getUnitCanStandOnFn = (unitName) => {
           const uMeta = manifestData.entities[unitName];

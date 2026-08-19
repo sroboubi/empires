@@ -142,3 +142,29 @@ Task: Phase 11 - Move and add game config to manifest
 2. For each entity definition in the manifest, add spawnConditions: {terrain: [...list of terrain types by name], minSeparation: number} -in the baseEntity build action, ensure that the cell it is spawned on has terrain listed in spawnConditions.terrain and that it is at least minSeparation cells away from any other construct entity. Only check conditions that are present, if any are missing, then they don't limit the entity spawning.
 3. When placing initial units for a player, ensure units are not on the same cell. Add them further from the first unit if needed, they don't need to be adjacent.
 4. Add elevationAdjustment attribute to the damage object in the entity defintion of the manifest. When a unit attacks, if this adjustment is present, then calculate attackerElevation/targetElevation. If this is greater than 1, then multiply by the adjustment, otherwise divide by the adjustment. Scale the damage by this value.
+
+Task: Phase 12 - Setup Page and Save/Load functionality
+1. Move "initialization" and "players" attributes from the manifest to defaultSettings.json
+2. Add a new modal panel for game setup - this should be shown when the page is first loaded
+3. remove the regerate map button and replace with "NEW GAME" that will open this panel again
+4. Add a start button to this panel that will create a new game with the selected settings
+5. The panel should allow adjusting everything in the defaultSettings.json (which should be used to load the defaults for this panel)
+- selecting a map size
+- selecting orders per player
+- add/remove players and naming each player and selecting a color - selecting AI vs human
+- selecting starting resources and units (applied to all players)
+- auto-save interval and number to keep
+6. Remove the "State Serialization" panel. Instead add a save/load button. Save/Load the game state to/from indexedDB. The structure should look like
+{
+  name: "Empire of Rome - Turn 12",  // Key
+  timestamp: 1724000000000,
+  turnNumber: 12,
+  auto: true, // if this is true then the game was auto-saved
+  data: gameState.serialize() // Full state JSON payload
+}
+7. The game should auto-save as per settings, and keep as many previous auto-saves as per settings, removing the oldest ones first. When the user selects to load a game, they should be presented with a list of saved games to choose from. When the user selects to manually save a game, they can input the save game name, and these manual saves should not count towards the auto-save limit.
+
+Task: Phase 13 - Fix bugs
+1. resource types should be defined only in the manifest - remove hardcodes from main.js
+2. on player turn start, focus camera on center of mass of player entities (average position of all entities)
+3. on load - gameState.deserialize can not call new HexGrid() as this will try to regen the terrain and fail because there is no terrain config provided. Make terrain config manditory in the existing hexGrid constructor. Make a new constructor for load that just takes the cells and does not try to generate new ones.

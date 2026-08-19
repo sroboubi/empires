@@ -15,47 +15,45 @@ import {
 } from './renderer.js';
 import { loadGameManifest } from './manifestLoader.js';
 import { HexGrid } from './hexGrid.js';
+import { saveGame, loadGame, listSaves, deleteSave, pruneAutoSaves } from './saveManager.js';
 
 let gameState;
 let manifestData;
-const mouse = { x: 0, y: 0 };
+let defaultSettings;
+let currentGameSettings = null;
 
+const mouse = { x: 0, y: 0 };
 let selectedEntity = null;
 let pointerDownPos = { x: 0, y: 0 };
 let pointerDownTime = 0;
+
+// Local setup state before starting game
+let setupPlayers = [];
+let setupStartingUnits = {};
 
 /**
  * Initializes the application.
  */
 async function init() {
   try {
-    // 1. Parse manifest URL parameter
+    // 1. Parse manifest URL parameter & load default settings
     const urlParams = new URLSearchParams(window.location.search);
     const manifestUrl = urlParams.get('manifest') || './manifest.json';
 
-    // 2. Load manifest data and preload controllers
-    manifestData = await loadGameManifest(manifestUrl);
+    const [manifestResult, settingsResult] = await Promise.all([
+      loadGameManifest(manifestUrl),
+      fetch('./defaultSettings.json').then(r => r.json())
+    ]);
 
-    // 3. Create Game State and Generate Map
-    gameState = new GameState();
-    gameState.generateMap(CONFIG.GRID_RADIUS, manifestData.terrains);
-    gameState.initializeManifest(manifestData);
+    manifestData = manifestResult;
+    defaultSettings = settingsResult;
 
-    // 4. Initialize 3D Renderer
+    // 2. Initialize 3D Renderer and preload models
     const canvas = document.getElementById('game-canvas');
     initRenderer(canvas);
-
-    // 5. Preload 3D models & reconcile entities in scene
     await preloadModels(manifestData.entities);
-    reconcileEntities(gameState);
 
-    // 6. Draw Hex Grid with Fog of War for Active Player
-    drawGrid(gameState.cells, gameState.activePlayer);
-
-    // 7. Update UI
-    updatePlayersUI();
-
-    // 8. Event Listeners
+    // 3. Setup Event Listeners
     window.addEventListener('mousemove', onMouseMove);
 
     window.addEventListener('pointerdown', (e) => {
@@ -64,7 +62,7 @@ async function init() {
     });
 
     window.addEventListener('pointerup', (e) => {
-      if (e.target.closest('.glass-panel') || e.target.closest('.btn')) return;
+      if (e.target.closest('.glass-panel') || e.target.closest('.btn') || e.target.closest('.modal-overlay')) return;
 
       const dx = e.clientX - pointerDownPos.x;
       const dy = e.clientY - pointerDownPos.y;
@@ -93,25 +91,459 @@ async function init() {
       if (e.key === 'Escape') {
         hideContextMenu();
         deselectEntity();
+        closeSaveLoadModal();
+        if (gameState) {
+          closeSetupModal();
+        }
       }
     });
 
     // Control buttons
-    document.getElementById('btn-regenerate').addEventListener('click', regenerateMap);
+    document.getElementById('btn-new-game').addEventListener('click', () => openSetupModal(true));
+    document.getElementById('btn-save-game').addEventListener('click', () => openSaveLoadModal('save'));
+    document.getElementById('btn-load-game').addEventListener('click', () => openSaveLoadModal('load'));
     document.getElementById('btn-next-turn').addEventListener('click', nextTurn);
-    document.getElementById('btn-serialize').addEventListener('click', serializeState);
-    document.getElementById('btn-deserialize').addEventListener('click', deserializeState);
 
-    console.log('Empire game initialised successfully.');
+    // Modal UI buttons
+    document.getElementById('btn-start-game').addEventListener('click', handleStartGameClicked);
+    document.getElementById('btn-add-player').addEventListener('click', addSetupPlayerRow);
+    document.getElementById('btn-add-starting-unit').addEventListener('click', addSetupUnitRow);
+    document.getElementById('btn-close-setup').addEventListener('click', closeSetupModal);
+    document.getElementById('btn-close-saveload').addEventListener('click', closeSaveLoadModal);
+    document.getElementById('btn-do-manual-save').addEventListener('click', handleManualSaveClicked);
+
+    // Open Setup Modal automatically on initial load
+    openSetupModal(false);
+
+    console.log('Empire game initialized successfully.');
   } catch (err) {
     console.error('Fatal initialization error:', err);
     alert('Failed to load game config: ' + err.message);
   }
 }
 
+/* ==========================================================================
+   SETUP MODAL & GAME INITIALIZATION LOGIC
+   ========================================================================== */
+
+function openSetupModal(canClose = true) {
+  const overlay = document.getElementById('setup-modal-overlay');
+  const closeBtn = document.getElementById('btn-close-setup');
+  closeBtn.style.display = canClose ? 'block' : 'none';
+
+  const baseSettings = currentGameSettings || defaultSettings;
+
+  // Map size
+  document.getElementById('setup-map-size').value = baseSettings.mapSize || 64;
+
+  // Orders
+  const orders = baseSettings.initialization?.orders || { max: 8, initial: 8, perTurn: 6 };
+  document.getElementById('setup-orders-max').value = orders.max;
+  document.getElementById('setup-orders-initial').value = orders.initial;
+  document.getElementById('setup-orders-perturn').value = orders.perTurn;
+
+  // Players
+  setupPlayers = JSON.parse(JSON.stringify(baseSettings.players || [
+    { id: 1, name: 'Red Empire', color: '#ff4d4d', controller: null },
+    { id: 2, name: 'Blue Alliance', color: '#3399ff', controller: null }
+  ]));
+  renderSetupPlayers();
+
+  // Resources
+  renderSetupResources(baseSettings.initialization?.startingResources || {});
+
+  // Units
+  setupStartingUnits = { ...(baseSettings.initialization?.startingUnits || {}) };
+  populateUnitSelectOptions();
+  renderSetupUnits();
+
+  // Auto-Save
+  const autoSave = baseSettings.autoSave || { enabled: true, intervalTurns: 5, maxAutoSaves: 10 };
+  document.getElementById('setup-autosave-enabled').checked = autoSave.enabled;
+  document.getElementById('setup-autosave-interval').value = autoSave.intervalTurns;
+  document.getElementById('setup-autosave-max').value = autoSave.maxAutoSaves;
+
+  overlay.classList.add('active');
+}
+
+function closeSetupModal() {
+  document.getElementById('setup-modal-overlay').classList.remove('active');
+}
+
+function renderSetupPlayers() {
+  const container = document.getElementById('setup-players-container');
+  container.innerHTML = '';
+
+  setupPlayers.forEach((p, idx) => {
+    const row = document.createElement('div');
+    row.className = 'dynamic-row';
+
+    const isAI = p.controller !== null && p.controller !== undefined;
+
+    row.innerHTML = `
+      <input type="color" value="${p.color}" title="Choose color">
+      <input type="text" class="form-input" value="${p.name}" placeholder="Player Name" style="flex: 1;">
+      <label style="font-size: 12px; display: flex; align-items: center; gap: 4px; cursor: pointer;">
+        <input type="checkbox" class="ai-checkbox" ${isAI ? 'checked' : ''}> AI
+      </label>
+      <button type="button" class="btn btn-danger btn-small" ${setupPlayers.length <= 1 ? 'disabled style="opacity:0.3;cursor:not-allowed;"' : ''}>✕</button>
+    `;
+
+    // Event listeners for fields
+    const colorInput = row.querySelector('input[type="color"]');
+    const nameInput = row.querySelector('input[type="text"]');
+    const aiCheckbox = row.querySelector('.ai-checkbox');
+    const removeBtn = row.querySelector('.btn-danger');
+
+    colorInput.addEventListener('change', (e) => { p.color = e.target.value; });
+    nameInput.addEventListener('input', (e) => { p.name = e.target.value; });
+    aiCheckbox.addEventListener('change', (e) => {
+      // If AI selected, set controller to empty object as requested by user
+      p.controller = e.target.checked ? {} : null;
+    });
+
+    removeBtn.addEventListener('click', () => {
+      if (setupPlayers.length > 1) {
+        setupPlayers.splice(idx, 1);
+        renderSetupPlayers();
+      }
+    });
+
+    container.appendChild(row);
+  });
+}
+
+function addSetupPlayerRow() {
+  const palette = ['#ff4d4d', '#3399ff', '#2ecc71', '#f1c40f', '#9b59b6', '#e67e22', '#1abc9c', '#e84393'];
+  const newId = setupPlayers.length > 0 ? Math.max(...setupPlayers.map(p => p.id)) + 1 : 1;
+  const color = palette[(newId - 1) % palette.length];
+  setupPlayers.push({
+    id: newId,
+    name: `Player ${newId}`,
+    color: color,
+    controller: null
+  });
+  renderSetupPlayers();
+}
+
+function renderSetupResources(resources) {
+  const container = document.getElementById('setup-resources-container');
+  container.innerHTML = '';
+
+  const resourceTypes = ['gold', 'wood', 'iron', 'food', 'gems'];
+  resourceTypes.forEach(res => {
+    const val = resources[res] !== undefined ? resources[res] : 1000;
+    const box = document.createElement('div');
+    box.style.display = 'flex';
+    box.style.flexDirection = 'column';
+    box.style.gap = '2px';
+
+    box.innerHTML = `
+      <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">${res}</span>
+      <input type="number" id="res-val-${res}" class="form-input" value="${val}" min="0" style="padding: 4px 8px;">
+    `;
+    container.appendChild(box);
+  });
+}
+
+function populateUnitSelectOptions() {
+  const select = document.getElementById('setup-add-unit-select');
+  select.innerHTML = '';
+  if (!manifestData || !manifestData.entities) return;
+
+  Object.keys(manifestData.entities).forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name.toUpperCase();
+    select.appendChild(opt);
+  });
+}
+
+function renderSetupUnits() {
+  const container = document.getElementById('setup-units-container');
+  container.innerHTML = '';
+
+  Object.entries(setupStartingUnits).forEach(([unitName, qty]) => {
+    const row = document.createElement('div');
+    row.className = 'dynamic-row';
+
+    row.innerHTML = `
+      <strong style="font-size: 13px; text-transform: uppercase; flex: 1;">${unitName}</strong>
+      <span style="font-size: 11px; color: var(--text-muted);">Count:</span>
+      <input type="number" class="form-input" value="${qty}" min="1" style="width: 70px; padding: 4px 8px;">
+      <button type="button" class="btn btn-danger btn-small">✕</button>
+    `;
+
+    const countInput = row.querySelector('input[type="number"]');
+    const removeBtn = row.querySelector('.btn-danger');
+
+    countInput.addEventListener('change', (e) => {
+      const val = parseInt(e.target.value, 10);
+      if (val > 0) {
+        setupStartingUnits[unitName] = val;
+      }
+    });
+
+    removeBtn.addEventListener('click', () => {
+      delete setupStartingUnits[unitName];
+      renderSetupUnits();
+    });
+
+    container.appendChild(row);
+  });
+}
+
+function addSetupUnitRow() {
+  const select = document.getElementById('setup-add-unit-select');
+  const unitName = select.value;
+  if (unitName && setupStartingUnits[unitName] === undefined) {
+    setupStartingUnits[unitName] = 1;
+    renderSetupUnits();
+  }
+}
+
+function handleStartGameClicked() {
+  if (setupPlayers.length < 1) {
+    showToast('Add at least 1 player!', true);
+    return;
+  }
+
+  const resourceTypes = ['gold', 'wood', 'iron', 'food', 'gems'];
+  const startingResources = {};
+  resourceTypes.forEach(res => {
+    const el = document.getElementById(`res-val-${res}`);
+    startingResources[res] = el ? parseInt(el.value, 10) || 0 : 0;
+  });
+
+  const settings = {
+    mapSize: parseInt(document.getElementById('setup-map-size').value, 10),
+    players: setupPlayers.map((p, i) => ({
+      id: i + 1,
+      name: p.name.trim() || `Player ${i + 1}`,
+      color: p.color,
+      controller: p.controller
+    })),
+    initialization: {
+      orders: {
+        max: parseInt(document.getElementById('setup-orders-max').value, 10) || 8,
+        initial: parseInt(document.getElementById('setup-orders-initial').value, 10) || 8,
+        perTurn: parseInt(document.getElementById('setup-orders-perturn').value, 10) || 6
+      },
+      startingResources: startingResources,
+      startingUnits: { ...setupStartingUnits }
+    },
+    autoSave: {
+      enabled: document.getElementById('setup-autosave-enabled').checked,
+      intervalTurns: parseInt(document.getElementById('setup-autosave-interval').value, 10) || 5,
+      maxAutoSaves: parseInt(document.getElementById('setup-autosave-max').value, 10) || 10
+    }
+  };
+
+  startNewGame(settings);
+  closeSetupModal();
+}
+
+function startNewGame(settings) {
+  currentGameSettings = settings;
+  deselectEntity();
+  hideContextMenu();
+  clearEntityMeshes();
+
+  gameState = new GameState();
+  gameState.generateMap(settings.mapSize, manifestData.terrains);
+  gameState.initializeManifest(manifestData, settings);
+
+  drawGrid(gameState.cells, gameState.activePlayer);
+  reconcileEntities(gameState);
+  updatePlayersUI();
+
+  document.getElementById('inspect-panel').classList.remove('active');
+  showToast('New game started!');
+}
+
+/* ==========================================================================
+   SAVE / LOAD MODAL LOGIC
+   ========================================================================== */
+
+async function openSaveLoadModal(mode = 'save') {
+  if (!gameState && mode === 'save') {
+    showToast('Start a game first before saving!', true);
+    return;
+  }
+
+  const overlay = document.getElementById('saveload-modal-overlay');
+  const manualInput = document.getElementById('manual-save-name');
+
+  if (gameState) {
+    const activeP = gameState.activePlayer ? gameState.activePlayer.name : 'Game';
+    manualInput.value = `${activeP} - Turn ${gameState.currentRound}`;
+  } else {
+    manualInput.value = '';
+  }
+
+  overlay.classList.add('active');
+  await renderSavesList();
+}
+
+function closeSaveLoadModal() {
+  document.getElementById('saveload-modal-overlay').classList.remove('active');
+}
+
+async function renderSavesList() {
+  const container = document.getElementById('saves-list-container');
+  container.innerHTML = '<div style="font-size:12px; color:var(--text-muted);">Loading saves...</div>';
+
+  try {
+    const saves = await listSaves();
+    container.innerHTML = '';
+
+    if (saves.length === 0) {
+      container.innerHTML = '<div style="font-size:12px; color:var(--text-muted); padding:12px; text-align:center;">No saved games found.</div>';
+      return;
+    }
+
+    saves.forEach(save => {
+      const item = document.createElement('div');
+      item.className = 'save-item';
+
+      const dateStr = new Date(save.timestamp).toLocaleString();
+      const badgeClass = save.auto ? 'auto' : 'manual';
+      const badgeText = save.auto ? 'Auto-Save' : 'Manual';
+
+      item.innerHTML = `
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <strong style="font-size: 14px;">${save.name}</strong>
+            <span class="save-badge ${badgeClass}">${badgeText}</span>
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted);">
+            Round ${save.turnNumber || 1} • Saved on ${dateStr}
+          </div>
+        </div>
+        <div style="display: flex; gap: 6px;">
+          <button type="button" class="btn btn-small btn-load-entry" style="width: 70px;">Load</button>
+          <button type="button" class="btn btn-danger btn-small btn-del-entry">✕</button>
+        </div>
+      `;
+
+      item.querySelector('.btn-load-entry').addEventListener('click', () => doLoadGame(save.name));
+      item.querySelector('.btn-del-entry').addEventListener('click', async () => {
+        await deleteSave(save.name);
+        renderSavesList();
+        showToast(`Deleted save "${save.name}"`);
+      });
+
+      container.appendChild(item);
+    });
+  } catch (err) {
+    console.error('Failed to list saves:', err);
+    container.innerHTML = '<div style="font-size:12px; color:#e74c3c;">Failed to load saved games.</div>';
+  }
+}
+
+async function handleManualSaveClicked() {
+  const input = document.getElementById('manual-save-name');
+  const name = input.value.trim();
+
+  if (!name) {
+    showToast('Enter a save name!', true);
+    return;
+  }
+
+  await doSaveGame(name, false);
+  await renderSavesList();
+  showToast(`Game saved as "${name}"`);
+}
+
+async function doSaveGame(name, isAuto = false) {
+  if (!gameState) return;
+
+  try {
+    const serializedData = gameState.serialize();
+    await saveGame({
+      name: name,
+      turnNumber: gameState.currentRound,
+      auto: isAuto,
+      data: serializedData
+    });
+
+    if (isAuto && currentGameSettings?.autoSave?.maxAutoSaves) {
+      await pruneAutoSaves(currentGameSettings.autoSave.maxAutoSaves);
+    }
+  } catch (err) {
+    console.error('Save failed:', err);
+    showToast('Failed to save game.', true);
+  }
+}
+
+async function doLoadGame(saveName) {
+  try {
+    const record = await loadGame(saveName);
+    if (!record) {
+      showToast('Save record not found!', true);
+      return;
+    }
+
+    deselectEntity();
+    hideContextMenu();
+    clearEntityMeshes();
+
+    gameState = new GameState();
+    gameState.deserialize(record.data);
+    gameState.manifestData = manifestData;
+
+    drawGrid(gameState.cells, gameState.activePlayer);
+    reconcileEntities(gameState);
+    updatePlayersUI();
+
+    closeSaveLoadModal();
+    showToast(`Loaded save: ${record.name}`);
+  } catch (err) {
+    console.error('Load failed:', err);
+    showToast('Failed to load save.', true);
+  }
+}
+
+/* ==========================================================================
+   TURN LIFECYCLE & AUTO-SAVE CHECK
+   ========================================================================== */
+
 /**
- * Left click: selects entity at clicked hex cell if owned by active human player, or deselects.
+ * Next Turn: triggers endTurn on gameState, cycling to next player turn and updating Fog of War.
  */
+function nextTurn() {
+  deselectEntity();
+  hideContextMenu();
+
+  gameState.endTurn();
+
+  drawGrid(gameState.cells, gameState.activePlayer);
+  reconcileEntities(gameState);
+  updatePlayersUI();
+
+  showToast(`Turn passed to ${gameState.activePlayer ? gameState.activePlayer.name : ''} (Round ${gameState.currentRound})`);
+
+  // Check auto-save condition
+  checkAutoSave();
+}
+
+async function checkAutoSave() {
+  const autoSaveConfig = currentGameSettings?.autoSave;
+  if (!autoSaveConfig || !autoSaveConfig.enabled) return;
+
+  const interval = autoSaveConfig.intervalTurns || 5;
+  // Trigger auto-save at start of round interval for player 1
+  if (gameState.currentRound > 1 && gameState.activePlayerIndex === 0 && (gameState.currentRound % interval === 0)) {
+    const autoSaveName = `Auto-Save Round ${gameState.currentRound}`;
+    await doSaveGame(autoSaveName, true);
+    showToast(`Auto-saved (${autoSaveName})`);
+  }
+}
+
+/* ==========================================================================
+   INTERACTION & SELECTION HANDLERS
+   ========================================================================== */
+
 function handleLeftClick(event) {
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
@@ -126,19 +558,16 @@ function handleLeftClick(event) {
 
   const activePlayer = gameState.activePlayer;
   if (!activePlayer || activePlayer.isAI) {
-    // AI players cannot be controlled by user
     deselectEntity();
     return;
   }
 
-  // Check if target cell is visible to active player
   if (!activePlayer.isVisible(hovered.q, hovered.r)) {
     deselectEntity();
     return;
   }
 
   const entity = gameState.getEntityAt(hovered.q, hovered.r);
-  // User can only select and control entities owned by the active human player
   if (entity && entity.owner && entity.owner.id === activePlayer.id) {
     selectEntity(entity);
   } else {
@@ -146,10 +575,6 @@ function handleLeftClick(event) {
   }
 }
 
-/**
- * Right click: if an entity is selected and belongs to active player,
- * queries entity.getActions() and displays action context menu.
- */
 function handleRightClick(event) {
   event.preventDefault();
 
@@ -180,9 +605,6 @@ function handleRightClick(event) {
   showContextMenu(event.clientX, event.clientY, selectedEntity, candidateActions, targetCell, targetEntity);
 }
 
-/**
- * Selects an entity and shows selection ring in 3D scene.
- */
 function selectEntity(entity) {
   selectedEntity = entity;
   const cell = entity.cell || gameState.cells[`${entity.q},${entity.r}`];
@@ -195,9 +617,6 @@ function selectEntity(entity) {
   showToast(`Selected ${entity.name.toUpperCase()}`);
 }
 
-/**
- * Deselects entity.
- */
 function deselectEntity() {
   if (selectedEntity) {
     selectedEntity = null;
@@ -205,9 +624,6 @@ function deselectEntity() {
   }
 }
 
-/**
- * Shows context menu popup with actions and preview text / validation reasons.
- */
 function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
   const menu = document.getElementById('entity-context-menu');
   const title = document.getElementById('context-menu-title');
@@ -268,12 +684,10 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
           showToast(`Failed to execute ${action.name}`, true);
         }
 
-        // Re-draw grid & reconcile 3D visual scene & update UI
         drawGrid(gameState.cells, gameState.activePlayer);
         reconcileEntities(gameState);
         updatePlayersUI();
 
-        // Check if selected entity was destroyed
         if (selectedEntity && !gameState.entities.includes(selectedEntity)) {
           deselectEntity();
         } else if (selectedEntity) {
@@ -306,16 +720,12 @@ function hideContextMenu() {
   clearPathHighlight();
 }
 
-/**
- * Updates players and dynamic resources list in UI, highlighting active player and turn round.
- */
 function updatePlayersUI() {
   const container = document.getElementById('players-list');
   container.innerHTML = '';
 
   const activePlayer = gameState.activePlayer;
 
-  // Add turn header info
   const header = document.createElement('div');
   header.style.marginBottom = '10px';
   header.style.fontSize = '12px';
@@ -363,26 +773,8 @@ function updatePlayersUI() {
   });
 }
 
-/**
- * Next Turn: triggers endTurn on gameState, cycling to next player turn and updating Fog of War.
- */
-function nextTurn() {
-  deselectEntity();
-  hideContextMenu();
-
-  gameState.endTurn();
-
-  drawGrid(gameState.cells, gameState.activePlayer);
-  reconcileEntities(gameState);
-  updatePlayersUI();
-
-  showToast(`Turn passed to ${gameState.activePlayer ? gameState.activePlayer.name : ''} (Round ${gameState.currentRound})`);
-}
-
-/**
- * Handles mouse movement for hovering inspection, respecting Fog of War.
- */
 function onMouseMove(event) {
+  if (!gameState) return;  // no game started yet
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
@@ -416,7 +808,6 @@ function onMouseMove(event) {
     const entitiesDiv = document.getElementById('inspect-entities');
     entitiesDiv.innerHTML = '';
 
-    // Show entity only if explored and visible, or if owned by active player on explored tile
     const showEntityInInspect = entity && (
       (entity.owner && activePlayer && entity.owner.id === activePlayer.id && isExplored) ||
       isVisible
@@ -455,66 +846,6 @@ function onMouseMove(event) {
     if (!selectedEntity) {
       infoPanel.classList.remove('active');
     }
-  }
-}
-
-/**
- * Regenerates map.
- */
-function regenerateMap() {
-  deselectEntity();
-  hideContextMenu();
-  clearEntityMeshes();
-
-  gameState.generateMap(CONFIG.GRID_RADIUS, manifestData.terrains);
-  gameState.initializeManifest(manifestData);
-
-  drawGrid(gameState.cells, gameState.activePlayer);
-  reconcileEntities(gameState);
-  updatePlayersUI();
-
-  document.getElementById('inspect-panel').classList.remove('active');
-  showToast('New map generated successfully!');
-}
-
-/**
- * Serializes state to JSON string.
- */
-function serializeState() {
-  const serialized = gameState.serialize();
-  const textarea = document.getElementById('state-data');
-  textarea.value = serialized;
-  textarea.select();
-  showToast('State serialized to JSON!');
-}
-
-/**
- * Deserializes state from JSON string.
- */
-function deserializeState() {
-  const textarea = document.getElementById('state-data');
-  const jsonString = textarea.value.trim();
-
-  if (!jsonString) {
-    showToast('Paste serialized state JSON first!', true);
-    return;
-  }
-
-  try {
-    deselectEntity();
-    hideContextMenu();
-    clearEntityMeshes();
-
-    gameState.deserialize(jsonString);
-    gameState.manifestData = manifestData;
-
-    drawGrid(gameState.cells, gameState.activePlayer);
-    reconcileEntities(gameState);
-    updatePlayersUI();
-    showToast('State successfully deserialized!');
-  } catch (err) {
-    console.error(err);
-    showToast('Failed to deserialize state data.', true);
   }
 }
 

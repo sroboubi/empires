@@ -155,6 +155,8 @@ export class UnitEntity extends BaseEntity {
             const pathRes = this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.movementCostTo(this, cell || entity) : null;
             if (!pathRes) {
               return { possible: false, reason: "No valid path to target for melee attack." };
+            } else if (pathRes.path.length > 2) {
+              return { possible: false, reason: "Can only melee attack adjacent targets." };
             }
             cost = Math.ceil(this.attackCostScale * pathRes.cost);
           }

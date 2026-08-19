@@ -1,0 +1,45 @@
+{
+  "mapSize": 64,
+  "players": [
+    {
+      "id": 1,
+      "name": "Red Empire",
+      "color": "#ff4d4d",
+      "description": "Aggressive expansionist empire",
+      "controller": null
+    },
+    {
+      "id": 2,
+      "name": "Blue Alliance",
+      "color": "#3399ff",
+      "description": "Strategic maritime alliance",
+      "controller": null
+    }
+  ],
+  "initialization": {
+    "orders": {
+      "max": 8,
+      "initial": 8,
+      "perTurn": 6
+    },
+    "startingResources": {
+      "gold": 1000,
+      "wood": 1000,
+      "iron": 1000,
+      "food": 1000,
+      "gems": 10
+    },
+    "startingUnits": {
+      "settler": 1,
+      "worker": 2,
+      "swordsman": 1,
+      "bowman": 1,
+      "horseman": 1
+    }
+  },
+  "autoSave": {
+    "enabled": true,
+    "intervalTurns": 5,
+    "maxAutoSaves": 10
+  }
+}
