@@ -791,6 +791,63 @@ export function raycastHex(mouseNormalized) {
   return null;
 }
 
+/**
+ * Focuses the camera on the center of mass of a list of entities.
+ * Pans the camera (moves both position and target) while keeping camera elevation constant.
+ * @param {Array} entities - Array of entity objects with q, r coordinates
+ */
+export function focusCameraOnEntities(entities) {
+  if (!entities || entities.length === 0 || !controls || !camera) return;
+
+  let sumX = 0;
+  let sumZ = 0;
+  let count = 0;
+
+  for (const entity of entities) {
+    const { x, z } = HexGrid.axialToPixel(entity.q, entity.r);
+    sumX += x;
+    sumZ += z;
+    count++;
+  }
+
+  if (count === 0) return;
+
+  const centerX = sumX / count;
+  const centerZ = sumZ / count;
+
+  // Smoothly animate camera position and target to the center of mass
+  // Keep camera Y (elevation) constant by moving both position and target by the same delta
+  const target = controls.target;
+  const duration = 0.5; // seconds
+  const startTargetX = target.x;
+  const startTargetZ = target.z;
+  const startCameraX = camera.position.x;
+  const startCameraZ = camera.position.z;
+  const startTime = performance.now() / 1000;
+
+  function animateFocus() {
+    const elapsed = performance.now() / 1000 - startTime;
+    const progress = Math.min(elapsed / duration, 1.0);
+    const easeProgress = progress * progress * (3 - 2 * progress); // Smoothstep easing
+
+    const newTargetX = THREE.MathUtils.lerp(startTargetX, centerX, easeProgress);
+    const newTargetZ = THREE.MathUtils.lerp(startTargetZ, centerZ, easeProgress);
+    const newCameraX = THREE.MathUtils.lerp(startCameraX, startCameraX + (centerX - startTargetX), easeProgress);
+    const newCameraZ = THREE.MathUtils.lerp(startCameraZ, startCameraZ + (centerZ - startTargetZ), easeProgress);
+
+    target.x = newTargetX;
+    target.z = newTargetZ;
+    camera.position.x = newCameraX;
+    camera.position.z = newCameraZ;
+
+    if (progress < 1.0) {
+      requestAnimationFrame(animateFocus);
+    }
+  }
+
+  animateFocus();
+}
+
 export function setEntitySelectionHighlight(x, y, z) {
   if (x === null || y === null || z === null) {
     clearEntitySelectionHighlight();

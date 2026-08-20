@@ -301,17 +301,7 @@ export class GameState {
 
       // Re-hydrate Cells into the HexGrid
       if (data.cells) {
-        const cellKeys = Object.keys(data.cells);
-        let maxQ = 0;
-        for (const key of cellKeys) {
-          const cell = data.cells[key];
-          maxQ = Math.max(maxQ, Math.abs(cell.q));
-        }
-        this.hexGrid = new HexGrid(maxQ);
-        this.hexGrid.cells.clear();
-        for (const key of cellKeys) {
-          this.hexGrid.cells.set(key, data.cells[key]);
-        }
+        this.hexGrid = HexGrid.fromCells(data.cells);
       }
 
       // Re-hydrate Entities

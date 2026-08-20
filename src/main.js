@@ -11,7 +11,8 @@ import {
   clearEntitySelectionHighlight,
   preloadModels,
   reconcileEntities,
-  clearEntityMeshes
+  clearEntityMeshes,
+  focusCameraOnEntities
 } from './renderer.js';
 import { loadGameManifest } from './manifestLoader.js';
 import { HexGrid } from './hexGrid.js';
@@ -131,34 +132,32 @@ function openSetupModal(canClose = true) {
   const closeBtn = document.getElementById('btn-close-setup');
   closeBtn.style.display = canClose ? 'block' : 'none';
 
-  const baseSettings = currentGameSettings || defaultSettings;
-
   // Map size
-  document.getElementById('setup-map-size').value = baseSettings.mapSize || 64;
+  document.getElementById('setup-map-size').value = defaultSettings.mapSize || 64;
 
   // Orders
-  const orders = baseSettings.initialization?.orders || { max: 8, initial: 8, perTurn: 6 };
+  const orders = defaultSettings.initialization?.orders || { max: 8, initial: 8, perTurn: 6 };
   document.getElementById('setup-orders-max').value = orders.max;
   document.getElementById('setup-orders-initial').value = orders.initial;
   document.getElementById('setup-orders-perturn').value = orders.perTurn;
 
   // Players
-  setupPlayers = JSON.parse(JSON.stringify(baseSettings.players || [
+  setupPlayers = JSON.parse(JSON.stringify(defaultSettings.players || [
     { id: 1, name: 'Red Empire', color: '#ff4d4d', controller: null },
     { id: 2, name: 'Blue Alliance', color: '#3399ff', controller: null }
   ]));
   renderSetupPlayers();
 
   // Resources
-  renderSetupResources(baseSettings.initialization?.startingResources || {});
+  renderSetupResources();
 
   // Units
-  setupStartingUnits = { ...(baseSettings.initialization?.startingUnits || {}) };
+  setupStartingUnits = { ...(defaultSettings.initialization?.startingUnits || {}) };
   populateUnitSelectOptions();
   renderSetupUnits();
 
   // Auto-Save
-  const autoSave = baseSettings.autoSave || { enabled: true, intervalTurns: 5, maxAutoSaves: 10 };
+  const autoSave = defaultSettings.autoSave || { enabled: true, intervalTurns: 5, maxAutoSaves: 10 };
   document.getElementById('setup-autosave-enabled').checked = autoSave.enabled;
   document.getElementById('setup-autosave-interval').value = autoSave.intervalTurns;
   document.getElementById('setup-autosave-max').value = autoSave.maxAutoSaves;
@@ -226,13 +225,10 @@ function addSetupPlayerRow() {
   renderSetupPlayers();
 }
 
-function renderSetupResources(resources) {
+function renderSetupResources() {
   const container = document.getElementById('setup-resources-container');
   container.innerHTML = '';
-
-  const resourceTypes = ['gold', 'wood', 'iron', 'food', 'gems'];
-  resourceTypes.forEach(res => {
-    const val = resources[res] !== undefined ? resources[res] : 1000;
+  for (const [res, val] of Object.entries(defaultSettings?.initialization?.startingResources || {})) {      
     const box = document.createElement('div');
     box.style.display = 'flex';
     box.style.flexDirection = 'column';
@@ -243,7 +239,7 @@ function renderSetupResources(resources) {
       <input type="number" id="res-val-${res}" class="form-input" value="${val}" min="0" style="padding: 4px 8px;">
     `;
     container.appendChild(box);
-  });
+  };
 }
 
 function populateUnitSelectOptions() {
@@ -307,13 +303,12 @@ function handleStartGameClicked() {
     showToast('Add at least 1 player!', true);
     return;
   }
-
-  const resourceTypes = ['gold', 'wood', 'iron', 'food', 'gems'];
+  
   const startingResources = {};
-  resourceTypes.forEach(res => {
+  for (const [res, val] of Object.entries(defaultSettings?.initialization?.startingResources || {})) {  
     const el = document.getElementById(`res-val-${res}`);
-    startingResources[res] = el ? parseInt(el.value, 10) || 0 : 0;
-  });
+    startingResources[res] = el ? parseInt(el.value, 10) || 0 : val;
+  };
 
   const settings = {
     mapSize: parseInt(document.getElementById('setup-map-size').value, 10),
@@ -356,6 +351,14 @@ function startNewGame(settings) {
   drawGrid(gameState.cells, gameState.activePlayer);
   reconcileEntities(gameState);
   updatePlayersUI();
+
+  // Focus camera on center of mass of active player's entities
+  if (gameState.activePlayer && gameState.entities.length > 0) {
+    const playerEntities = gameState.entities.filter(e => e.owner && e.owner.id === gameState.activePlayer.id);
+    if (playerEntities.length > 0) {
+      focusCameraOnEntities(playerEntities);
+    }
+  }
 
   document.getElementById('inspect-panel').classList.remove('active');
   showToast('New game started!');
@@ -489,12 +492,20 @@ async function doLoadGame(saveName) {
     clearEntityMeshes();
 
     gameState = new GameState();
-    gameState.deserialize(record.data);
     gameState.manifestData = manifestData;
-
+    gameState.deserialize(record.data);
+    
     drawGrid(gameState.cells, gameState.activePlayer);
     reconcileEntities(gameState);
     updatePlayersUI();
+
+    // Focus camera on center of mass of active player's entities
+    if (gameState.activePlayer && gameState.entities.length > 0) {
+      const playerEntities = gameState.entities.filter(e => e.owner && e.owner.id === gameState.activePlayer.id);
+      if (playerEntities.length > 0) {
+        focusCameraOnEntities(playerEntities);
+      }
+    }
 
     closeSaveLoadModal();
     showToast(`Loaded save: ${record.name}`);
@@ -520,6 +531,14 @@ function nextTurn() {
   drawGrid(gameState.cells, gameState.activePlayer);
   reconcileEntities(gameState);
   updatePlayersUI();
+
+  // Focus camera on center of mass of active player's entities
+  if (gameState.activePlayer && gameState.entities.length > 0) {
+    const playerEntities = gameState.entities.filter(e => e.owner && e.owner.id === gameState.activePlayer.id);
+    if (playerEntities.length > 0) {
+      focusCameraOnEntities(playerEntities);
+    }
+  }
 
   showToast(`Turn passed to ${gameState.activePlayer ? gameState.activePlayer.name : ''} (Round ${gameState.currentRound})`);
 

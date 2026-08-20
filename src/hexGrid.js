@@ -57,6 +57,29 @@ export class HexGrid {
     }
   }
 
+  /**
+   * Creates a HexGrid instance from pre-existing cell data (for deserialization).
+   * Does not regenerate terrain - uses the provided cells directly.
+   * @param {Object} cellsObject - Plain object keyed by "q,r" with cell data
+   * @returns {HexGrid}
+   */
+  static fromCells(cellsObject) {
+    const cellKeys = Object.keys(cellsObject);
+    let maxQ = 0;
+    for (const key of cellKeys) {
+      const cell = cellsObject[key];
+      maxQ = Math.max(maxQ, Math.abs(cell.q));
+    }
+    // Create grid without generating terrain by using a private initialization
+    const grid = Object.create(HexGrid.prototype);
+    grid.radius = maxQ;
+    grid.cells = new Map();
+    for (const key of cellKeys) {
+      grid.cells.set(key, cellsObject[key]);
+    }
+    return grid;
+  }
+
   // ---------------------------------------------------------------------------
   // Cell accessors
   // ---------------------------------------------------------------------------
