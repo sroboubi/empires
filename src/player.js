@@ -1,4 +1,6 @@
 import { animateToTimeOfDay } from "./renderer.js";
+import { nextTurn } from "./main.js";
+import { processTurn } from "./ai/harness.js";
 
 const turnHours = { start: 7, end: 17 }
 
@@ -56,7 +58,7 @@ export class Player {
 
     this.refillOrders();
     this.score = { military: 0, economic: 0 };
-    const ownedEntities = gameState.entities.filter(e => e.owner && e.owner.id === this.id);
+    const ownedEntities = this.getEntities(gameState);
     for (const entity of ownedEntities) {
       this.score.military += entity.state.score.military;
       this.score.economic += entity.state.score.economic;
@@ -68,6 +70,47 @@ export class Player {
     }
 
     this.updateVisibility(gameState);
+
+    if (this.controller) {      
+      processTurn(this, gameState).then(() => {
+        nextTurn();
+      }).catch(err => {
+        console.error(`Error processing turn for player ${this.name}:`, err);
+      });    
+    }
+  }
+
+  /**
+   * Returns all entities owned by this player in the given game state.
+   * @param {GameState} gameState
+   * @returns {Array<Entity>}
+   */
+  getEntities(gameState) {
+    if (!gameState || !gameState.entities) return [];
+    return gameState.entities.filter(e => e.owner && e.owner.id === this.id);
+  }
+
+  /**
+   * Returns all visible opponents and their owned entities in the given game state.
+   * @param {GameState} gameState
+   * @returns {Object} Mapping opponent player IDs to { name, score, description, entities }
+   */
+  getOpponents(gameState) {
+    if (!gameState || !gameState.entities) return [];    
+    const opponentEntities = gameState.entities.filter(e => e.owner && e.owner.id !== this.id && this.visibleCells.has(`${e.q},${e.r}`));
+    const opponent = {};
+    for (const entity of opponentEntities) {
+      if (!opponent[entity.owner.id]) {
+        opponent[entity.owner.id] = {
+          name: entity.owner.name,
+          score: entity.owner.score,
+          description: entity.owner.description,
+          entities: []
+        };
+      }
+      opponent[entity.owner.id].entities.push(entity);
+    }
+    return opponent;
   }
 
   /**
@@ -81,7 +124,7 @@ export class Player {
 
     if (!gameState || !gameState.entities) return;
 
-    const ownedEntities = gameState.entities.filter(e => e.owner && e.owner.id === this.id);
+    const ownedEntities = this.getEntities(gameState);
     ownedEntities.forEach(entity => {
       // Ensure entity has updated visible cells
       if (entity.visibleCells) {

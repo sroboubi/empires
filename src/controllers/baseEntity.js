@@ -98,6 +98,10 @@ export class BaseEntity {
     return this.state.sightRange !== undefined ? this.state.sightRange : 2;
   }
 
+  get armor() {
+    return this.state.armor || {};
+  }
+
   get rotationOffset() {
     return this.state.rotationOffset || 0;
   }
@@ -255,7 +259,7 @@ export class BaseEntity {
       damageType = damage.type || 'blunt';
     }
 
-    const armor = this.state.armor[damageType] || 1;
+    const armor = this.armor[damageType] || 1;
     let effectiveDamage = rawValue / armor;
 
     // Round to 1 decimal place for clean stats

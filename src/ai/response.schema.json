@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["type", "thoughtProcess"],
+  "properties": {
+    "thoughtProcess": {
+      "type": "string",
+      "description": "Brief strategic reasoning behind this decision."
+    },
+    "type": {
+      "type": "string",
+      "enum": ["ACTION", "CHAT", "END_TURN"],
+      "description": "The category of command being issued."
+    },
+    "entityId": {
+      "type": "string",
+      "description": "Required for ACTION. ID of the owned unit or construct executing the order."
+    },
+    "actionName": {
+      "type": "string",
+      "description": "Required for ACTION. Must match an action name from the entity's catalog (e.g. 'Move', 'Attack', 'Repair')."
+    },
+    "targetCell": {
+      "type": "object",
+      "description": "Target hex coordinates for actions like Move, Attack, or Construct.",
+      "required": ["q", "r"],
+      "properties": {
+        "q": { "type": "integer" },
+        "r": { "type": "integer" }
+      }
+    },
+    "targetEntityId": {
+      "type": "string",
+      "description": "Optional for ACTION. ID of an enemy or friendly entity being targeted."
+    },
+    "targetPlayerId": {
+      "type": "string",
+      "description": "Required for CHAT. ID of the opponent player to communicate with."
+    }
+  }
+}

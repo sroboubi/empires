@@ -29,16 +29,16 @@ export async function loadGameManifest(manifestUrl) {
       const absoluteModelUrl = new URL(entity.modelUrl, baseUri).href;
 
       console.log(`Preloading controller class for "${entity.name}" from ${absoluteControllerUrl}`);
-
-      let controllerClass = null;
+            
       try {
         const module = await import(absoluteControllerUrl);
-        controllerClass = module.default || module.Controller;
+        const controllerClass = module.default || module.Controller;
+        const tempInstance = new controllerClass(entity, null, null, null, null);            
+        const actions = tempInstance.getActions() || [];
+        entityMetadata[entity.name] = { ...entity, modelUrl: absoluteModelUrl, controllerUrl: absoluteControllerUrl, controllerClass: controllerClass, actions: actions };
       } catch (err) {
         console.error(`Failed to dynamically import controller for "${entity.name}":`, err);
-      }
-
-      entityMetadata[entity.name] = { ...entity, modelUrl: absoluteModelUrl, controllerUrl: absoluteControllerUrl, controllerClass: controllerClass };
+      }      
     }
 
     manifest.entities = entityMetadata;

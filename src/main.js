@@ -354,7 +354,7 @@ function startNewGame(settings) {
 
   // Focus camera on center of mass of active player's entities
   if (gameState.activePlayer && gameState.entities.length > 0) {
-    const playerEntities = gameState.entities.filter(e => e.owner && e.owner.id === gameState.activePlayer.id);
+    const playerEntities = gameState.activePlayer.getEntities(gameState);
     if (playerEntities.length > 0) {
       focusCameraOnEntities(playerEntities);
     }
@@ -501,7 +501,7 @@ async function doLoadGame(saveName) {
 
     // Focus camera on center of mass of active player's entities
     if (gameState.activePlayer && gameState.entities.length > 0) {
-      const playerEntities = gameState.entities.filter(e => e.owner && e.owner.id === gameState.activePlayer.id);
+      const playerEntities = gameState.activePlayer.getEntities(gameState);
       if (playerEntities.length > 0) {
         focusCameraOnEntities(playerEntities);
       }
@@ -522,7 +522,7 @@ async function doLoadGame(saveName) {
 /**
  * Next Turn: triggers endTurn on gameState, cycling to next player turn and updating Fog of War.
  */
-function nextTurn() {
+export function nextTurn() {
   deselectEntity();
   hideContextMenu();
 
@@ -534,7 +534,7 @@ function nextTurn() {
 
   // Focus camera on center of mass of active player's entities
   if (gameState.activePlayer && gameState.entities.length > 0) {
-    const playerEntities = gameState.entities.filter(e => e.owner && e.owner.id === gameState.activePlayer.id);
+    const playerEntities = gameState.activePlayer.getEntities(gameState);
     if (playerEntities.length > 0) {
       focusCameraOnEntities(playerEntities);
     }

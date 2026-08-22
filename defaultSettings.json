@@ -13,7 +13,10 @@
       "name": "Blue Alliance",
       "color": "#3399ff",
       "description": "Strategic maritime alliance",
-      "controller": null
+      "controller": {
+        "personality": "defensive",
+        "strategy": "economic focused"
+      }
     }
   ],
   "initialization": {
