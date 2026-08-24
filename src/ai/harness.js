@@ -97,3 +97,5 @@ function summarizeManifest(manifest) {
     });
     return summary;
 }
+
+// FIXME - this is too hard, make it simpler for LLM

@@ -14,6 +14,7 @@
 
 ## Game ##
 
+- prevent movement through enemy entities, and implement zone of control
 - prevent movement across tiles that units can't stand on, like water (check intermediate path)
 - barbarians and other non-aligned hostiles
 - resources init on grid - adjust resource extractor yields next to resources
