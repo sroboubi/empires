@@ -21,7 +21,7 @@
     {
       "name": "ShallowWater",
       "height": 1.0,
-      "movementCost": 1,
+      "movementCost": 9999,
       "material": {
         "color": "#3498db",
         "roughness": 0.1,
@@ -40,7 +40,7 @@
     {
       "name": "DeepWater",
       "height": 1.0,
-      "movementCost": 2,
+      "movementCost": 9999,
       "material": {
         "color": "#1d396e",
         "roughness": 0.1,
@@ -318,7 +318,8 @@
       },
       "spawnCost": {
         "food": 50,
-        "gold": 10
+        "gold": 10,
+        "gems": 2
       },
       "rotationOffset": 90,
       "sightRange": 3,
@@ -367,7 +368,8 @@
       },
       "spawnCost": {
         "food": 100,
-        "gold": 50
+        "gold": 50,
+        "gems": 10
       },
       "rotationOffset": 180,
       "sightRange": 5,
@@ -467,7 +469,8 @@
       "maintenance": {},
       "spawnCost": {
         "gold": 100,
-        "food": 100
+        "food": 100,
+        "wood": 100
       },
       "spawnConditions": {
         "terrain": [
@@ -482,7 +485,8 @@
       "yields": {
         "gold": 10,
         "food": 10,
-        "gems": 10
+        "gems": 1,
+        "orders": 1
       },
       "rotationOffset": 0,
       "sightRange": 8,
@@ -521,7 +525,7 @@
         "minSeparation": 3
       },
       "yields": {
-        "iron": 10
+        "iron": 15
       },
       "rotationOffset": 0,
       "sightRange": 3,
@@ -551,7 +555,7 @@
         "minSeparation": 3
       },
       "yields": {
-        "wood": 10
+        "wood": 15
       },
       "rotationOffset": 0,
       "sightRange": 3,
@@ -582,7 +586,7 @@
         "minSeparation": 3
       },
       "yields": {
-        "gold": 25,
+        "gold": 20,
         "gems": 1
       },
       "rotationOffset": 0,
@@ -611,7 +615,7 @@
         "minSeparation": 2
       },
       "yields": {
-        "food": 20
+        "food": 25
       },
       "rotationOffset": 0,
       "sightRange": 3,

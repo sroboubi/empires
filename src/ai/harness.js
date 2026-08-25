@@ -1,9 +1,36 @@
+const responseFormatInstructions = `
+Respond EXCLUSIVELY with a raw JSON object (no markdown wrappers).
+
+1. COMMAND:
+{
+  "thoughtProcess": "Reasoning",
+  "type": "COMMAND",
+  "entityId": "<YOUR_ENTITY_ID>",
+  "actionName": "<ACTION_NAME>",
+  "target": { "cell": { "q": 0, "r": 2 } } // OR { "entityId": "<ID>" } OR { "entityName": "<NAME>" }
+}
+
+2. CHAT (Costs 1 order):
+{
+  "thoughtProcess": "Reasoning",
+  "type": "CHAT",
+  "targetPlayerId": "<OPPONENT_PLAYER_ID>"
+}
+
+3. END_TURN (Always use when out of orders or finished):
+{
+  "thoughtProcess": "Reasoning",
+  "type": "END_TURN",
+  "note": "Reminder to myself for next turn (e.g. Finish building farm, then move warrior North)"
+}
+`;
+
 /**
  * Processes a player's turn by summarizing the game state and interacting with the AI controller.
  * @param {Player} player - The player whose turn is being processed.
  * @param {GameState} gameState - The current state of the game.
  */
-export async function processTurn(player, gameState) {    
+export async function processTurn(player, gameState) {
     const systemPrompt = {
         identity: `You are an AI player in a turn-based strategy game. Make strategic decisions based on the current game state and your objectives.`,
         name: player.name,
@@ -17,16 +44,14 @@ export async function processTurn(player, gameState) {
             `Adjacent hexes differ by 1 unit in q, r, or both axial co-ordinates`,
             `Players can build new entities or repair existing ones if they have the resources`,
             `Players can initiate chat with other players, which costs 1 order`,
-            `The game ends when a player achieves a score that is double the score of any other player in all attributes (military and economic)`,            
+            `The game ends when a player achieves a score that is double the score of any other player in all attributes (military and economic)`,
         ],
         manifest: summarizeManifest(gameState.manifestData),
-        responseFormatInstructions: `Respond EXCLUSIVELY with a valid JSON object. Do not include markdown codeblock wrappers (\`\`\`json). Your response MUST follow this structure:
-        {"thoughtProcess": "Short strategic reason", "type": "ACTION" | "CHAT" | "END_TURN", "entityId": "string (for ACTION)", "actionName": "string (for ACTION)", 
-        "targetCell": { "q": number, "r": number }, "targetEntityId": "string (optional for ACTION)", "targetPlayerId": "string (for CHAT)"}`
+        responseFormatInstructions: responseFormatInstructions
     }
 
     let attempts = 10; // Safeguard against infinite loops
-    while (player.orders > 0 && attempts > 0) {
+    while (attempts > 0) {
         attempts--;
         const summary = summarize(player, gameState);
 
@@ -44,7 +69,7 @@ export async function processTurn(player, gameState) {
         // TODO: reset attempts if we get a valid order back from LLM, so we can keep processing until we run out of orders or the LLM wants to end the turn
 
         return // TODO only do this if LLM wants to end the turn to save orders for next turn
-    }    
+    }
 }
 
 /**
@@ -63,13 +88,14 @@ function summarize(player, gameState) {
     Object.values(opponents).forEach(opp => {
         opp.entities = opp.entities.map(summarizeEntity);
     });
+
     return {
-        orders: player.orders, 
+        orders: player.orders,
         resources: player.resources,
-        score: player.score,       
+        score: player.score,
         cells: {
-            visible: Array.from(player.visibleCells),
-            explored: Array.from(player.exploredCells.difference(player.visibleCells))
+            visible: Array.from(player.visibleCells).map(cellKey => { return getCellInfo(gameState, cellKey) }),
+            explored: Array.from(player.exploredCells.difference(player.visibleCells)).map(cellKey => { return getCellInfo(gameState, cellKey) })
         },
         entities: player.getEntities(gameState).map(summarizeEntity),
         opponents: opponents
@@ -77,25 +103,38 @@ function summarize(player, gameState) {
 }
 
 function summarizeEntity(entity) {
+    const { q, r } = entity.cell;
+    const terrainName = entity.cell.terrain.name;
     return {
         id: entity.id,
         name: entity.name,
-        cell: entity.cell,
+        cell: { q, r, terrainName },
         health: entity.health,
         maxHealth: entity.maxHealth,
         actionPoints: entity.actionPoints,
         damage: entity.damage,
-        armor: entity.armor        
+        armor: entity.armor
     };
 }
 
 function summarizeManifest(manifest) {
-    const summary = {};
+    const summary = { entities: {}, terrains: {} };
     Object.entries(manifest.entities).forEach(([name, entity]) => {
-        const {spawnCost, maintenance, buildables, repairables, score, yields, actions} = entity;
-        summary[name] = {spawnCost, maintenance, buildables, repairables, score, yields, actions};
+        const { spawnCost, maintenance, buildables, repairables, score, yields, actions } = entity;
+        summary.entities[name] = { spawnCost, maintenance, buildables, repairables, score, yields, actions };
+    });
+    manifest.terrains.forEach(terrain => {
+        summary.terrains[terrain.name] = { movementCost: terrain.movementCost, height: terrain.height };
     });
     return summary;
 }
 
-// FIXME - this is too hard, make it simpler for LLM
+function getCellInfo(gameState, cellCoordStr) {
+    if (typeof cellCoordStr === 'string') {
+        const [q, r] = cellCoordStr.split(',').map(Number);
+        const cell = gameState.hexGrid.getCell(q, r);
+        if (!cell) return null;
+        return { q, r, terrainName: cell.terrain.name };
+    }
+    return null;
+}

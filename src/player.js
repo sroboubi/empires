@@ -1,6 +1,6 @@
 import { animateToTimeOfDay } from "./renderer.js";
 import { nextTurn } from "./main.js";
-import { processTurn } from "./ai/harness.js";
+import { processTurn } from "./ai/standard/core.js";
 import { CONFIG } from './config.js';
 
 const turnHours = { start: 7, end: 17 }
@@ -32,9 +32,8 @@ export class Player {
       economic: 0
     };
 
-    this.maxOrders = ordersConfig?.max ?? 0;
-    this.ordersPerTurn = ordersConfig?.perTurn ?? 0;
-    this.orders = ordersConfig?.initial ?? this.maxOrders;
+    this.ordersConfig = ordersConfig || {};
+    this.orders = ordersConfig?.initial ?? 0;
 
     // Fog of war tracking sets (stores coordinate key strings "q,r")
     this.exploredCells = new Set();
@@ -57,7 +56,7 @@ export class Player {
   step(gameState) {
     if (!gameState || !gameState.entities) return;
 
-    this.refillOrders();
+    this.refillOrders(gameState);
     this.score = { military: 0, economic: 0 };
     const ownedEntities = this.getEntities(gameState);
     for (const entity of ownedEntities) {
@@ -72,12 +71,56 @@ export class Player {
 
     this.updateVisibility(gameState);
 
-    if (this.controller) {      
+    if (this.controller) {
       processTurn(this, gameState).then(() => {
         nextTurn();
       }).catch(err => {
         console.error(`Error processing turn for player ${this.name}:`, err);
-      });    
+      });
+    }
+  }
+
+  /**
+   * Calculates resource profile of the player given current upkeep and yields.
+   * @param {GameState} gameState
+   * @returns {Object} An object with the following properties:
+   *  - totalUpkeep: An object with the total upkeep for each resource.
+   *  - totalYields: An object with the total yields for each resource.
+   *  - netIncome: An object with the net income for each resource (yields - upkeep).
+   */
+  getResourceProfile(gameState) {
+    const totalUpkeep = {};
+    const totalYields = {};
+    const netIncome = {};
+    const resourceKeys = new Set();
+
+    const myEntities = this.getEntities(gameState);
+    for (const entity of myEntities) {
+      const maintenance = entity.getCostToMaintain ? entity.getCostToMaintain() : {};
+      for (const [res, amt] of Object.entries(maintenance)) {
+        resourceKeys.add(res);
+        totalUpkeep[res] = (totalUpkeep[res] || 0) + amt;
+      }
+
+      if (entity.active) {
+        const yields = entity.state?.yields || {};
+        for (const [res, amt] of Object.entries(yields)) {
+          resourceKeys.add(res);
+          totalYields[res] = (totalYields[res] || 0) + amt;
+        }
+      }
+    }
+
+    for (const resKey of resourceKeys) {
+      if (totalUpkeep[resKey] == undefined) totalUpkeep[resKey] = 0;
+      if (totalYields[resKey] == undefined) totalYields[resKey] = 0;
+      netIncome[resKey] = totalYields[resKey] - totalUpkeep[resKey];
+    }
+
+    return {
+      totalUpkeep,
+      totalYields,
+      netIncome,
     }
   }
 
@@ -97,7 +140,7 @@ export class Player {
    * @returns {Object} Mapping opponent player IDs to { name, score, description, entities }
    */
   getOpponents(gameState) {
-    if (!gameState || !gameState.entities) return [];    
+    if (!gameState || !gameState.entities) return [];
     const opponentEntities = gameState.entities.filter(e => e.owner && e.owner.id !== this.id && this.visibleCells.has(`${e.q},${e.r}`));
     const opponent = {};
     for (const entity of opponentEntities) {
@@ -229,8 +272,13 @@ export class Player {
   /**
    * Adds per-turn orders up to the maximum.
    */
-  refillOrders() {
-    if (this.maxOrders <= 0) return;
+  refillOrders(gameState) {
+    let orderBonus = 0;
+    this.getEntities(gameState).forEach(entity => {
+      orderBonus += entity.state?.yields?.orders || 0;
+    });
+    this.maxOrders = this.ordersConfig.max + orderBonus;
+    this.ordersPerTurn = this.ordersConfig.perTurn + orderBonus;
     this.orders = Math.min(this.maxOrders, this.orders + this.ordersPerTurn);
     this.setTimeOfDay(2);
   }
@@ -257,8 +305,7 @@ export class Player {
       controller: this.controller,
       resources: this.resources,
       orders: this.orders,
-      maxOrders: this.maxOrders,
-      ordersPerTurn: this.ordersPerTurn,
+      ordersConfig: this.ordersConfig,
       startCoord: this.startCoord,
       exploredCells: Array.from(this.exploredCells),
       visibleCells: Array.from(this.visibleCells)
@@ -269,12 +316,7 @@ export class Player {
    * Re-hydrates a Player instance from serialized JSON object.
    */
   static fromJSON(data) {
-    const ordersConfig = {
-      max: data.maxOrders ?? 0,
-      initial: data.orders ?? 0,
-      perTurn: data.ordersPerTurn ?? 0
-    };
-    const player = new Player(data.id, data.name, data.color, data.resources, data.description, data.controller, ordersConfig);
+    const player = new Player(data.id, data.name, data.color, data.resources, data.description, data.controller, data.ordersConfig);
     if (data.startCoord) {
       player.startCoord = { ...data.startCoord };
     }

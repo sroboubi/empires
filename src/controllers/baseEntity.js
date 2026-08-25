@@ -332,7 +332,7 @@ export class BaseEntity {
           if (!cell) return { possible: false, reason: "No target cell selected." };
           if (entity && entity !== this) return { possible: false, reason: "Target cell is occupied." };
 
-          if (!this.canStandOn(cell)) return { possible: false, reason: "Cannot build construct on water." };
+          if (!this.canStandOn(cell)) return { possible: false, reason: "Cannot build construct on target terrain." };
 
           const meta = this.gameState && this.gameState.manifestData ? this.gameState.manifestData.entities[buildable] : null;
           const spawnConditions = meta ? meta.spawnConditions : null;

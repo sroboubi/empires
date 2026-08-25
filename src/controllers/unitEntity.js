@@ -21,7 +21,8 @@ export class UnitEntity extends BaseEntity {
       attackCostScale: 1.0,
       damage: { value: 0, type: 'blunt' },
       range: null,
-      facing: 'E'
+      facing: 'E',
+      battleExhaustion: 1,
     };
   }
 
@@ -56,6 +57,7 @@ export class UnitEntity extends BaseEntity {
   step(globalContext) {
     super.step(globalContext);
 
+    this.state.battleExhaustion = 1;
     if (this.active) {
       const unusedAP = Math.max(0, this.state.actionPoints);
       if (unusedAP > 0) {
@@ -78,7 +80,7 @@ export class UnitEntity extends BaseEntity {
         if (!this.active) return { possible: false, reason: "Unit is inactive (maintenance unpaid)." };
         if (!cell) return { possible: false, reason: "No target cell selected." };
         if (entity && entity !== this) return { possible: false, reason: "Target cell is occupied." };
-        if (!this.canStandOn(cell)) return { possible: false, reason: "Cannot stand on water terrain." };
+        if (!this.canStandOn(cell)) return { possible: false, reason: "Cannot stand on target terrain." };
 
         const pathRes = this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.movementCostTo(this, cell) : null;
         if (!pathRes) return { possible: false, reason: "No valid path to target cell." };
@@ -149,7 +151,7 @@ export class UnitEntity extends BaseEntity {
                 return { possible: false, reason: "Ranged trajectory blocked by terrain height." };
               }
             }
-            cost = Math.ceil(this.attackCostScale * dist);
+            cost = Math.ceil(this.attackCostScale * this.state.battleExhaustion * dist);
           } else {
             // Melee attack
             const pathRes = this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.movementCostTo(this, cell || entity) : null;
@@ -158,7 +160,7 @@ export class UnitEntity extends BaseEntity {
             } else if (pathRes.path.length > 2) {
               return { possible: false, reason: "Can only melee attack adjacent targets." };
             }
-            cost = Math.ceil(this.attackCostScale * pathRes.cost);
+            cost = Math.ceil(this.attackCostScale * this.state.battleExhaustion * pathRes.cost);
           }
 
           const affordability = this.checkActionAffordability(cost);
@@ -222,7 +224,7 @@ export class UnitEntity extends BaseEntity {
 
           this.spendActionCost(check.cost, check.ordersRequired);
           entity.receiveDamage({ value: check.rawDamage, type: this.damage.type }, this);
-
+          this.state.battleExhaustion++;
           return true;
         }
       });

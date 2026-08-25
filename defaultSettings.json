@@ -1,5 +1,5 @@
 {
-  "mapSize": 64,
+  "mapSize": 32,
   "players": [
     {
       "id": 1,
@@ -26,15 +26,15 @@
       "perTurn": 6
     },
     "startingResources": {
-      "gold": 1000,
-      "wood": 1000,
-      "iron": 1000,
-      "food": 1000,
-      "gems": 10
+      "gold": 200,
+      "wood": 300,
+      "iron": 300,
+      "food": 300,
+      "gems": 5
     },
     "startingUnits": {
       "settler": 1,
-      "worker": 2,
+      "worker": 1,
       "swordsman": 1,
       "bowman": 1,
       "horseman": 1

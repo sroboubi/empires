@@ -93,6 +93,7 @@ async function init() {
         hideContextMenu();
         deselectEntity();
         closeSaveLoadModal();
+        closeProfileModal();
         if (gameState) {
           closeSetupModal();
         }
@@ -111,6 +112,7 @@ async function init() {
     document.getElementById('btn-add-starting-unit').addEventListener('click', addSetupUnitRow);
     document.getElementById('btn-close-setup').addEventListener('click', closeSetupModal);
     document.getElementById('btn-close-saveload').addEventListener('click', closeSaveLoadModal);
+    document.getElementById('btn-close-profile').addEventListener('click', closeProfileModal);
     document.getElementById('btn-do-manual-save').addEventListener('click', handleManualSaveClicked);
 
     // Open Setup Modal automatically on initial load
@@ -723,14 +725,24 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
     actionsDiv.innerHTML = '<div style="font-size: 11px; color: var(--text-muted); padding: 4px;">No actions available for target cell</div>';
   }
 
-  const menuWidth = 260;
-  const menuHeight = 220;
-  const posX = Math.min(x, window.innerWidth - menuWidth - 10);
-  const posY = Math.min(y, window.innerHeight - menuHeight - 10);
-
-  menu.style.left = `${posX}px`;
-  menu.style.top = `${posY}px`;
+  // Display menu offscreen first to measure actual dimensions
   menu.style.display = 'flex';
+  menu.style.visibility = 'hidden';
+  menu.style.left = '0px';
+  menu.style.top = '0px';
+
+  requestAnimationFrame(() => {
+    const rect = menu.getBoundingClientRect();
+    const menuWidth = rect.width || 280;
+    const menuHeight = rect.height || 220;
+
+    const posX = Math.max(10, Math.min(x, window.innerWidth - menuWidth - 10));
+    const posY = Math.max(10, Math.min(y, window.innerHeight - menuHeight - 10));
+
+    menu.style.left = `${posX}px`;
+    menu.style.top = `${posY}px`;
+    menu.style.visibility = 'visible';
+  });
 }
 
 function hideContextMenu() {
@@ -738,6 +750,8 @@ function hideContextMenu() {
   if (menu) menu.style.display = 'none';
   clearPathHighlight();
 }
+
+let playerHoverTimer = null;
 
 function updatePlayersUI() {
   const container = document.getElementById('players-list');
@@ -756,15 +770,16 @@ function updatePlayersUI() {
   gameState.players.forEach(player => {
     const isActive = activePlayer && activePlayer.id === player.id;
     const li = document.createElement('li');
+    li.className = 'player-list-item';
     li.style.display = 'flex';
     li.style.flexDirection = 'column';
     li.style.alignItems = 'flex-start';
     li.style.gap = '2px';
     li.style.marginBottom = '8px';
-    li.style.padding = '6px';
+    li.style.padding = '8px';
     li.style.borderRadius = '6px';
-    li.style.background = isActive ? 'rgba(167, 139, 250, 0.15)' : 'transparent';
-    li.style.border = isActive ? '1px solid var(--accent-color)' : '1px solid transparent';
+    li.style.background = isActive ? 'rgba(167, 139, 250, 0.15)' : 'rgba(255, 255, 255, 0.02)';
+    li.style.border = isActive ? '1px solid var(--accent-color)' : '1px solid rgba(255, 255, 255, 0.08)';
 
     let resourceStr = '';
     if (player.resources) {
@@ -777,19 +792,253 @@ function updatePlayersUI() {
       ? `orders: ${player.orders}/${player.maxOrders}`
       : '';
 
-    const scoreStr = `military score: ${player.score.military} - econimic score: ${player.score.economic}`;
+    const scoreStr = `military score: ${player.score.military} - economic score: ${player.score.economic}`;
 
     li.innerHTML = `
-      <div style="display: flex; align-items: center; gap: 8px;">
-        <span class="player-color-dot" style="background-color: ${player.color};"></span>
-        <strong style="font-size: 14px; color: ${isActive ? '#ffffff' : 'var(--text-muted)'};">${player.name} ${isActive ? '◀ ACTIVE' : ''}</strong>
+      <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span class="player-color-dot" style="background-color: ${player.color};"></span>
+          <strong style="font-size: 14px; color: ${isActive ? '#ffffff' : 'var(--text-muted)'};">${player.name} ${isActive ? '◀ ACTIVE' : ''}</strong>
+        </div>
+        <span style="font-size: 10px; color: var(--accent-color); opacity: 0.8;">📊 Profile</span>
       </div>
       ${ordersStr ? `<div style="font-size: 11px; color: var(--accent-color); margin-left: 18px;">${ordersStr}</div>` : ''}
       ${scoreStr ? `<div style="font-size: 11px; color: var(--accent-color); margin-left: 18px;">${scoreStr}</div>` : ''}
       ${resourceStr ? `<div style="font-size: 11px; color: var(--text-muted); margin-left: 18px;">${resourceStr}</div>` : ''}
     `;
+
+    // Long Hover (Tooltip) setup
+    li.addEventListener('mouseenter', (ev) => {
+      clearTimeout(playerHoverTimer);
+      playerHoverTimer = setTimeout(() => {
+        showResourceTooltip(player, ev.clientX, ev.clientY);
+      }, 400);
+    });
+
+    li.addEventListener('mousemove', (ev) => {
+      const tooltip = document.getElementById('resource-profile-tooltip');
+      if (tooltip.classList.contains('active')) {
+        positionResourceTooltip(ev.clientX, ev.clientY);
+      }
+    });
+
+    li.addEventListener('mouseleave', () => {
+      clearTimeout(playerHoverTimer);
+      hideResourceTooltip();
+    });
+
+    // Click -> Open Detailed Resource Profile Modal
+    li.addEventListener('click', () => {
+      clearTimeout(playerHoverTimer);
+      hideResourceTooltip();
+      openProfileModal(player);
+    });
+
     container.appendChild(li);
   });
+}
+
+/* ==========================================================================
+   RESOURCE PROFILE VISUALIZER (MODAL & TOOLTIP)
+   ========================================================================== */
+
+function openProfileModal(player) {
+  if (!player || !gameState) return;
+  const overlay = document.getElementById('profile-modal-overlay');
+  const colorDot = document.getElementById('profile-modal-color');
+  const nameSpan = document.getElementById('profile-modal-player-name');
+  const content = document.getElementById('profile-modal-content');
+
+  colorDot.style.backgroundColor = player.color;
+  nameSpan.textContent = `${player.name.toUpperCase()} — RESOURCE PROFILE`;
+  content.innerHTML = renderResourceProfileHTML(player, gameState, false);
+
+  overlay.classList.add('active');
+}
+
+function closeProfileModal() {
+  const overlay = document.getElementById('profile-modal-overlay');
+  if (overlay) overlay.classList.remove('active');
+}
+
+function showResourceTooltip(player, x, y) {
+  if (!player || !gameState) return;
+  const tooltip = document.getElementById('resource-profile-tooltip');
+  const content = document.getElementById('profile-tooltip-content');
+
+  content.innerHTML = renderResourceProfileHTML(player, gameState, true);
+  tooltip.classList.add('active');
+  positionResourceTooltip(x, y);
+}
+
+function hideResourceTooltip() {
+  const tooltip = document.getElementById('resource-profile-tooltip');
+  if (tooltip) tooltip.classList.remove('active');
+}
+
+function positionResourceTooltip(x, y) {
+  const tooltip = document.getElementById('resource-profile-tooltip');
+  if (!tooltip) return;
+  const rect = tooltip.getBoundingClientRect();
+  let posX = x + 15;
+  let posY = y - 20;
+
+  if (posX + rect.width > window.innerWidth - 10) {
+    posX = x - rect.width - 15;
+  }
+  if (posY + rect.height > window.innerHeight - 10) {
+    posY = window.innerHeight - rect.height - 10;
+  }
+  tooltip.style.left = `${Math.max(10, posX)}px`;
+  tooltip.style.top = `${Math.max(10, posY)}px`;
+}
+
+function renderResourceProfileHTML(player, gameState, isCompact = false) {
+  const { totalUpkeep, totalYields, netIncome } = player.getResourceProfile(gameState);
+  const myEntities = player.getEntities(gameState);
+
+  const resourceKeys = Array.from(new Set([
+    ...Object.keys(player.resources || {}),
+    ...Object.keys(totalYields || {}),
+    ...Object.keys(totalUpkeep || {})
+  ])).sort();
+
+  const summaryHTML = isCompact ? '' : `
+    <div class="profile-summary-grid">
+      <div class="profile-stat-box">
+        <span class="profile-stat-label">Military Score</span>
+        <span class="profile-stat-val" style="color: #e74c3c;">${player.score.military}</span>
+      </div>
+      <div class="profile-stat-box">
+        <span class="profile-stat-label">Economic Score</span>
+        <span class="profile-stat-val" style="color: #f1c40f;">${player.score.economic}</span>
+      </div>
+      <div class="profile-stat-box">
+        <span class="profile-stat-label">Orders</span>
+        <span class="profile-stat-val" style="color: var(--accent-color);">${player.orders}/${player.maxOrders}</span>
+      </div>
+      <div class="profile-stat-box">
+        <span class="profile-stat-label">Entities</span>
+        <span class="profile-stat-val" style="color: #2ecc71;">${myEntities.length}</span>
+      </div>
+    </div>
+  `;
+
+  const resourceIconColors = {
+    food: '#2ecc71',
+    gold: '#f1c40f',
+    iron: '#95a5a6',
+    wood: '#e67e22',
+    gems: '#9b59b6'
+  };
+
+  let chartsHTML = '';
+  resourceKeys.forEach(res => {
+    const stock = player.resources[res] || 0;
+    const yields = totalYields[res] || 0;
+    const upkeep = totalUpkeep[res] || 0;
+    const net = netIncome[res] || 0;
+    const projectedStock = Math.max(0, stock + net);
+
+    const netClass = net > 0 ? 'positive' : (net < 0 ? 'negative' : 'neutral');
+    const netStr = net > 0 ? `+${net}/turn` : (net < 0 ? `${net}/turn` : `0/turn`);
+
+    // Stock Bar Scale & Segments
+    const maxStockScale = Math.max(stock, projectedStock, stock + Math.abs(net), 60);
+    let stockBarHTML = '';
+
+    if (net >= 0) {
+      const baseStockPct = Math.min(100, Math.round((stock / maxStockScale) * 100));
+      const gainPct = Math.min(100 - baseStockPct, Math.round((net / maxStockScale) * 100));
+      stockBarHTML = `
+        <div class="stock-bar-container" title="Current Stock: ${stock} | Projected Gain: +${net} | Projected Next Turn: ${projectedStock}">
+          <div class="stock-bar-current" style="width: ${baseStockPct}%;"></div>
+          <div class="stock-bar-gain" style="width: ${gainPct}%;"></div>
+        </div>
+      `;
+    } else {
+      const deficitAmount = Math.min(stock, Math.abs(net));
+      const safeStock = Math.max(0, stock - deficitAmount);
+      const safeStockPct = Math.min(100, Math.round((safeStock / maxStockScale) * 100));
+      const lossPct = Math.min(100 - safeStockPct, Math.round((deficitAmount / maxStockScale) * 100));
+      stockBarHTML = `
+        <div class="stock-bar-container" title="Current Stock: ${stock} | Projected Loss: ${net} | Projected Next Turn: ${projectedStock}">
+          <div class="stock-bar-current" style="width: ${safeStockPct}%;"></div>
+          <div class="stock-bar-loss" style="width: ${lossPct}%;"></div>
+        </div>
+      `;
+    }
+
+    // Yield vs Upkeep Sub-bar
+    const maxFlowScale = Math.max(yields + upkeep, 15);
+    const yieldPct = Math.min(100, Math.round((yields / maxFlowScale) * 100));
+    const upkeepPct = Math.min(100, Math.round((upkeep / maxFlowScale) * 100));
+
+    const color = resourceIconColors[res.toLowerCase()] || 'var(--accent-color)';
+    const projectionText = net >= 0 ? `<span style="color: #2ecc71;">(+${net} ➔ ${projectedStock})</span>` : `<span style="color: #e74c3c;">(${net} ➔ ${projectedStock})</span>`;
+
+    chartsHTML += `
+      <div class="resource-chart-row">
+        <div class="resource-chart-header">
+          <span class="resource-chart-name" style="color: ${color};">
+            ● ${res}
+          </span>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 11px; color: var(--text-muted);">Stock: <strong>${stock}</strong> ${projectionText}</span>
+            <span class="resource-chart-net ${netClass}">${netStr}</span>
+          </div>
+        </div>
+
+        ${stockBarHTML}
+
+        <div class="stacked-bar-container" style="margin-top: 2px;">
+          <div class="stacked-bar-yield" style="width: ${yieldPct}%;" title="Yields: +${yields}/turn"></div>
+          <div class="stacked-bar-upkeep" style="width: ${upkeepPct}%;" title="Upkeep: -${upkeep}/turn"></div>
+        </div>
+
+        <div class="resource-details-line">
+          <span style="color: #2ecc71;">▲ Yield: +${yields}/turn</span>
+          <span style="color: #e74c3c;">▼ Upkeep: -${upkeep}/turn</span>
+        </div>
+      </div>
+    `;
+  });
+
+  // Entity breakdown section for full modal view
+  let entityBreakdownHTML = '';
+  if (!isCompact && myEntities.length > 0) {
+    const entityCounts = {};
+    myEntities.forEach(e => {
+      entityCounts[e.name] = (entityCounts[e.name] || 0) + 1;
+    });
+
+    const chips = Object.entries(entityCounts)
+      .map(([name, count]) => `<span style="background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); padding: 4px 8px; border-radius: 4px; font-size: 11px; text-transform: uppercase;"><strong>${name}</strong> x${count}</span>`)
+      .join(' ');
+
+    entityBreakdownHTML = `
+      <div class="divider" style="margin: 16px 0 12px 0;"></div>
+      <div class="section-title">Owned Entities Breakdown</div>
+      <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px;">
+        ${chips}
+      </div>
+    `;
+  }
+
+  const titleHeader = isCompact ? `
+    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+      <span class="player-color-dot" style="background-color: ${player.color};"></span>
+      <strong style="font-size: 13px; text-transform: uppercase;">${player.name} Resource Profile</strong>
+    </div>
+  ` : '';
+
+  return `
+    ${titleHeader}
+    ${summaryHTML}
+    <div class="section-title" style="margin-bottom: 8px;">Resource Flow & Balance</div>
+    ${chartsHTML}
+    ${entityBreakdownHTML}
+  `;
 }
 
 function onMouseMove(event) {

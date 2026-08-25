@@ -172,3 +172,28 @@ Implement the game configuration loading system using the provided JSON architec
 1. resource types should be defined only in the manifest - remove hardcodes from main.js
 2. on player turn start, focus camera on center of mass of player entities (average position of all entities)
 3. on load - gameState.deserialize can not call new HexGrid() as this will try to regen the terrain and fail because there is no terrain config provided. Make terrain config manditory in the existing hexGrid constructor. Make a new constructor for load that just takes the cells and does not try to generate new ones.
+
+## Task: Phase 14 - Conventional AI and UI
+
+1. Fix and enhance the conventional AI in ai/standard/core.js
+2. The action menu goes off the bottom of the screen when there are lots of actions - suggest making a radial menu instead or just fix current menu placement
+3. When the user clicks on an empire in the empires panel, show a panel that to visualize the player resource profile using output from player.getResourceProfile(). Use a stacked barchart or sankey diagram, or something better if you can think of it. You can use external JS libraries, but only if needed.
+4. When the user long hovers over an empire in the empires panel, show the same resource profile panel as a tooltip.
+
+## Task: Phase 15 - Enhance AI and Utilities
+
+1. Add functions to ai/utils.js
+   - attack(gameState, sourceEntity, targetEntity, maxOrders): if target is in range and (directional x elevation) multiplier >= 1, perform attack; otherwise, if possible, and maxOrders is > 1, move to within range, preferring a cell that maximises the directional x elevation multiplier, then perform attack. Once an attack is performed, if the number of orders used is less than maxOrders and the target is still alive, and the source has enough action points, continue to perform attacks. Return number of orders used.
+   - build(gameState, sourceEntity, targetName): find the appropriate action name in the sourceEntity, call action.canDo() with all neighboring cells perform the action on a potential cell. If none of the neighbors support the construction, and the sourceEntity can "move", then find the closest cell that supports the construction - this will be the targetCell. If possible to move to an adjacent cell to the targetCell, then move there and then build on the targetCell, otherwise do nothing. Return number of orders used.
+   - repair(gameState, sourceEntity, targetEntity, maxOrders): this should work exactly like the attack util function, but no need to worry about the multiplier or picking the best if moving next to the target.
+2. Update ai/standard/core.js to use these utilities to implement the standard AI. 
+3. Enhance the implementation by selecting a goal for each turn:
+   - if there are no enemy units and there is economic pressure, then determine the best constructs to build and use all orders on building. Also build workers and settlers as needed.
+   - if there are no enemy units and no economic pressure, then expand and explore. Build more military units and settlers or towns.
+   - if there are enemy units, and no economic pressure, then use all orders on attacking.
+   - if there are enemy units, and economic pressure, then first try and attack units that are close to towns, then focus on required resource buildings.
+   - economic pressure is high if the net yield of any resource is less than 1.5x the upkeep cost for that resource OR if the stock is less than 4x the upkeep cost for that resource.
+   - otherwise economic pressure is low if the net yield of any resource is less than 3x the upkeep cost for that resource OR if the stock is less than 6x the upkeep cost for that resource.
+   - otherwise there is no economic pressure
+4. Add a log of what actions are taken by the AI during a turn and the rational - log these to the console.   
+5. Update the resource profile panel to show a bar for each resource indicating the current stock. If the net income is negative, add a red bar over the end portion to indicate the change in the stock over the next turn. If the net income is positive, add a green bar at the end to indicate the projected gain in the stock over the next turn.
