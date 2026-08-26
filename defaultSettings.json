@@ -21,9 +21,9 @@
   ],
   "initialization": {
     "orders": {
-      "max": 8,
-      "initial": 8,
-      "perTurn": 6
+      "max": 6,
+      "initial": 6,
+      "perTurn": 5
     },
     "startingResources": {
       "gold": 200,
