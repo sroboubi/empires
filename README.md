@@ -197,3 +197,19 @@ Implement the game configuration loading system using the provided JSON architec
    - otherwise there is no economic pressure
 4. Add a log of what actions are taken by the AI during a turn and the rational - log these to the console.   
 5. Update the resource profile panel to show a bar for each resource indicating the current stock. If the net income is negative, add a red bar over the end portion to indicate the change in the stock over the next turn. If the net income is positive, add a green bar at the end to indicate the projected gain in the stock over the next turn.
+
+## Task: Phase 16 - AI Bug Fixes
+
+1. Remove hard coded values from the AI logic as much as possible. For example:
+   - Do not hardcode resource types, except for "orders" - you should exclude orders from the stock/yield calculations
+   - Don't use a hardcoded amount for determining if stock is low - instead use a fraction, like 0.5, of the initial resources per player
+   - Don't use entity names to determine what resource buildings to build, look at the yields
+   - Don't use entity names to determine what unit to build, look at unit attributes and actions. E.g. if you need wood, then determine what entity gives you wood, then determine what entity   can build it. If that entity is not available, then determine what entity can build it. If that entity does not exist, then determine what entity can build it. Follow this chain until you find and entity that can start the process needed to eventually build what you need to yield more wood.
+   - Don't use entity names to find military units. Instead look at their damage and armor relative to other entities.
+
+## Task: Phase 17 - Visual/UX Improvements
+
+1. When action panel opens it flies in from the top left of the screen. Fix this.
+2. When unit selected has the "move" action, show movement path and cost as mouse hovers on other cells
+3. On hover over unit, show building exclusion zone defined by entity spawnConditions.minSeparation value - it is a circle of hexes with that radius. It should be semi-transparent and use the same color as the owning player
+4. For build actions, show maintenance and yield of entities to build

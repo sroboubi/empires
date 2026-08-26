@@ -216,6 +216,7 @@ export class BaseEntity {
         this.owner.consumeResources(cost);
         this.active = true;
       } else {
+        console.log("Insufficient resources to maintain entity.", this.id, cost);
         this.active = false;
       }
     } else {
@@ -223,7 +224,8 @@ export class BaseEntity {
     }
 
     const yields = this.state.yields;
-    if (this.active && this.owner && yields) {
+    // only give yields if not damaged
+    if (this.active && this.owner && yields && this.health > this.maxHealth * 0.95) {
       this.owner.addResources(yields);
     }
   }

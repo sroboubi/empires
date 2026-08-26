@@ -12,10 +12,7 @@ export async function processTurn(player, gameState) {
     const manifest = gameState.manifestData;
     if (!manifest || !manifest.entities) return;
 
-    // 1. Assess economy and calculate economic pressure
-    const economicPressure = evaluateEconomicPressure(player, gameState);
-
-    // 2. Identify visible enemy entities
+    // Identify visible enemy entities
     const visibleOpponents = player.getOpponents ? player.getOpponents(gameState) : {};
     const enemyEntities = [];
     Object.values(visibleOpponents).forEach(opp => {
@@ -23,29 +20,32 @@ export async function processTurn(player, gameState) {
     });
     const hasEnemies = enemyEntities.length > 0;
 
-    // 3. Goal Selection
-    let goal = "";
-    if (!hasEnemies && economicPressure.level !== 'NONE') {
-        goal = "BUILD_RESOURCES_AND_WORKERS"; // No enemies + economic pressure
-    } else if (!hasEnemies && economicPressure.level === 'NONE') {
-        goal = "EXPAND_AND_EXPLORE"; // No enemies + no economic pressure
-    } else if (hasEnemies && economicPressure.level === 'NONE') {
-        goal = "ALL_OUT_ATTACK"; // Enemies visible + no economic pressure
-    } else {
-        goal = "DEFEND_TOWNS_THEN_RESOURCES"; // Enemies visible + economic pressure
-    }
-
-    console.log(`%c[AI ${player.name}] Turn Start (Round ${gameState.currentRound}) | Goal: ${goal} | Economic Pressure: ${economicPressure.level} | Orders: ${player.orders}`, 'color: #3498db; font-weight: bold;');
-    if (economicPressure.reasons.length > 0) {
-        console.log(`%c[AI ${player.name}] Economic Analysis: ${economicPressure.reasons.join('; ')}`, 'color: #9ca3af;');
-    }
-
     let maxLoops = 25;
     let actionExecuted = true;
 
     while (player.orders > 0 && maxLoops > 0 && actionExecuted) {
         maxLoops--;
         actionExecuted = false;
+
+        // 1. Re-evaluate economic pressure and resource demand before each action
+        const economicPressure = evaluateEconomicPressure(player, gameState);
+
+        // 2. Dynamic Goal Selection
+        let goal = "";
+        if (!hasEnemies && economicPressure.level !== 'NONE') {
+            goal = "BUILD_RESOURCES_AND_WORKERS"; // No enemies + economic pressure
+        } else if (!hasEnemies && economicPressure.level === 'NONE') {
+            goal = "EXPAND_AND_EXPLORE"; // No enemies + no economic pressure
+        } else if (hasEnemies && economicPressure.level === 'NONE') {
+            goal = "ALL_OUT_ATTACK"; // Enemies visible + no economic pressure
+        } else {
+            goal = "DEFEND_TOWNS_THEN_RESOURCES"; // Enemies visible + economic pressure
+        }
+
+        console.log(`%c[AI ${player.name}] Action Step (Round ${gameState.currentRound}) | Goal: ${goal} | Economic Pressure: ${economicPressure.level} | Orders: ${player.orders}`, 'color: #3498db; font-weight: bold;');
+        if (economicPressure.reasons.length > 0) {
+            console.log(`%c[AI ${player.name}] Demand Analysis (Ranked): ${economicPressure.deficits.join(' > ') || 'None'} | ${economicPressure.reasons.join('; ')}`, 'color: #9ca3af;');
+        }
 
         const myEntities = player.getEntities ? player.getEntities(gameState) : [];
         if (myEntities.length === 0) break;
@@ -81,69 +81,246 @@ function sleep(ms) {
 }
 
 /**
- * Evaluates economic pressure for a player.
- * - High: net yield < 1.5x upkeep OR stock < 4x upkeep for any resource.
- * - Low: net yield < 3x upkeep OR stock < 6x upkeep for any resource.
- * - None: otherwise.
+ * Evaluates economic pressure dynamically and ranks resource deficits by highest demand score.
+ * Excludes 'orders' from stock and yield evaluations.
  */
 export function evaluateEconomicPressure(player, gameState) {
     const profile = player.getResourceProfile ? player.getResourceProfile(gameState) : { totalUpkeep: {}, totalYields: {}, netIncome: {} };
     const { totalUpkeep, totalYields, netIncome } = profile;
     const reserves = player.resources || {};
+    const startingResources = gameState?.initializationSettings?.startingResources || {};
 
     const resourceKeys = Array.from(new Set([
         ...Object.keys(reserves),
         ...Object.keys(totalUpkeep),
         ...Object.keys(totalYields),
-        'food', 'gold', 'wood', 'iron', 'gems'
-    ]));
+        ...Object.keys(startingResources)
+    ])).filter(k => k !== 'orders');
 
     let isHigh = false;
     let isLow = false;
     const reasons = [];
-    const deficits = [];
+    const deficitsWithScores = [];
 
     for (const res of resourceKeys) {
         const upkeep = totalUpkeep[res] || 0;
         const net = netIncome[res] !== undefined ? netIncome[res] : 0;
         const stock = reserves[res] !== undefined ? reserves[res] : 0;
+        const initialRes = startingResources[res] !== undefined ? startingResources[res] : 100;
+        const lowStockThreshold = 0.5 * initialRes;
+        const medStockThreshold = 1.0 * initialRes;
+
+        let resScore = 0;
+        let hasDeficit = false;
 
         if (upkeep > 0) {
             if (net < 1.5 * upkeep || stock < 4 * upkeep) {
                 isHigh = true;
-                deficits.push(res);
+                hasDeficit = true;
+                resScore = (1.5 * upkeep - net) * 2 + Math.max(0, 4 * upkeep - stock);
                 reasons.push(`${res} in deficit (net ${net} < 1.5x upkeep ${upkeep} or stock ${stock} < 4x upkeep)`);
             } else if (net < 3.0 * upkeep || stock < 6 * upkeep) {
                 isLow = true;
-                deficits.push(res);
+                hasDeficit = true;
+                resScore = (3.0 * upkeep - net) + Math.max(0, 6 * upkeep - stock) * 0.5;
                 reasons.push(`${res} low margin (net ${net} < 3x upkeep ${upkeep} or stock ${stock} < 6x upkeep)`);
             }
         } else {
-            if (net < 0 || stock < 25) {
+            if (net < 0 || stock < lowStockThreshold) {
                 isHigh = true;
-                deficits.push(res);
-                reasons.push(`${res} reserves low (${stock})`);
+                hasDeficit = true;
+                resScore = Math.max(0, lowStockThreshold - stock) * 2 + (net < 0 ? Math.abs(net) * 3 : 0);
+                reasons.push(`${res} reserves low (${stock} < 0.5x starting ${initialRes})`);
+            } else if (stock < medStockThreshold) {
+                isLow = true;
+                hasDeficit = true;
+                resScore = Math.max(0, medStockThreshold - stock);
+                reasons.push(`${res} reserves moderate (${stock} < starting ${initialRes})`);
             }
         }
+
+        if (hasDeficit) {
+            deficitsWithScores.push({ res, score: resScore });
+        }
     }
+
+    // Sort deficits by highest demand score first
+    deficitsWithScores.sort((a, b) => b.score - a.score);
+    const deficits = deficitsWithScores.map(d => d.res);
 
     const level = isHigh ? 'HIGH' : (isLow ? 'LOW' : 'NONE');
     return { level, reasons, deficits, profile };
 }
 
+// -----------------------------------------------------------------------------
+// Dynamic Entity Analysis & Dependency Helpers
+// -----------------------------------------------------------------------------
+
+function getManifestEntities(gameState) {
+    return gameState.manifestData?.entities || {};
+}
+
 /**
- * Goal 1: Build resources, workers, and settlers when under economic pressure and no enemies.
+ * Finds all entity definitions that yield the given resource key.
+ * Prioritizes entities that can build other entities (e.g. settlements/villages),
+ * followed by highest resource yield amount.
+ */
+function findEntitiesYieldingResource(manifestEntities, resKey) {
+    const results = [];
+    for (const [name, meta] of Object.entries(manifestEntities)) {
+        if (meta.yields && (meta.yields[resKey] || 0) > 0) {
+            const isProducerOfEntities = Array.isArray(meta.buildables) && meta.buildables.length > 0;
+            results.push({
+                name,
+                meta,
+                yieldAmount: meta.yields[resKey],
+                isProducerOfEntities
+            });
+        }
+    }
+
+    // Prioritize entities that can produce other entities, then by yield amount
+    results.sort((a, b) => {
+        if (a.isProducerOfEntities !== b.isProducerOfEntities) {
+            return a.isProducerOfEntities ? -1 : 1;
+        }
+        return b.yieldAmount - a.yieldAmount;
+    });
+
+    return results;
+}
+
+/**
+ * Finds entity types in manifest that have `targetName` in their `buildables` list.
+ */
+function findBuildersForEntity(manifestEntities, targetName) {
+    const builders = [];
+    const targetLower = targetName.toLowerCase();
+    for (const [bName, bMeta] of Object.entries(manifestEntities)) {
+        if (Array.isArray(bMeta.buildables)) {
+            if (bMeta.buildables.some(item => item.toLowerCase() === targetLower)) {
+                builders.push(bName);
+            }
+        }
+    }
+    return builders;
+}
+
+/**
+ * Recursively resolves a production dependency chain to find an owned entity that
+ * can build the next required unit/structure in order to eventually produce `targetName`.
+ *
+ * @param {Player} player
+ * @param {GameState} gameState
+ * @param {string} targetName
+ * @param {Set<string>} [visited]
+ * @returns {{ executor: BaseEntity, actionTarget: string } | null}
+ */
+function resolveProductionPath(player, gameState, targetName, visited = new Set()) {
+    if (visited.has(targetName)) return null;
+    visited.add(targetName);
+
+    const manifestEntities = getManifestEntities(gameState);
+    const myEntities = player.getEntities(gameState).filter(e => e.active);
+    const builderTypeNames = findBuildersForEntity(manifestEntities, targetName);
+
+    // 1. Check if we currently own an active builder of this type
+    for (const bTypeName of builderTypeNames) {
+        const ownedBuilder = myEntities.find(e => e.name.toLowerCase() === bTypeName.toLowerCase());
+        if (ownedBuilder) {
+            return { executor: ownedBuilder, actionTarget: targetName };
+        }
+    }
+
+    // 2. If no direct builder owned, recursively check how to build each builder type
+    for (const bTypeName of builderTypeNames) {
+        const step = resolveProductionPath(player, gameState, bTypeName, visited);
+        if (step) {
+            return step;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Calculates a combat rating for an entity based on damage, health, range, and armor.
+ */
+function getMilitaryRating(meta) {
+    if (!meta) return 0;
+    const baseDamage = meta.damage?.value || 0;
+    const rangeMult = meta.range ? (meta.range.maxCells || 1) : 1;
+    const armorTotal = meta.armor ? (Object.values(meta.armor).reduce((a, b) => a + b, 0)) : 0;
+    const health = meta.health || 0;
+    const scoreMil = meta.score?.military || 0;
+    return (scoreMil * 15) + (baseDamage * rangeMult * 3) + (armorTotal * 10) + (health * 0.1);
+}
+
+/**
+ * Returns entities ranked by military effectiveness.
+ */
+function getRankedMilitaryTypes(manifestEntities) {
+    const units = [];
+    for (const [name, meta] of Object.entries(manifestEntities)) {
+        // Military units are mobile entities with significant damage/military score
+        const hasDamage = (meta.damage?.value || 0) > 15 || (meta.score?.military || 0) >= 5;
+        const isMobile = !meta.spawnConditions && (meta.actionPoints || 0) > 0;
+        if (hasDamage && isMobile) {
+            units.push({ name, meta, rating: getMilitaryRating(meta) });
+        }
+    }
+    units.sort((a, b) => b.rating - a.rating);
+    return units;
+}
+
+/**
+ * Returns entity types capable of founding settlements (destroyOnBuild or builds settlement centers).
+ */
+function getSettlerTypes(manifestEntities) {
+    return Object.entries(manifestEntities)
+        .filter(([_, meta]) => meta.destroyOnBuild || (Array.isArray(meta.buildables) && meta.buildables.some(b => manifestEntities[b]?.spawnConditions?.minSeparation >= 3)))
+        .map(([name]) => name);
+}
+
+/**
+ * Returns entity types that represent settlement centers (villages/cities with high economic score and minSeparation).
+ */
+function getSettlementCenterTypes(manifestEntities) {
+    return Object.entries(manifestEntities)
+        .filter(([_, meta]) => (meta.spawnConditions?.minSeparation >= 3) && (meta.yields?.orders || meta.score?.economic >= 10))
+        .map(([name]) => name);
+}
+
+/**
+ * Returns entity types that are mobile construct builders / repairers (workers).
+ */
+function getWorkerTypes(manifestEntities) {
+    return Object.entries(manifestEntities)
+        .filter(([_, meta]) => !meta.spawnConditions && (meta.actionPoints || 0) > 0 && Array.isArray(meta.buildables) && meta.buildables.length > 0 && !meta.destroyOnBuild)
+        .map(([name]) => name);
+}
+
+// -----------------------------------------------------------------------------
+// Goal Executions
+// -----------------------------------------------------------------------------
+
+/**
+ * Goal 1: Build resources, workers, and infrastructure when under economic pressure.
  */
 async function executeBuildResourcesGoal(player, myEntities, economicPressure, gameState) {
-    const workers = myEntities.filter(e => e.name === 'worker' && e.active);
-    const villages = myEntities.filter(e => e.name === 'village' && e.active);
-    const settlers = myEntities.filter(e => e.name === 'settler' && e.active);
+    const manifestEntities = getManifestEntities(gameState);
+    const workerTypeNames = getWorkerTypes(manifestEntities);
+    const settlerTypeNames = getSettlerTypes(manifestEntities);
+
+    const workers = myEntities.filter(e => workerTypeNames.includes(e.name) && e.active);
+    const settlers = myEntities.filter(e => settlerTypeNames.includes(e.name) && e.active);
 
     // 1. Repair any damaged structures first
     const damagedEntity = myEntities.find(e => e.health < e.maxHealth);
     if (damagedEntity) {
-        for (const worker of workers) {
-            const ordersUsed = repair(gameState, worker, damagedEntity, player.orders);
+        const repairers = myEntities.filter(e => e.getActions().some(a => a.name === "Repair"));
+        for (const repairer of repairers) {
+            const ordersUsed = repair(gameState, repairer, damagedEntity, player.orders);
             if (ordersUsed > 0) {
                 console.log(`[AI ${player.name}] Action: Repair ${damagedEntity.name}. Rationale: Fix damaged infrastructure. Orders used: ${ordersUsed}`);
                 return true;
@@ -151,44 +328,44 @@ async function executeBuildResourcesGoal(player, myEntities, economicPressure, g
         }
     }
 
-    // 2. Ensure at least 1-2 workers exist
-    if (workers.length < 2 && villages.length > 0) {
-        for (const village of villages) {
-            const ordersUsed = build(gameState, village, 'worker');
-            if (ordersUsed > 0) {
-                console.log(`[AI ${player.name}] Action: Train Worker at ${village.name}. Rationale: Need workers to build resource infrastructure. Orders used: ${ordersUsed}`);
-                return true;
+    // 2. Build resource constructs matching highest-priority deficits via dynamic production chains
+    for (const deficitRes of economicPressure.deficits) {
+        const candidateYielders = findEntitiesYieldingResource(manifestEntities, deficitRes);
+        for (const yielder of candidateYielders) {
+            const step = resolveProductionPath(player, gameState, yielder.name);
+            if (step && step.executor) {
+                const ordersUsed = build(gameState, step.executor, step.actionTarget);
+                if (ordersUsed > 0) {
+                    console.log(`[AI ${player.name}] Action: Build ${camelToTitle(step.actionTarget)} with ${step.executor.name}. Rationale: Satisfy highest demand (${deficitRes}). Orders used: ${ordersUsed}`);
+                    return true;
+                }
             }
         }
     }
 
-    // 3. Workers build resource constructs matching deficits
-    const constructMap = { food: 'farm', gold: 'mine', gems: 'mine', wood: 'lumberMill', iron: 'forge' };
-    const priorityConstructs = [];
-    economicPressure.deficits.forEach(d => {
-        const c = constructMap[d];
-        if (c && !priorityConstructs.includes(c)) priorityConstructs.push(c);
-    });
-    ['farm', 'mine', 'lumberMill', 'forge'].forEach(c => {
-        if (!priorityConstructs.includes(c)) priorityConstructs.push(c);
-    });
-
-    for (const worker of workers) {
-        for (const constructName of priorityConstructs) {
-            const ordersUsed = build(gameState, worker, constructName);
-            if (ordersUsed > 0) {
-                console.log(`[AI ${player.name}] Action: Build ${camelToTitle(constructName)}. Rationale: Alleviate economic pressure for deficits (${economicPressure.deficits.join(', ')}). Orders used: ${ordersUsed}`);
-                return true;
+    // 3. If workers are scarce, produce workers
+    if (workers.length < 2) {
+        for (const workerName of workerTypeNames) {
+            const step = resolveProductionPath(player, gameState, workerName);
+            if (step && step.executor) {
+                const ordersUsed = build(gameState, step.executor, step.actionTarget);
+                if (ordersUsed > 0) {
+                    console.log(`[AI ${player.name}] Action: Train ${camelToTitle(step.actionTarget)} at ${step.executor.name}. Rationale: Need builders for economy. Orders used: ${ordersUsed}`);
+                    return true;
+                }
             }
         }
     }
 
     // 4. Settler expansion if settler available
+    const settlementCenterNames = getSettlementCenterTypes(manifestEntities);
     for (const settler of settlers) {
-        const ordersUsed = build(gameState, settler, 'village');
-        if (ordersUsed > 0) {
-            console.log(`[AI ${player.name}] Action: Found Village with Settler. Rationale: Expand empire territory and production. Orders used: ${ordersUsed}`);
-            return true;
+        for (const centerName of settlementCenterNames) {
+            const ordersUsed = build(gameState, settler, centerName);
+            if (ordersUsed > 0) {
+                console.log(`[AI ${player.name}] Action: Found ${camelToTitle(centerName)} with Settler. Rationale: Expand empire territory and production. Orders used: ${ordersUsed}`);
+                return true;
+            }
         }
     }
 
@@ -200,38 +377,48 @@ async function executeBuildResourcesGoal(player, myEntities, economicPressure, g
  * Goal 2: Expand and explore when economy is strong and no enemies are visible.
  */
 async function executeExpandAndExploreGoal(player, myEntities, gameState) {
-    const villages = myEntities.filter(e => e.name === 'village' && e.active);
-    const settlers = myEntities.filter(e => e.name === 'settler' && e.active);
-    const military = myEntities.filter(e => ['swordsman', 'bowman', 'horseman'].includes(e.name) && e.active);
+    const manifestEntities = getManifestEntities(gameState);
+    const settlementCenterNames = getSettlementCenterTypes(manifestEntities);
+    const settlerTypeNames = getSettlerTypes(manifestEntities);
+    const militaryRanked = getRankedMilitaryTypes(manifestEntities);
 
-    // 1. Build Settler if wealthy and few villages
-    if (villages.length < 3 && settlers.length === 0 && (player.resources.food || 0) >= 120 && (player.resources.gold || 0) >= 60) {
-        for (const village of villages) {
-            const ordersUsed = build(gameState, village, 'settler');
+    const centers = myEntities.filter(e => settlementCenterNames.includes(e.name) && e.active);
+    const settlers = myEntities.filter(e => settlerTypeNames.includes(e.name) && e.active);
+    const military = myEntities.filter(e => militaryRanked.some(m => m.name === e.name) && e.active);
+
+    // 1. Build Settler if wealthy and few settlement centers
+    if (centers.length < 3 && settlers.length === 0) {
+        for (const settlerTypeName of settlerTypeNames) {
+            const step = resolveProductionPath(player, gameState, settlerTypeName);
+            if (step && step.executor) {
+                const ordersUsed = build(gameState, step.executor, step.actionTarget);
+                if (ordersUsed > 0) {
+                    console.log(`[AI ${player.name}] Action: Train ${camelToTitle(step.actionTarget)} at ${step.executor.name}. Rationale: Strong economy permits territorial expansion. Orders used: ${ordersUsed}`);
+                    return true;
+                }
+            }
+        }
+    }
+
+    // 2. Found settlement center with settler
+    for (const settler of settlers) {
+        for (const centerName of settlementCenterNames) {
+            const ordersUsed = build(gameState, settler, centerName);
             if (ordersUsed > 0) {
-                console.log(`[AI ${player.name}] Action: Train Settler at ${village.name}. Rationale: Strong economy permits territorial expansion. Orders used: ${ordersUsed}`);
+                console.log(`[AI ${player.name}] Action: Build ${camelToTitle(centerName)}. Rationale: Expand civilization with new settlement. Orders used: ${ordersUsed}`);
                 return true;
             }
         }
     }
 
-    // 2. Found village with settler
-    for (const settler of settlers) {
-        const ordersUsed = build(gameState, settler, 'village');
-        if (ordersUsed > 0) {
-            console.log(`[AI ${player.name}] Action: Build Village. Rationale: Expand civilization with new settlement. Orders used: ${ordersUsed}`);
-            return true;
-        }
-    }
-
-    // 3. Train Military Units (Bowman, Swordsman, Horseman)
-    if (military.length < villages.length * 3) {
-        const militaryQueue = ['bowman', 'swordsman', 'horseman'];
-        for (const village of villages) {
-            for (const unitType of militaryQueue) {
-                const ordersUsed = build(gameState, village, unitType);
+    // 3. Train Military Units based on attribute combat ratings
+    if (military.length < centers.length * 3 && militaryRanked.length > 0) {
+        for (const milChoice of militaryRanked) {
+            const step = resolveProductionPath(player, gameState, milChoice.name);
+            if (step && step.executor) {
+                const ordersUsed = build(gameState, step.executor, step.actionTarget);
                 if (ordersUsed > 0) {
-                    console.log(`[AI ${player.name}] Action: Train ${camelToTitle(unitType)} at ${village.name}. Rationale: Build military forces for defense and scouting. Orders used: ${ordersUsed}`);
+                    console.log(`[AI ${player.name}] Action: Train ${camelToTitle(step.actionTarget)} at ${step.executor.name}. Rationale: Build military forces (Rating: ${milChoice.rating.toFixed(0)}). Orders used: ${ordersUsed}`);
                     return true;
                 }
             }
@@ -271,14 +458,16 @@ async function executeAllOutAttackGoal(player, myEntities, enemyEntities, gameSt
  * Goal 4: Defend towns close to enemies first, then build resource infrastructure.
  */
 async function executeDefendTownsThenResourcesGoal(player, myEntities, enemyEntities, economicPressure, gameState) {
-    const villages = myEntities.filter(e => e.name === 'village');
+    const manifestEntities = getManifestEntities(gameState);
+    const settlementCenterNames = getSettlementCenterTypes(manifestEntities);
+    const towns = myEntities.filter(e => settlementCenterNames.includes(e.name));
     const combatUnits = myEntities.filter(e => !e.isConstruct && e.active && e.getActions().some(a => a.name === "Attack"));
 
-    // 1. Find enemies threatening villages (distance <= 4 from any village)
+    // 1. Find enemies threatening towns (distance <= 4 from any town)
     let threateningEnemies = [];
-    if (villages.length > 0) {
+    if (towns.length > 0) {
         threateningEnemies = enemyEntities.filter(enemy => {
-            return villages.some(v => HexGrid.distance(enemy, v) <= 4);
+            return towns.some(t => HexGrid.distance(enemy, t) <= 4);
         });
     }
 
@@ -289,7 +478,7 @@ async function executeDefendTownsThenResourcesGoal(player, myEntities, enemyEnti
         for (const enemy of sortedEnemies) {
             const ordersUsed = attack(gameState, unit, enemy, player.orders);
             if (ordersUsed > 0) {
-                console.log(`[AI ${player.name}] Action: Defend Town - Attack ${enemy.name} with ${unit.name}. Rationale: Protect vulnerable settlement. Orders used: ${ordersUsed}`);
+                console.log(`[AI ${player.name}] Action: Defend Settlement - Attack ${enemy.name} with ${unit.name}. Rationale: Protect vulnerable settlement. Orders used: ${ordersUsed}`);
                 return true;
             }
         }

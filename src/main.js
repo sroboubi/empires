@@ -6,6 +6,8 @@ import {
   highlightCell,
   highlightPathCells,
   clearPathHighlight,
+  showExclusionZone,
+  clearExclusionZone,
   raycastHex,
   setEntitySelectionHighlight,
   clearEntitySelectionHighlight,
@@ -230,7 +232,7 @@ function addSetupPlayerRow() {
 function renderSetupResources() {
   const container = document.getElementById('setup-resources-container');
   container.innerHTML = '';
-  for (const [res, val] of Object.entries(defaultSettings?.initialization?.startingResources || {})) {      
+  for (const [res, val] of Object.entries(defaultSettings?.initialization?.startingResources || {})) {
     const box = document.createElement('div');
     box.style.display = 'flex';
     box.style.flexDirection = 'column';
@@ -305,9 +307,9 @@ function handleStartGameClicked() {
     showToast('Add at least 1 player!', true);
     return;
   }
-  
+
   const startingResources = {};
-  for (const [res, val] of Object.entries(defaultSettings?.initialization?.startingResources || {})) {  
+  for (const [res, val] of Object.entries(defaultSettings?.initialization?.startingResources || {})) {
     const el = document.getElementById(`res-val-${res}`);
     startingResources[res] = el ? parseInt(el.value, 10) || 0 : val;
   };
@@ -496,7 +498,7 @@ async function doLoadGame(saveName) {
     gameState = new GameState();
     gameState.manifestData = manifestData;
     gameState.deserialize(record.data);
-    
+
     drawGrid(gameState.cells, gameState.activePlayer);
     reconcileEntities(gameState);
     updatePlayersUI();
@@ -642,6 +644,9 @@ function deselectEntity() {
   if (selectedEntity) {
     selectedEntity = null;
     clearEntitySelectionHighlight();
+    clearPathHighlight();
+    const moveRow = document.getElementById('inspect-movement-row');
+    if (moveRow) moveRow.style.display = 'none';
   }
 }
 
@@ -673,6 +678,30 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
         }
       }
 
+      // Extract build stats if this is a build action
+      let buildStatsHTML = '';
+      if (action.name && action.name.toLowerCase().startsWith('build ')) {
+        const buildTarget = action.name.substring(6).trim();
+        const manifestEntities = gameState?.manifestData?.entities || {};
+        let meta = manifestEntities[buildTarget];
+        if (!meta) {
+          const entry = Object.entries(manifestEntities).find(([k]) => k.toLowerCase() === buildTarget.toLowerCase());
+          if (entry) meta = entry[1];
+        }
+        if (meta) {
+          const upkeepParts = Object.entries(meta.maintenance || {}).map(([r, a]) => `${a} ${r}`);
+          const upkeepStr = upkeepParts.length > 0 ? upkeepParts.join(', ') : 'None';
+          const yieldParts = Object.entries(meta.yields || {}).map(([r, a]) => `+${a} ${r}`);
+          const yieldStr = yieldParts.length > 0 ? yieldParts.join(', ') : 'None';
+          buildStatsHTML = `
+            <div style="font-size: 10px; color: #38bdf8; margin-top: 3px; display: flex; gap: 8px; flex-wrap: wrap;">
+              <span><strong>Upkeep:</strong> ${upkeepStr}</span>
+              <span><strong>Yield:</strong> ${yieldStr}</span>
+            </div>
+          `;
+        }
+      }
+
       const btn = document.createElement('button');
       btn.className = 'context-action-btn';
       if (!isPossible) {
@@ -681,11 +710,14 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
       }
 
       btn.innerHTML = `
-        <div style="display: flex; flex-direction: column;">
-          <strong style="font-size: 12px; color: ${isPossible ? '#ffffff' : '#999999'};">${action.name}</strong>
-          <span style="font-size: 10px; color: ${isPossible ? '#a78bfa' : '#ff6b6b'};">${previewText}</span>
+        <div style="display: flex; flex-direction: column; width: 100%;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <strong style="font-size: 12px; color: ${isPossible ? '#ffffff' : '#999999'};">${action.name}</strong>
+            <span style="font-size: 10px; color: ${isPossible ? 'var(--accent-color)' : '#666666'};">►</span>
+          </div>
+          <span style="font-size: 10px; color: ${isPossible ? '#a78bfa' : '#ff6b6b'}; margin-top: 1px;">${previewText}</span>
+          ${buildStatsHTML}
         </div>
-        <span style="font-size: 10px; color: ${isPossible ? 'var(--accent-color)' : '#666666'};">►</span>
       `;
 
       btn.addEventListener('click', (ev) => {
@@ -725,24 +757,18 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
     actionsDiv.innerHTML = '<div style="font-size: 11px; color: var(--text-muted); padding: 4px;">No actions available for target cell</div>';
   }
 
-  // Display menu offscreen first to measure actual dimensions
+  // Position and display menu directly without frame-delay to prevent top-left fly-in
   menu.style.display = 'flex';
   menu.style.visibility = 'hidden';
-  menu.style.left = '0px';
-  menu.style.top = '0px';
+  const menuWidth = menu.offsetWidth || 280;
+  const menuHeight = menu.offsetHeight || 220;
 
-  requestAnimationFrame(() => {
-    const rect = menu.getBoundingClientRect();
-    const menuWidth = rect.width || 280;
-    const menuHeight = rect.height || 220;
+  const posX = Math.max(10, Math.min(x, window.innerWidth - menuWidth - 10));
+  const posY = Math.max(10, Math.min(y, window.innerHeight - menuHeight - 10));
 
-    const posX = Math.max(10, Math.min(x, window.innerWidth - menuWidth - 10));
-    const posY = Math.max(10, Math.min(y, window.innerHeight - menuHeight - 10));
-
-    menu.style.left = `${posX}px`;
-    menu.style.top = `${posY}px`;
-    menu.style.visibility = 'visible';
-  });
+  menu.style.left = `${posX}px`;
+  menu.style.top = `${posY}px`;
+  menu.style.visibility = 'visible';
 }
 
 function hideContextMenu() {
@@ -792,7 +818,7 @@ function updatePlayersUI() {
       ? `orders: ${player.orders}/${player.maxOrders}`
       : '';
 
-    const scoreStr = `military score: ${player.score.military} - economic score: ${player.score.economic}`;
+    const scoreStr = `total score: ${player.score.total} (${player.score.military} military, ${player.score.economic} economic, ${player.score.exploration} exploration)`;
 
     li.innerHTML = `
       <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
@@ -914,12 +940,12 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
         <span class="profile-stat-val" style="color: #f1c40f;">${player.score.economic}</span>
       </div>
       <div class="profile-stat-box">
-        <span class="profile-stat-label">Orders</span>
-        <span class="profile-stat-val" style="color: var(--accent-color);">${player.orders}/${player.maxOrders}</span>
+        <span class="profile-stat-label">Exploration Score</span>
+        <span class="profile-stat-val" style="color: #0f44f1ff;">${player.score.exploration}</span>
       </div>
       <div class="profile-stat-box">
-        <span class="profile-stat-label">Entities</span>
-        <span class="profile-stat-val" style="color: #2ecc71;">${myEntities.length}</span>
+        <span class="profile-stat-label">Orders</span>
+        <span class="profile-stat-val" style="color: var(--accent-color);">${player.orders}/${player.maxOrders}</span>
       </div>
     </div>
   `;
@@ -1043,6 +1069,13 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
 
 function onMouseMove(event) {
   if (!gameState) return;  // no game started yet
+
+  // Do not update hover inspection or path preview when context menu is open
+  const contextMenu = document.getElementById('entity-context-menu');
+  if (contextMenu && contextMenu.style.display !== 'none') {
+    return;
+  }
+
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
@@ -1081,6 +1114,54 @@ function onMouseMove(event) {
       isVisible
     );
 
+    // 1. Exclusion Zone Preview on Unit/Construct Hover
+    if (entity && showEntityInInspect) {
+      const manifestEntities = gameState?.manifestData?.entities || {};
+      const meta = manifestEntities[entity.name] || manifestEntities[entity.name.toLowerCase()];
+      if (meta && meta.spawnConditions && typeof meta.spawnConditions.minSeparation === 'number' && meta.spawnConditions.minSeparation > 1) {
+        showExclusionZone(entity.q, entity.r, meta.spawnConditions.minSeparation, entity.owner ? entity.owner.color : '#3498db', gameState);
+      } else {
+        clearExclusionZone();
+      }
+    } else {
+      clearExclusionZone();
+    }
+
+    // 2. Movement Path and Cost Preview when a unit with "Move" is selected (only when movement is possible)
+    const moveRow = document.getElementById('inspect-movement-row');
+    const moveValue = document.getElementById('inspect-movement');
+    const moveAction = selectedEntity && selectedEntity.owner && activePlayer && selectedEntity.owner.id === activePlayer.id && !activePlayer.isAI
+      ? selectedEntity.getActions().find(a => a.name === "Move")
+      : null;
+
+    if (moveAction && isExplored) {
+      if (hovered.q === selectedEntity.q && hovered.r === selectedEntity.r) {
+        clearPathHighlight();
+        if (moveRow) moveRow.style.display = 'none';
+      } else {
+        const targetOccupant = gameState.getEntityAt(hovered.q, hovered.r);
+        const check = moveAction.canDo(hovered, targetOccupant);
+        if (check && check.possible && check.path && check.path.length > 1) {
+          highlightPathCells(check.path);
+          const ap = selectedEntity.actionPoints !== undefined ? selectedEntity.actionPoints : 0;
+          const cost = check.cost;
+          if (moveRow && moveValue) {
+            moveRow.style.display = 'flex';
+            moveValue.innerHTML = `<span style="color: #2ecc71; font-weight: 600;">${cost.toFixed(1)} AP</span> (${check.path.length - 1} steps, ${ap} AP avail)`;
+          }
+        } else {
+          clearPathHighlight();
+          if (moveRow && moveValue) {
+            moveRow.style.display = 'flex';
+            moveValue.innerHTML = `<span style="color: #e74c3c; font-weight: 600;">${check ? check.reason : 'Cannot move'}</span>`;
+          }
+        }
+      }
+    } else {
+      if (moveRow) moveRow.style.display = 'none';
+      clearPathHighlight();
+    }
+
     if (showEntityInInspect) {
       const isSelected = selectedEntity && selectedEntity.id === entity.id;
 
@@ -1111,6 +1192,13 @@ function onMouseMove(event) {
     infoPanel.classList.add('active');
   } else {
     highlightCell(null, null);
+    clearExclusionZone();
+    const moveRow = document.getElementById('inspect-movement-row');
+    if (moveRow) moveRow.style.display = 'none';
+    const contextMenu = document.getElementById('entity-context-menu');
+    if (!contextMenu || contextMenu.style.display === 'none') {
+      clearPathHighlight();
+    }
     if (!selectedEntity) {
       infoPanel.classList.remove('active');
     }

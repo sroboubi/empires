@@ -2,10 +2,6 @@
 
 ## Visual ##
 
-- if unit selected, show movement path and cost as mouse hovers on cells
-- on unit hover, show building exclusion zone
-- for build actions, show maintenance and yield of entities to build
-
 ## Audio ##
 
 - sound effects
@@ -26,3 +22,10 @@
 - unit vision considers center of cell, some cells that are partly visible are hidden - fix?
 - frame drop and lagging?
 - smooth move
+
+----
+convention AI:
+
+why do you keep thinking you need gems?
+exploration - why do you do it? and you keep hitting water and going back and forth?
+attacking with settler?

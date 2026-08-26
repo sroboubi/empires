@@ -259,6 +259,7 @@
       gap: 6px;
       scrollbar-width: thin;
       scrollbar-color: rgba(52, 152, 219, 0.5) rgba(0, 0, 0, 0.2);
+      transition: opacity 0.15s ease, transform 0.15s ease !important;
     }
 
     .context-menu::-webkit-scrollbar {
@@ -753,6 +754,10 @@
     <div class="info-row">
       <span class="info-label">Humidity:</span>
       <span class="info-value" id="inspect-humidity">0.2</span>
+    </div>
+    <div class="info-row" id="inspect-movement-row" style="display: none; color: #a78bfa;">
+      <span class="info-label" style="color: #a78bfa;">Move Cost:</span>
+      <span class="info-value" id="inspect-movement" style="color: #a78bfa;">-</span>
     </div>
     <div class="divider" style="margin-top: 12px; margin-bottom: 12px;"></div>
     <div class="section-title">Entities</div>

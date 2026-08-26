@@ -262,8 +262,8 @@
       "controllerUrl": "./src/controllers/swordsman.js",
       "health": 200,
       "maxHealth": 200,
-      "actionPoints": 10,
-      "maxActionPoints": 10,
+      "actionPoints": 5,
+      "maxActionPoints": 5,
       "attackCostScale": 1.5,
       "damage": {
         "value": 50,
@@ -299,8 +299,8 @@
       "controllerUrl": "./src/controllers/worker.js",
       "health": 100,
       "maxHealth": 100,
-      "actionPoints": 8,
-      "maxActionPoints": 8,
+      "actionPoints": 5,
+      "maxActionPoints": 5,
       "attackCostScale": 2.0,
       "damage": {
         "value": 10,
@@ -348,8 +348,8 @@
       "controllerUrl": "./src/controllers/settler.js",
       "health": 150,
       "maxHealth": 150,
-      "actionPoints": 10,
-      "maxActionPoints": 10,
+      "actionPoints": 5,
+      "maxActionPoints": 5,
       "attackCostScale": 2.0,
       "damage": {
         "value": 10,
@@ -389,8 +389,8 @@
       "controllerUrl": "./src/controllers/bowman.js",
       "health": 150,
       "maxHealth": 150,
-      "actionPoints": 12,
-      "maxActionPoints": 12,
+      "actionPoints": 6,
+      "maxActionPoints": 6,
       "attackCostScale": 1.0,
       "damage": {
         "value": 25,
@@ -431,8 +431,8 @@
       "controllerUrl": "./src/controllers/horseman.js",
       "health": 250,
       "maxHealth": 250,
-      "actionPoints": 16,
-      "maxActionPoints": 16,
+      "actionPoints": 8,
+      "maxActionPoints": 8,
       "attackCostScale": 1.2,
       "damage": {
         "value": 60,
@@ -499,7 +499,7 @@
       ],
       "score": {
         "military": 2,
-        "economic": 10
+        "economic": 20
       }
     },
     {
@@ -511,8 +511,7 @@
       "maintenance": {},
       "spawnCost": {
         "wood": 80,
-        "iron": 50,
-        "gold": 50
+        "gold": 40
       },
       "spawnConditions": {
         "terrain": [
@@ -572,8 +571,8 @@
       "maxHealth": 400,
       "maintenance": {},
       "spawnCost": {
-        "wood": 100,
-        "iron": 100
+        "wood": 60,
+        "iron": 60
       },
       "spawnConditions": {
         "terrain": [
@@ -586,14 +585,14 @@
         "minSeparation": 3
       },
       "yields": {
-        "gold": 20,
+        "gold": 15,
         "gems": 1
       },
       "rotationOffset": 0,
       "sightRange": 3,
       "score": {
         "military": 2,
-        "economic": 8
+        "economic": 6
       }
     },
     {
@@ -604,9 +603,9 @@
       "maxHealth": 200,
       "maintenance": {},
       "spawnCost": {
-        "wood": 60,
+        "wood": 40,
         "iron": 40,
-        "gold": 25
+        "gold": 20
       },
       "spawnConditions": {
         "terrain": [
@@ -615,13 +614,13 @@
         "minSeparation": 2
       },
       "yields": {
-        "food": 25
+        "food": 20
       },
       "rotationOffset": 0,
       "sightRange": 3,
       "score": {
         "military": 2,
-        "economic": 3
+        "economic": 4
       }
     }
   ]

@@ -1,45 +1,7 @@
 import { HexGrid } from '../hexGrid.js';
 import { camelToTitle } from '../utils.js';
 import { SeaLevel } from '../terrainProvider.js';
-
-const DIRECTIONS_LIST = ['E', 'NE', 'NW', 'W', 'SW', 'SE'];
-
-/**
- * Calculates the combined directional and elevation damage multiplier from an attacker cell against a target entity.
- */
-export function calculateAttackMultiplier(gameState, sourceEntity, fromCell, targetEntity, targetCell) {
-    let multiplier = 1.0;
-
-    if (gameState && gameState.hexGrid && targetEntity.facing) {
-        const dirFromTargetToAttacker = gameState.hexGrid.directionTo(targetEntity, fromCell).fromSource;
-        const idxTarget = DIRECTIONS_LIST.indexOf(targetEntity.facing);
-        const idxAttacker = DIRECTIONS_LIST.indexOf(dirFromTargetToAttacker);
-
-        if (idxTarget !== -1 && idxAttacker !== -1) {
-            let diff = Math.abs(idxTarget - idxAttacker);
-            if (diff > 3) diff = 6 - diff;
-
-            if (diff === 0) multiplier = 1.0;        // Front
-            else if (diff === 1 || diff === 2) multiplier = 1.5;  // Side
-            else if (diff === 3) multiplier = 2.0;    // Behind
-        }
-    }
-
-    let elevationFactor = 1.0;
-    if (sourceEntity.damage && typeof sourceEntity.damage.elevationAdjustment === 'number' && sourceEntity.damage.elevationAdjustment > 0) {
-        const getElev = (c) => (c && c.terrain && (c.terrain.height ?? c.terrain.elevation)) ?? 1.0;
-        const attackerElevation = Math.max(0.1, getElev(fromCell));
-        const targetElevation = Math.max(0.1, getElev(targetCell));
-        const ratio = attackerElevation / targetElevation;
-        if (ratio > 1.01) {
-            elevationFactor = ratio * sourceEntity.damage.elevationAdjustment;
-        } else if (ratio < 0.99) {
-            elevationFactor = ratio / sourceEntity.damage.elevationAdjustment;
-        }
-    }
-
-    return multiplier * elevationFactor;
-}
+import { calculateAttackMultiplier } from '../utils.js';
 
 /**
  * Attacks targetEntity with sourceEntity.
@@ -66,13 +28,10 @@ export function attack(gameState, sourceEntity, targetEntity, maxOrders = 1) {
 
     const moveAction = actions.find(a => a.name === "Move");
 
-    const currentCell = sourceEntity.cell || gameState.hexGrid?.getCell(sourceEntity.q, sourceEntity.r);
-    const targetCell = targetEntity.cell || gameState.hexGrid?.getCell(targetEntity.q, targetEntity.r);
-    if (!currentCell || !targetCell) return 0;
-
+    const targetCell = targetEntity.cell;
     const currentAttackCheck = attackAction.canDo(targetCell, targetEntity);
     const isCurrentPossible = currentAttackCheck && currentAttackCheck.possible;
-    const currentMult = isCurrentPossible ? calculateAttackMultiplier(gameState, sourceEntity, currentCell, targetEntity, targetCell) : 0;
+    const currentMult = isCurrentPossible ? calculateAttackMultiplier(gameState, sourceEntity.cell, sourceEntity.damage.elevationAdjustment, targetEntity).total : 0;
 
     // 1. If currently in range and multiplier >= 1.0, attack directly
     if (isCurrentPossible && currentMult >= 1.0) {
@@ -123,7 +82,7 @@ export function attack(gameState, sourceEntity, targetEntity, maxOrders = 1) {
             }
 
             if (inRange) {
-                const mult = calculateAttackMultiplier(gameState, sourceEntity, candCell, targetEntity, targetCell);
+                const mult = calculateAttackMultiplier(gameState, candCell, sourceEntity.damage.elevationAdjustment, targetEntity).total;
                 if (mult > bestMult || (!isCurrentPossible && mult >= 1.0) || (!bestCell && inRange)) {
                     bestMult = mult;
                     bestCell = candCell;
@@ -300,8 +259,7 @@ export function repair(gameState, sourceEntity, targetEntity, maxOrders = 1) {
     if (!repairAction) return 0;
 
     const moveAction = actions.find(a => a.name === "Move");
-    const targetCell = targetEntity.cell || gameState.hexGrid?.getCell(targetEntity.q, targetEntity.r);
-    if (!targetCell) return 0;
+    const targetCell = targetEntity.cell;
 
     // 1. If adjacent, perform repair directly
     if (HexGrid.distance(sourceEntity, targetEntity) === 1) {

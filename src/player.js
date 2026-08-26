@@ -29,11 +29,15 @@ export class Player {
     this.startCoord = { q: 0, r: 0 };
     this.score = {
       military: 0,
-      economic: 0
+      economic: 0,
+      exploration: 0,
+      total: 0
     };
 
     this.ordersConfig = ordersConfig || {};
     this.orders = ordersConfig?.initial ?? 0;
+    this.maxOrders = ordersConfig?.max ?? 0;
+    this.ordersPerTurn = ordersConfig?.perTurn ?? 0;
 
     // Fog of war tracking sets (stores coordinate key strings "q,r")
     this.exploredCells = new Set();
@@ -70,6 +74,8 @@ export class Player {
     }
 
     this.updateVisibility(gameState);
+    this.score.exploration = Math.round(Math.pow(this.visibleCells.size * this.exploredCells.size, 1 / 3));
+    this.score.total = Math.round(Math.pow(this.score.military * this.score.economic * this.score.exploration, 1 / 3));
 
     if (this.controller) {
       processTurn(this, gameState).then(() => {
@@ -305,8 +311,11 @@ export class Player {
       controller: this.controller,
       resources: this.resources,
       orders: this.orders,
+      maxOrders: this.maxOrders,
+      ordersPerTurn: this.ordersPerTurn,
       ordersConfig: this.ordersConfig,
       startCoord: this.startCoord,
+      score: this.score,
       exploredCells: Array.from(this.exploredCells),
       visibleCells: Array.from(this.visibleCells)
     };
@@ -317,8 +326,14 @@ export class Player {
    */
   static fromJSON(data) {
     const player = new Player(data.id, data.name, data.color, data.resources, data.description, data.controller, data.ordersConfig);
+    player.maxOrders = data.maxOrders ?? 0;
+    player.ordersPerTurn = data.ordersPerTurn ?? 0;
+    player.orders = data.orders ?? 0;
     if (data.startCoord) {
       player.startCoord = { ...data.startCoord };
+    }
+    if (data.score) {
+      player.score = { ...data.score };
     }
     if (data.exploredCells && Array.isArray(data.exploredCells)) {
       player.exploredCells = new Set(data.exploredCells);

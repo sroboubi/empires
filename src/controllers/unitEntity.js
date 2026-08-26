@@ -1,8 +1,7 @@
 import { BaseEntity } from './baseEntity.js';
 import { HexGrid } from '../hexGrid.js';
 import { CONFIG } from '../config.js';
-
-const DIRECTIONS_LIST = ['E', 'NE', 'NW', 'W', 'SW', 'SE'];
+import { calculateAttackMultiplier } from '../utils.js';
 
 /**
  * UnitEntity - Base Class for all mobile, combat-capable units.
@@ -168,46 +167,16 @@ export class UnitEntity extends BaseEntity {
             return affordability;
           }
 
-          // Directional damage multiplier
-          let multiplier = 1.0;
-          if (this.gameState && this.gameState.hexGrid && entity.facing) {
-            const dirFromTargetToAttacker = this.gameState.hexGrid.directionTo(entity, this).fromSource;
-            const idxTarget = DIRECTIONS_LIST.indexOf(entity.facing);
-            const idxAttacker = DIRECTIONS_LIST.indexOf(dirFromTargetToAttacker);
-
-            if (idxTarget !== -1 && idxAttacker !== -1) {
-              let diff = Math.abs(idxTarget - idxAttacker);
-              if (diff > 3) diff = 6 - diff;
-
-              if (diff === 0) multiplier = 1.0;       // Front
-              else if (diff === 1 || diff === 2) multiplier = 1.5; // Side
-              else if (diff === 3) multiplier = 2.0;   // Behind
-            }
-          }
-
-          // Elevation damage adjustment
-          let elevationFactor = 1.0;
-          if (this.damage && typeof this.damage.elevationAdjustment === 'number' && this.damage.elevationAdjustment > 0) {
-            const attackerCell = this.cell || (this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.getCell(this.q, this.r) : null);
-            const targetCell = cell || (entity && entity.cell) || (this.gameState && this.gameState.hexGrid && entity ? this.gameState.hexGrid.getCell(entity.q, entity.r) : null);
-            const getElev = (c) => (c && c.terrain && (c.terrain.height ?? c.terrain.elevation)) ?? 1.0;
-            const attackerElevation = Math.max(0.1, getElev(attackerCell));
-            const targetElevation = Math.max(0.1, getElev(targetCell));
-            const ratio = attackerElevation / targetElevation;
-            if (ratio > 1.01) { elevationFactor = ratio * this.damage.elevationAdjustment }
-            else if (ratio < 0.99) { elevationFactor = ratio / this.damage.elevationAdjustment }
-          }
-
-          const rawDamage = Math.round(this.damage.value * multiplier * elevationFactor);
-          const elevStr = this.damage && this.damage.elevationAdjustment ? `, ${elevationFactor.toFixed(2)}x elev` : '';
+          const multiplier = calculateAttackMultiplier(this.gameState, this.cell, this.damage.elevationAdjustment, entity);
+          const rawDamage = this.damage.value * multiplier.total;
 
           return {
             possible: true,
-            reason: `Attack ${entity.name.toUpperCase()} for ~${rawDamage} dmg (${multiplier}x dir${elevStr}) costing ${cost} AP and 1 order.`,
+            reason: `Attack ${entity.name.toUpperCase()} for ~${rawDamage.toFixed(2)} dmg (${multiplier.direction.toFixed(2)}x dir, ${multiplier.elevation.toFixed(2)}x elev) costing ${cost} AP and 1 order.`,
             cost: cost,
             ordersRequired: affordability.ordersRequired,
-            multiplier: multiplier,
-            elevationFactor: elevationFactor,
+            multiplier: multiplier.direction,
+            elevationFactor: multiplier.elevation,
             rawDamage: rawDamage
           };
         },

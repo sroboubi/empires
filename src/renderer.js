@@ -16,6 +16,8 @@ let pathHighlightGeometry = null;
 let pathHighlightMaterial = null;
 let entitySelectionMesh = null; // Selection ring around active entity
 let groundBaseMesh = null;
+let exclusionZoneGroup = null; // Group of meshes showing entity minSeparation exclusion zone
+let exclusionZoneGeometry = null;
 
 // State tracking for time of day (0 to 24)
 let currentHour = 12; // Starts at Noon
@@ -189,6 +191,11 @@ export function initRenderer(canvas) {
   entitySelectionMesh = new THREE.Mesh(entityRingGeom, entityRingMat);
   entitySelectionMesh.visible = false;
   scene.add(entitySelectionMesh);
+
+  // Exclusion Zone Mesh Group
+  exclusionZoneGroup = new THREE.Group();
+  scene.add(exclusionZoneGroup);
+  exclusionZoneGeometry = new THREE.CylinderGeometry(CONFIG.HEX_SIZE * cellSizeScale.normal * 0.96, CONFIG.HEX_SIZE * cellSizeScale.normal * 0.96, 0.05, 6);
 
   // 8. Setup Loaders
   const dracoLoader = new DRACOLoader();
@@ -778,6 +785,51 @@ export function clearPathHighlight() {
   if (!pathHighlightGroup) return;
   while (pathHighlightGroup.children.length > 0) {
     pathHighlightGroup.remove(pathHighlightGroup.children[0]);
+  }
+}
+
+/**
+ * Highlights the building exclusion zone around an entity defined by minSeparation.
+ * Renders semi-transparent hexes in the owning player's color.
+ * @param {number} q - Center axial q
+ * @param {number} r - Center axial r
+ * @param {number} minSeparation - Radius (distance < minSeparation is excluded)
+ * @param {string} color - Player hex color
+ * @param {GameState} [gameState] - Game state for terrain heights
+ */
+export function showExclusionZone(q, r, minSeparation, color = '#3498db', gameState = null) {
+  clearExclusionZone();
+  if (q === null || r === null || !minSeparation || minSeparation <= 1 || !exclusionZoneGroup) return;
+
+  const hexColor = new THREE.Color(color);
+  const mat = new THREE.MeshBasicMaterial({
+    color: hexColor,
+    transparent: true,
+    opacity: 0.35,
+    side: THREE.DoubleSide
+  });
+
+  const radius = minSeparation - 1;
+  for (let dq = -radius; dq <= radius; dq++) {
+    for (let dr = Math.max(-radius, -dq - radius); dr <= Math.min(radius, -dq + radius); dr++) {
+      const targetQ = q + dq;
+      const targetR = r + dr;
+      const { x, z } = HexGrid.axialToPixel(targetQ, targetR);
+      const cell = gameState?.cells ? gameState.cells[`${targetQ},${targetR}`] : null;
+      const height = cell?.terrain ? cell.terrain.height : 1.0;
+      const mesh = new THREE.Mesh(exclusionZoneGeometry, mat);
+      mesh.position.set(x, height + CONFIG.HEX_SIZE / 30, z);
+      exclusionZoneGroup.add(mesh);
+    }
+  }
+}
+
+export function clearExclusionZone() {
+  if (!exclusionZoneGroup) return;
+  while (exclusionZoneGroup.children.length > 0) {
+    const child = exclusionZoneGroup.children[0];
+    if (child.material) child.material.dispose();
+    exclusionZoneGroup.remove(child);
   }
 }
 
