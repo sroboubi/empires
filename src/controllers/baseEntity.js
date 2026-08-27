@@ -34,6 +34,9 @@ export class BaseEntity {
       ...(initialState || {})
     };
 
+    // Attack tracking - last 5 attackers with damage dealt
+    this.attackHistory = (initialState && initialState.attackHistory) || [];
+
     // Actions list defined on BaseEntity instance
     this.actions = [];
     this.setupActions();
@@ -268,6 +271,21 @@ export class BaseEntity {
     effectiveDamage = Math.round(effectiveDamage * 10) / 10;
 
     this.state.health -= effectiveDamage;
+
+    // Track attack history - keep last 5 attackers
+    if (attacker) {
+      this.attackHistory.unshift({
+        attackerId: attacker.id,
+        attackerName: attacker.name,
+        damage: effectiveDamage,
+        damageType: damageType,
+        turn: this.gameState?.currentRound || 0
+      });
+      if (this.attackHistory.length > 5) {
+        this.attackHistory.pop();
+      }
+    }
+
     if (this.state.health <= 0) {
       this.destroy();
     }
@@ -441,7 +459,8 @@ export class BaseEntity {
       ownerId: this.owner ? this.owner.id : null,
       q: this.q,
       r: this.r,
-      state: this.state
+      state: this.state,
+      attackHistory: this.attackHistory
     };
   }
 }
