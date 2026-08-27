@@ -65,6 +65,10 @@ export class GameState {
 
     // 1. Setup starting resources dynamically from settings or manifest initialization
     const init = settings?.initialization || manifestData.initialization || {};
+
+    // Expose initialization settings on the game state so AI controllers can
+    // reason about starting stock levels (resource deficit thresholds, etc.)
+    this.initializationSettings = init;
     const startingResources = { ...(init.startingResources || {}) };
     const ordersConfig = init.orders || null;
 

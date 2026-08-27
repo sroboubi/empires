@@ -5,5 +5,5 @@
 export const CONFIG = {
   HEX_SIZE: 1.0,
   FRIENDLY_FIRE: true,
-  SHOW_ALL: false
+  SHOW_ALL: true
 };

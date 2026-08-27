@@ -369,13 +369,43 @@ export class HexGrid {
     const prev = {};        // previous cell key in best path
     dist[sourceKey] = 0;
 
-    // Simple priority queue via sorted array (grid is bounded, perf is fine)
-    const pq = [{ key: sourceKey, cost: 0 }];
+    // Binary min-heap priority queue (a sorted-array queue degenerates to
+    // O(V^2 log V) on long paths and can block the main thread for seconds)
+    const heap = [];
+    const heapPush = (cost, key) => {
+      heap.push({ cost, key });
+      let i = heap.length - 1;
+      while (i > 0) {
+        const p = (i - 1) >> 1;
+        if (heap[p].cost <= heap[i].cost) break;
+        [heap[p], heap[i]] = [heap[i], heap[p]];
+        i = p;
+      }
+    };
+    const heapPop = () => {
+      const top = heap[0];
+      const last = heap.pop();
+      if (heap.length > 0) {
+        heap[0] = last;
+        let i = 0;
+        for (;;) {
+          const l = 2 * i + 1, r = l + 1;
+          let m = i;
+          if (l < heap.length && heap[l].cost < heap[m].cost) m = l;
+          if (r < heap.length && heap[r].cost < heap[m].cost) m = r;
+          if (m === i) break;
+          [heap[m], heap[i]] = [heap[i], heap[m]];
+          i = m;
+        }
+      }
+      return top;
+    };
 
-    while (pq.length > 0) {
+    heapPush(0, sourceKey);
+
+    while (heap.length > 0) {
       // Extract min-cost entry
-      pq.sort((a, b) => a.cost - b.cost);
-      const { key: currentKey, cost: currentCost } = pq.shift();
+      const { key: currentKey, cost: currentCost } = heapPop();
 
       if (currentKey === targetKey) {
         // Reconstruct path
@@ -409,7 +439,7 @@ export class HexGrid {
         if (newCost < (dist[nbKey] ?? Infinity)) {
           dist[nbKey] = newCost;
           prev[nbKey] = currentKey;
-          pq.push({ key: nbKey, cost: newCost });
+          heapPush(newCost, nbKey);
         }
       }
     }

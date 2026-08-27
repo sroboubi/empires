@@ -216,7 +216,7 @@ export class BaseEntity {
         this.owner.consumeResources(cost);
         this.active = true;
       } else {
-        console.log("Insufficient resources to maintain entity.", this.id, cost);
+        console.log(this.owner.name, this.id, "Insufficient resources to maintain entity.", this.owner.resources, cost);
         this.active = false;
       }
     } else {
