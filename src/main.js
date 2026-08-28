@@ -779,7 +779,7 @@ function hideContextMenu() {
 
 let playerHoverTimer = null;
 
-function updatePlayersUI() {
+export function updatePlayersUI() {
   const container = document.getElementById('players-list');
   container.innerHTML = '';
 

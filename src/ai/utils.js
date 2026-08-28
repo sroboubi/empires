@@ -2,6 +2,8 @@ import { HexGrid } from '../hexGrid.js';
 import { camelToTitle } from '../utils.js';
 import { SeaLevel } from '../terrainProvider.js';
 import { calculateAttackMultiplier } from '../utils.js';
+import { drawGrid, reconcileEntities } from '../renderer.js';
+import { updatePlayersUI } from '../main.js';
 
 /**
  * Attacks targetEntity with sourceEntity.
@@ -236,6 +238,7 @@ export function build(gameState, sourceEntity, targetName) {
     return 0;
 }
 
+// TODO change this to support (could be actions like enhance - increases yield, defend - increases defense, etc.) and not just repair
 /**
  * Repairs targetEntity with sourceEntity.
  * If target is adjacent, performs repair directly.
@@ -297,4 +300,14 @@ export function repair(gameState, sourceEntity, targetEntity, maxOrders = 1) {
     }
 
     return 0;
+}
+
+/**
+ * Update UI and render after an action is done.
+ * @param {GameState} gameState 
+ */ 
+export function onActionDone(gameState) {
+    drawGrid(gameState.cells, gameState.activePlayer);
+    reconcileEntities(gameState);
+    updatePlayersUI();
 }

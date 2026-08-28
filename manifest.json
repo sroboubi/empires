@@ -329,6 +329,7 @@
         "farm",
         "forge"
       ],
+      "buildCharges": 3,
       "repairables": [
         "mine",
         "lumberMill",
@@ -376,7 +377,7 @@
       "buildables": [
         "village"
       ],
-      "destroyOnBuild": true,
+      "buildCharges": 1,
       "score": {
         "military": 1,
         "economic": 4

@@ -426,8 +426,11 @@ export class BaseEntity {
             this.gameState.spawnEntity(buildable, cell, this.owner);
             const { x, z } = HexGrid.axialToPixel(cell.q, cell.r);
             spawnParticleBurst(x, cell.terrain.height, z, 0xcca055);
-            if (this.state.destroyOnBuild) {
-              this.destroy();
+            if (this.state.buildCharges !== undefined) {
+              this.state.buildCharges -= 1;
+              if (this.state.buildCharges <= 0) {
+                this.destroy();
+              }              
             }
           }
           return true;

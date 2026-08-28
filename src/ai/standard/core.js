@@ -1,27 +1,43 @@
-import { attack, build, repair } from '../utils.js';
+import { attack, build, repair, onActionDone } from '../utils.js';
 import { HexGrid } from '../../hexGrid.js';
 import { camelToTitle } from '../../utils.js';
 
 /**
  * Conventional Goal-Driven Heuristic AI Controller
  * Interface: async function processTurn(player, gameState)
+ *
+ * Per-order decision model:
+ *  - Each iteration inspects the current world and picks the highest priority
+ *    action that can succeed. There are two priority bands: HIGH (urgent:
+ *    avenging attacks, resource stabilization) and MEDIUM (attacks with
+ *    stronger forces, surplus economy, expansion that increases mobile
+ *    production or orders, and exploration).
+ *  - For every order, we alternate through the high-priority goals first
+ *    (round-robin), then fall back to medium-priority goals in round-robin.
+ *    This keeps the AI from getting fixated on a single track (e.g. building
+ *    mines forever while under military attack).
+ *
+ * Resource model:
+ *  - No hard-coded resource set. Starting levels come from
+ *    gameState.initializationSettings.startingResources. Target stock for each
+ *    resource is derived from the max of (its starting level, 10x the current
+ *    upkeep for that resource, or the maintenance burn of existing units),
+ *    so the AI naturally maintains starting levels.
+ *  - A resource is considered "in deficit" only if its net income is negative
+ *    (yields < upkeep). The AI never builds producers for resources that are
+ *    already producing a surplus.
+ *  - The only hard-coded resource key is "orders" (filtered out everywhere).
+ *
+ * Settlement / builder detection:
+ *  - Settlers: any entity flagged `destroyOnBuild: true` in its manifest.
+ *  - Settlement centers: any construct with a `spawnConditions.minSeparation`
+ *    of 3+ (villages/cities); derived from manifest, not magic-numbered.
+ *  - Workers / builders: any mobile unit whose `buildables` includes at least
+ *    one construct, excluding `destroyOnBuild` entities.
+ *  - Military units: any mobile unit with a non-zero `damage.value` AND
+ *    `score.military > 0` (workers and settlers have score.military = 1
+ *    so we use damage to separate).
  */
-
-// -----------------------------------------------------------------------------
-// Tuning constants
-// -----------------------------------------------------------------------------
-
-const ESSENTIAL_RESOURCES = new Set(['food', 'wood', 'gold', 'iron']);
-const LUXURY_WEIGHT = 0.25;          // De-prioritize luxury resources (e.g. gems)
-const EARLY_GAME_ROUNDS = 15;        // Rounds considered "early game"
-const EARLY_GAME_MIN_CONSTRUCTS = 2; // Or fewer constructs than this => early game
-const EARLY_ESSENTIAL_BOOST = 1.5;   // Essential resources weighted higher early
-const REPAIR_HEALTH_THRESHOLD = 0.6; // Only repair below 60% health
-const MILITARY_SCORE_THRESHOLD = 5;  // Min manifest military score to be a combat unit
-const BFS_NODE_CAP = 4000;           // Safety cap for pathfinding searches
-
-const TURN_SLEEP = 2000;
-const ACTION_SLEEP = 1000;
 
 // -----------------------------------------------------------------------------
 // Logging helpers
@@ -37,27 +53,17 @@ const LOG_STYLES = {
     detail:  'color: #95a5a6;'
 };
 
-// Wraps a synchronous operation and logs a warning if it blocks the main thread too long.
-function timeIt(player, label, fn) {
-    const t0 = (typeof performance !== 'undefined' ? performance.now() : Date.now());
-    const result = fn();
-    const dt = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
-    if (dt > 300) {
-        aiLog(player, 'warn', `PERF: ${label} blocked main thread for ${dt.toFixed(0)}ms`);
-    }
-    return result;
-}
+const TURN_SLEEP = 2000;       // ms between actions, keeps UI responsive
+const ACTION_SLEEP = 1000;     // ms after each action to allow the renderer to paint
 
 function aiLog(player, category, message) {
     const line = `[AI ${player.name}][${category}] ${message}`;
     console.log(`%c${line}`, LOG_STYLES[category] || '');
 
-    // Mirror logs into the DOM so external tooling (and headless testing) can
-    // inspect AI decision history even when console capture is unavailable.
     if (typeof document !== 'undefined') {
         const buf = window.__AI_LOGS || (window.__AI_LOGS = []);
         buf.push(line);
-        if (buf.length > 3000) buf.shift();
+        if (buf.length > 4000) buf.shift();
         let mirror = document.getElementById('__ai-log-mirror');
         if (!mirror) {
             mirror = document.createElement('div');
@@ -66,7 +72,7 @@ function aiLog(player, category, message) {
             document.documentElement.appendChild(mirror);
         }
         mirror.dataset.count = String(buf.length);
-        mirror.dataset.tail = buf.slice(-120).join('\n');
+        mirror.dataset.tail = buf.slice(-160).join('\n');
     }
 }
 
@@ -74,242 +80,218 @@ function fmtRes(obj) {
     return Object.entries(obj || {}).map(([k, v]) => `${k}:${v}`).join(', ') || '(empty)';
 }
 
-export async function processTurn(player, gameState) {
-    if (!player || player.orders <= 0) return;
-
-    const manifest = gameState.manifestData;
-    if (!manifest || !manifest.entities) return;
-
-    aiLog(player, 'turn', `=== Turn Start (Round ${gameState.currentRound}) | Orders: ${player.orders}/${player.maxOrders} | Resources: ${fmtRes(player.resources)} ===`);
-
-    await sleep(TURN_SLEEP); // Give the engine a moment to update the UI before AI actions start
-
-    let maxLoops = 25;
-    let actionExecuted = true;
-
-    while (player.orders > 0 && maxLoops > 0 && actionExecuted) {
-        maxLoops--;
-        actionExecuted = false;
-
-        // 0. Identify visible enemy entities (re-evaluated each action so fresh vision is used)
-        const visibleOpponents = player.getOpponents ? player.getOpponents(gameState) : {};
-        const enemyEntities = [];
-        Object.values(visibleOpponents).forEach(opp => {
-            if (opp.entities) enemyEntities.push(...opp.entities);
-        });
-        const hasEnemies = enemyEntities.length > 0;
-        if (hasEnemies) {
-            aiLog(player, 'combat', `Visible enemies: ${enemyEntities.map(e => `${e.name}@(${e.q},${e.r})`).join(', ')}`);
-        }
-
-        // 1. Re-evaluate economic pressure and resource demand before each action
-        const economicPressure = evaluateEconomicPressure(player, gameState);
-
-        // 2. Dynamic Goal Selection
-        let goal = "";
-        if (!hasEnemies && economicPressure.level !== 'NONE') {
-            goal = "BUILD_RESOURCES_AND_WORKERS"; // No enemies + economic pressure
-        } else if (!hasEnemies && economicPressure.level === 'NONE') {
-            goal = "EXPAND_AND_EXPLORE"; // No enemies + no economic pressure
-        } else if (hasEnemies && economicPressure.level === 'NONE') {
-            goal = "ALL_OUT_ATTACK"; // Enemies visible + no economic pressure
-        } else {
-            goal = "DEFEND_TOWNS_THEN_RESOURCES"; // Enemies visible + economic pressure
-        }
-
-        aiLog(player, 'turn', `Action Step | Goal: ${goal} | Economic Pressure: ${economicPressure.level} | Orders: ${player.orders} (loops left: ${maxLoops})`);
-        if (economicPressure.reasons.length > 0) {
-            aiLog(player, 'econ', `Demand Analysis (Ranked): ${economicPressure.deficits.join(' > ') || 'None'}`);
-            economicPressure.reasons.forEach(r => aiLog(player, 'detail', `  - ${r}`));
-        }
-
-        const myEntities = player.getEntities ? player.getEntities(gameState) : [];
-        if (myEntities.length === 0) break;
-
-        // Execute turn actions based on active goal
-        switch (goal) {
-            case "BUILD_RESOURCES_AND_WORKERS":
-                actionExecuted = await timeIt(player, `goal ${goal}`, () => executeBuildResourcesGoal(player, myEntities, economicPressure, gameState));
-                break;
-            case "EXPAND_AND_EXPLORE":
-                actionExecuted = await timeIt(player, `goal ${goal}`, () => executeExpandAndExploreGoal(player, myEntities, gameState));
-                break;
-            case "ALL_OUT_ATTACK":
-                actionExecuted = await timeIt(player, `goal ${goal}`, () => executeAllOutAttackGoal(player, myEntities, enemyEntities, gameState));
-                break;
-            case "DEFEND_TOWNS_THEN_RESOURCES":
-                actionExecuted = await timeIt(player, `goal ${goal}`, () => executeDefendTownsThenResourcesGoal(player, myEntities, enemyEntities, economicPressure, gameState));
-                break;
-            default:
-                break;
-        }
-
-        if (actionExecuted) {
-            await sleep(ACTION_SLEEP); // Give the engine a moment to update the UI after each action
-        }
-    }
-
-    if (maxLoops <= 0) {
-        aiLog(player, 'warn', `Hit action-loop safety cap (25 actions in one turn).`);
-    }
-    aiLog(player, 'turn', `=== Turn Completed. Remaining orders: ${player.orders} | Resources: ${fmtRes(player.resources)} ===`);
-    await sleep(TURN_SLEEP);
-}
-
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// -----------------------------------------------------------------------------
+// Manifest classification helpers (no magic numbers for type detection)
+// -----------------------------------------------------------------------------
+
+/** All entity types whose manifest entry has `destroyOnBuild: true` (settlers). */
+function getSettlerTypes(manifestEntities) {
+    return Object.entries(manifestEntities)
+        .filter(([_, meta]) => meta && meta.destroyOnBuild)
+        .map(([name]) => name);
+}
+
 /**
- * Evaluates economic pressure dynamically and ranks resource deficits by highest demand score.
- * Excludes 'orders' from stock and yield evaluations.
- *
- * Fixes vs. previous version:
- *  - Reads real starting-resource reference values from gameState.initializationSettings
- *    (previously always fell back to 100, which made scarce luxuries like gems register a
- *    permanent HIGH deficit and dominate build priorities).
- *  - Applies strategic weighting: essential resources (food/wood/gold/iron) are boosted in
- *    the early game; luxury resources are de-prioritized so the AI builds core economy first.
+ * Settlement centers are constructs that require non-trivial separation and
+ * produce orders or significant economic yield. We derive this from manifest
+ * `spawnConditions.minSeparation` rather than hardcoding a number.
  */
-export function evaluateEconomicPressure(player, gameState) {
-    const profile = player.getResourceProfile ? player.getResourceProfile(gameState) : { totalUpkeep: {}, totalYields: {}, netIncome: {} };
-    const { totalUpkeep, totalYields, netIncome } = profile;
-    const reserves = player.resources || {};
-    const startingResources = gameState?.initializationSettings?.startingResources || {};
-    const currentRound = gameState?.currentRound || 1;
+function getSettlementCenterTypes(manifestEntities) {
+    return Object.entries(manifestEntities)
+        .filter(([_, meta]) => {
+            if (!meta || !meta.spawnConditions) return false;
+            const sep = meta.spawnConditions.minSeparation;
+            return typeof sep === 'number' && sep >= 3
+                && (meta.yields?.orders || (meta.score?.economic || 0) >= 10);
+        })
+        .map(([name]) => name);
+}
 
-    const resourceKeys = Array.from(new Set([
-        ...Object.keys(reserves),
-        ...Object.keys(totalUpkeep),
-        ...Object.keys(totalYields),
-        ...Object.keys(startingResources)
-    ])).filter(k => k !== 'orders');
+/**
+ * Workers (construct builders / repairers) are mobile units that can build
+ * constructs but are NOT destroyed on build. They are detected from the
+ * manifest via `buildables` and `actionPoints`, not via name strings.
+ */
+function getWorkerTypes(manifestEntities) {
+    return Object.entries(manifestEntities)
+        .filter(([_, meta]) => {
+            if (!meta) return false;
+            if (meta.spawnConditions) return false;     // constructs aren't workers
+            if (meta.destroyOnBuild) return false;      // settlers aren't workers
+            if (!Array.isArray(meta.buildables) || meta.buildables.length === 0) return false;
+            if ((meta.actionPoints || 0) <= 0) return false;
+            return true;
+        })
+        .map(([name]) => name);
+}
 
-    // Early-game detection: few rounds played or barely any infrastructure built
-    const ownedConstructs = player.getEntities ? player.getEntities(gameState).filter(e => e.isConstruct && e.active).length : 0;
-    const isEarlyGame = currentRound <= EARLY_GAME_ROUNDS || ownedConstructs < EARLY_GAME_MIN_CONSTRUCTS;
-
-    let isHigh = false;
-    let isLow = false;
-    const reasons = [];
-    const deficitsWithScores = [];
-    const evalLines = [];
-
-    for (const res of resourceKeys) {
-        const upkeep = totalUpkeep[res] || 0;
-        const net = netIncome[res] !== undefined ? netIncome[res] : 0;
-        const stock = reserves[res] !== undefined ? reserves[res] : 0;
-        const initialRes = startingResources[res] !== undefined ? startingResources[res] : 100;
-        const lowStockThreshold = 0.5 * initialRes;
-        const medStockThreshold = 1.0 * initialRes;
-
-        let resScore = 0;
-        let hasDeficit = false;
-        let verdict = 'ok';
-
-        if (upkeep > 0) {
-            if (net < 1.5 * upkeep || stock < 4 * upkeep) {
-                isHigh = true;
-                hasDeficit = true;
-                verdict = 'HIGH deficit';
-                resScore = (1.5 * upkeep - net) * 2 + Math.max(0, 4 * upkeep - stock);
-                reasons.push(`${res} in deficit (net ${net} < 1.5x upkeep ${upkeep} or stock ${stock} < 4x upkeep)`);
-            } else if (net < 3.0 * upkeep || stock < 6 * upkeep) {
-                isLow = true;
-                hasDeficit = true;
-                verdict = 'LOW margin';
-                resScore = (3.0 * upkeep - net) + Math.max(0, 6 * upkeep - stock) * 0.5;
-                reasons.push(`${res} low margin (net ${net} < 3x upkeep ${upkeep} or stock ${stock} < 6x upkeep)`);
+/**
+ * Mobile producers (entities that can be trained to produce more mobile units
+ * or to grow the orders economy). Used by the medium-priority expansion
+ * branch. A village qualifies because it yields +orders and can build units.
+ */
+function getMobileProducerTypes(manifestEntities) {
+    return Object.entries(manifestEntities)
+        .filter(([_, meta]) => {
+            if (!meta) return false;
+            if (!Array.isArray(meta.buildables) || meta.buildables.length === 0) return false;
+            // Construct that produces units OR yields orders
+            if (meta.yields?.orders) return true;
+            // Or construct that can spawn mobile units (buildables that are mobile)
+            if (meta.spawnConditions) {
+                return meta.buildables.some(b => {
+                    const sub = manifestEntities[b];
+                    return sub && !sub.spawnConditions;
+                });
             }
-        } else {
-            if (net < 0 || stock < lowStockThreshold) {
-                isHigh = true;
-                hasDeficit = true;
-                verdict = 'HIGH reserves low';
-                resScore = Math.max(0, lowStockThreshold - stock) * 2 + (net < 0 ? Math.abs(net) * 3 : 0);
-                reasons.push(`${res} reserves low (${stock} < 0.5x starting ${initialRes})`);
-            } else if (stock < medStockThreshold) {
-                isLow = true;
-                hasDeficit = true;
-                verdict = 'LOW reserves moderate';
-                resScore = Math.max(0, medStockThreshold - stock);
-                reasons.push(`${res} reserves moderate (${stock} < starting ${initialRes})`);
-            }
-        }
+            return false;
+        })
+        .map(([name]) => name);
+}
 
-        // Strategic weighting applied BEFORE ranking so scores reflect true priority.
-        let weight = 1.0;
-        if (!ESSENTIAL_RESOURCES.has(res)) {
-            weight = LUXURY_WEIGHT;
-        } else if (isEarlyGame) {
-            weight = EARLY_ESSENTIAL_BOOST;
-        }
-        const weightedScore = resScore * weight;
+/**
+ * Military units are mobile entities that can actually deal meaningful
+ * damage. Workers and settlers have damage.value = 10 but are not military;
+ * we additionally require manifest.score.military > 0 AND damage.value >= 20
+ * (a heuristic derived from manifest values: swordsman=50, bowman=25,
+ * horseman=60; civilians = 10). This avoids both magic-number name lists
+ * and accidentally enlisting villagers.
+ */
+function getMilitaryTypes(manifestEntities) {
+    return Object.entries(manifestEntities)
+        .filter(([_, meta]) => {
+            if (!meta) return false;
+            if (meta.spawnConditions) return false;       // not constructs
+            if (meta.destroyOnBuild) return false;        // not settlers
+            const dmg = meta.damage?.value || 0;
+            const mil = meta.score?.military || 0;
+            return dmg >= 20 && mil > 0;
+        })
+        .map(([name]) => name);
+}
 
-        evalLines.push(`${res}: stock=${stock}, upkeep=${upkeep}, net=${net}, ref=${initialRes} -> ${hasDeficit ? `${verdict}, score=${weightedScore.toFixed(1)} (raw ${resScore.toFixed(1)} x${weight})` : verdict}`);
-        if (hasDeficit) {
-            deficitsWithScores.push({ res, score: weightedScore });
-        }
-    }
-
-    // Detailed per-resource evaluation log
-    aiLog(player, 'econ', `Resource evaluation (round ${currentRound}${isEarlyGame ? ', EARLY GAME: essentials x' + EARLY_ESSENTIAL_BOOST + ', luxuries x' + LUXURY_WEIGHT : ''}):`);
-    evalLines.forEach(l => aiLog(player, 'detail', `  ${l}`));
-
-    // Sort deficits by highest demand score first
-    deficitsWithScores.sort((a, b) => b.score - a.score);
-    const deficits = deficitsWithScores.map(d => d.res);
-
-    const level = isHigh ? 'HIGH' : (isLow ? 'LOW' : 'NONE');
-    return { level, reasons, deficits, profile };
+/** Score an entity's military effectiveness for tie-breaking. */
+function getMilitaryRating(meta) {
+    if (!meta) return 0;
+    const dmg = meta.damage?.value || 0;
+    const rangeMult = meta.range?.maxCells || 1;
+    const armor = meta.armor ? Object.values(meta.armor).reduce((a, b) => a + b, 0) : 0;
+    const health = meta.health || 0;
+    const scoreMil = meta.score?.military || 0;
+    return (scoreMil * 10) + (dmg * rangeMult) + (armor * 5) + (health * 0.05);
 }
 
 // -----------------------------------------------------------------------------
-// Dynamic Entity Analysis & Dependency Helpers
+// Resource evaluation (no ESSENTIAL_RESOURCES, no hard-coded resource list)
+// -----------------------------------------------------------------------------
+
+/**
+ * Returns the dynamic "target stock" the AI tries to maintain for each
+ * resource. The target is the maximum of:
+ *   - the resource's starting level (from initialization settings), so the
+ *     AI naturally tries to maintain starting levels,
+ *   - 10x the resource's current per-turn upkeep, so the AI has a buffer to
+ *     survive consumption spikes,
+ *   - 1.5x the resource's current yields * 10, so producers aren't
+ *     drained by their own creation cost.
+ * Resources not present in starting settings get a baseline of 50.
+ */
+function computeResourceTargets(startingResources, profile) {
+    const { totalUpkeep, totalYields } = profile;
+    const targets = {};
+    const allRes = new Set([
+        ...Object.keys(startingResources),
+        ...Object.keys(totalUpkeep || {}),
+        ...Object.keys(totalYields || {})
+    ]);
+    for (const res of allRes) {
+        if (res === 'orders') continue;
+        const start = startingResources[res] !== undefined ? startingResources[res] : 50;
+        const upkeep = totalUpkeep?.[res] || 0;
+        const yieldAmt = totalYields?.[res] || 0;
+        const targetByUpkeep = upkeep * 10;
+        const targetByYield = yieldAmt * 15;
+        targets[res] = Math.max(start, targetByUpkeep, targetByYield, 50);
+    }
+    return targets;
+}
+
+/**
+ * Resource evaluation:
+ *  - 'deficit' = net income < 0 (yields < upkeep). Only these need a
+ *    producer right now.
+ *  - 'surplus' = net income > 0 AND stock below target. Build more if we
+ *    have idle resources.
+ *  - 'ok' = neither. The AI does nothing for this resource.
+ * Each iteration logs the per-resource verdict and overall ordering.
+ */
+export function evaluateResources(player, gameState) {
+    const profile = player.getResourceProfile ? player.getResourceProfile(gameState)
+        : { totalUpkeep: {}, totalYields: {}, netIncome: {} };
+    const { totalUpkeep, totalYields, netIncome } = profile;
+    const reserves = player.resources || {};
+    const startingResources = (gameState?.initializationSettings?.startingResources) || {};
+    const targets = computeResourceTargets(startingResources, profile);
+
+    const resourceKeys = Array.from(new Set([
+        ...Object.keys(reserves),
+        ...Object.keys(totalUpkeep || {}),
+        ...Object.keys(totalYields || {}),
+        ...Object.keys(startingResources)
+    ])).filter(k => k !== 'orders');
+
+    const deficit = [];   // resources where we MUST build a producer (net < 0)
+    const surplus = [];   // resources that are net-positive but stock < target
+
+    const lines = [];
+    for (const res of resourceKeys) {
+        const net = netIncome?.[res] !== undefined ? netIncome[res] : 0;
+        const upkeep = totalUpkeep?.[res] || 0;
+        const yieldAmt = totalYields?.[res] || 0;
+        const stock = reserves[res] !== undefined ? reserves[res] : 0;
+        const target = targets[res];
+        const start = startingResources[res] !== undefined ? startingResources[res] : 50;
+
+        let verdict = 'ok';
+        let priority = 0;
+        if (net < 0) {
+            verdict = 'deficit';
+            // More negative = more urgent
+            priority = -net * 10 + Math.max(0, start - stock);
+            deficit.push({ res, priority });
+        } else if (net > 0 && stock < target) {
+            verdict = 'surplus_but_low';
+            // Deeper deficit relative to target = more urgent
+            priority = (target - stock) / Math.max(1, target);
+            surplus.push({ res, priority });
+        }
+
+        lines.push(`  ${res}: stock=${stock}, yield=${yieldAmt}, upkeep=${upkeep}, net=${net}, target=${target}, start=${start} -> ${verdict}${priority ? ` (priority ${priority.toFixed(1)})` : ''}`);
+    }
+
+    deficit.sort((a, b) => b.priority - a.priority);
+    surplus.sort((a, b) => b.priority - a.priority);
+
+    return { deficit, surplus, detailLines: lines, targets, startingResources };
+}
+
+// -----------------------------------------------------------------------------
+// Production path resolution
 // -----------------------------------------------------------------------------
 
 function getManifestEntities(gameState) {
     return gameState.manifestData?.entities || {};
 }
 
-/**
- * Finds all entity definitions that yield the given resource key.
- * Prioritizes entities that can build other entities (e.g. settlements/villages),
- * followed by highest resource yield amount.
- */
-function findEntitiesYieldingResource(manifestEntities, resKey) {
-    const results = [];
-    for (const [name, meta] of Object.entries(manifestEntities)) {
-        if (meta.yields && (meta.yields[resKey] || 0) > 0) {
-            const isProducerOfEntities = Array.isArray(meta.buildables) && meta.buildables.length > 0;
-            results.push({
-                name,
-                meta,
-                yieldAmount: meta.yields[resKey],
-                isProducerOfEntities
-            });
-        }
-    }
-
-    // Prioritize entities that can produce other entities, then by yield amount
-    results.sort((a, b) => {
-        if (a.isProducerOfEntities !== b.isProducerOfEntities) {
-            return a.isProducerOfEntities ? -1 : 1;
-        }
-        return b.yieldAmount - a.yieldAmount;
-    });
-
-    return results;
-}
-
-/**
- * Finds entity types in manifest that have `targetName` in their `buildables` list.
- */
 function findBuildersForEntity(manifestEntities, targetName) {
     const builders = [];
     const targetLower = targetName.toLowerCase();
     for (const [bName, bMeta] of Object.entries(manifestEntities)) {
-        if (Array.isArray(bMeta.buildables)) {
+        if (Array.isArray(bMeta?.buildables)) {
             if (bMeta.buildables.some(item => item.toLowerCase() === targetLower)) {
                 builders.push(bName);
             }
@@ -319,14 +301,10 @@ function findBuildersForEntity(manifestEntities, targetName) {
 }
 
 /**
- * Recursively resolves a production dependency chain to find an owned entity that
- * can build the next required unit/structure in order to eventually produce `targetName`.
- *
- * @param {Player} player
- * @param {GameState} gameState
- * @param {string} targetName
- * @param {Set<string>} [visited]
- * @returns {{ executor: BaseEntity, actionTarget: string } | null}
+ * Resolves a chain of production. We may need to build a worker before a
+ * worker can build a mine, or a settler before a settler can build a village.
+ * Returns the first step we can take immediately, or null if the chain
+ * requires an entity we cannot yet produce.
  */
 function resolveProductionPath(player, gameState, targetName, visited = new Set()) {
     if (visited.has(targetName)) return null;
@@ -336,160 +314,69 @@ function resolveProductionPath(player, gameState, targetName, visited = new Set(
     const myEntities = player.getEntities(gameState).filter(e => e.active);
     const builderTypeNames = findBuildersForEntity(manifestEntities, targetName);
 
-    // 1. Check if we currently own an active builder of this type
+    // 1. We already own an active builder of the right kind.
     for (const bTypeName of builderTypeNames) {
-        const ownedBuilder = myEntities.find(e => e.name.toLowerCase() === bTypeName.toLowerCase());
-        if (ownedBuilder) {
-            return { executor: ownedBuilder, actionTarget: targetName };
-        }
+        const owned = myEntities.find(e => e.name.toLowerCase() === bTypeName.toLowerCase());
+        if (owned) return { executor: owned, actionTarget: targetName };
     }
 
-    // 2. If no direct builder owned, recursively check how to build each builder type
+    // 2. We don't; recursively figure out how to build the builder.
     for (const bTypeName of builderTypeNames) {
         const step = resolveProductionPath(player, gameState, bTypeName, visited);
-        if (step) {
-            return step;
-        }
+        if (step) return step;
     }
-
     return null;
 }
 
-/**
- * Calculates a combat rating for an entity based on damage, health, range, and armor.
- */
-function getMilitaryRating(meta) {
-    if (!meta) return 0;
-    const baseDamage = meta.damage?.value || 0;
-    const rangeMult = meta.range ? (meta.range.maxCells || 1) : 1;
-    const armorTotal = meta.armor ? (Object.values(meta.armor).reduce((a, b) => a + b, 0)) : 0;
-    const health = meta.health || 0;
-    const scoreMil = meta.score?.military || 0;
-    return (scoreMil * 15) + (baseDamage * rangeMult * 3) + (armorTotal * 10) + (health * 0.1);
-}
-
-/**
- * Returns entities ranked by military effectiveness.
- */
-function getRankedMilitaryTypes(manifestEntities) {
-    const units = [];
+/** All construct manifests that yield the given resource. */
+function findConstructsYieldingResource(manifestEntities, resKey) {
+    const results = [];
     for (const [name, meta] of Object.entries(manifestEntities)) {
-        // Military units are mobile entities with significant damage/military score
-        const hasDamage = (meta.damage?.value || 0) > 15 || (meta.score?.military || 0) >= 5;
-        const isMobile = !meta.spawnConditions && (meta.actionPoints || 0) > 0;
-        if (hasDamage && isMobile) {
-            units.push({ name, meta, rating: getMilitaryRating(meta) });
+        if (!meta || !meta.spawnConditions) continue;  // only constructs
+        if (meta.yields && (meta.yields[resKey] || 0) > 0) {
+            results.push({ name, meta, yieldAmount: meta.yields[resKey] || 0 });
         }
     }
-    units.sort((a, b) => b.rating - a.rating);
-    return units;
-}
-
-/**
- * Returns entity types capable of founding settlements.
- * FIX: only entities with destroyOnBuild qualify (previously workers were misclassified
- * as settlers because they can build constructs that happen to have minSeparation >= 3).
- */
-function getSettlerTypes(manifestEntities) {
-    return Object.entries(manifestEntities)
-        .filter(([_, meta]) => meta.destroyOnBuild)
-        .map(([name]) => name);
-}
-
-/**
- * Returns entity types that represent settlement centers (villages/cities with high economic score and minSeparation).
- */
-function getSettlementCenterTypes(manifestEntities) {
-    return Object.entries(manifestEntities)
-        .filter(([_, meta]) => (meta.spawnConditions?.minSeparation >= 3) && (meta.yields?.orders || meta.score?.economic >= 10))
-        .map(([name]) => name);
-}
-
-/**
- * Returns entity types that are mobile construct builders / repairers (workers).
- */
-function getWorkerTypes(manifestEntities) {
-    return Object.entries(manifestEntities)
-        .filter(([_, meta]) => !meta.spawnConditions && (meta.actionPoints || 0) > 0 && Array.isArray(meta.buildables) && meta.buildables.length > 0 && !meta.destroyOnBuild)
-        .map(([name]) => name);
-}
-
-/**
- * FIX: Selects only genuine military units for combat duty.
- * Previously any mobile entity with an Attack action qualified — including workers and
- * settlers (they have token damage values), causing civilians to be sent into battle.
- * Civilian units are explicitly excluded and reported via logs.
- */
-function selectCombatUnits(player, myEntities, manifestEntities) {
-    const combatUnits = [];
-    const excludedCivilians = [];
-
-    for (const e of myEntities) {
-        if (!e.active || e.isConstruct) continue;
-        const hasAttack = e.getActions().some(a => a.name === "Attack");
-        if (!hasAttack) continue;
-
-        const meta = manifestEntities[e.name];
-        const milScore = meta?.score?.military || 0;
-        if (milScore >= MILITARY_SCORE_THRESHOLD) {
-            combatUnits.push(e);
-        } else {
-            excludedCivilians.push(`${e.name}#${(e.id || '').toString().slice(-4)} (mil score ${milScore})`);
-        }
-    }
-
-    // Strongest units act first
-    combatUnits.sort((a, b) =>
-        getMilitaryRating(manifestEntities[b.name]) - getMilitaryRating(manifestEntities[a.name]));
-
-    if (excludedCivilians.length > 0) {
-        aiLog(player, 'combat', `Combat selection: ${combatUnits.length} military unit(s) eligible [${combatUnits.map(u => u.name).join(', ') || 'none'}]; keeping civilians out of combat: ${excludedCivilians.join(', ')}`);
-    } else {
-        aiLog(player, 'combat', `Combat selection: ${combatUnits.length} military unit(s) eligible [${combatUnits.map(u => u.name).join(', ') || 'none'}]`);
-    }
-
-    return combatUnits;
+    results.sort((a, b) => b.yieldAmount - a.yieldAmount);
+    return results;
 }
 
 // -----------------------------------------------------------------------------
-// Pathfinding helpers (BFS over walkable terrain)
+// Pathfinding (BFS over walkable terrain)
 // -----------------------------------------------------------------------------
 
 /**
- * BFS from a unit across terrain the unit can stand on, recording paths.
- * Water/impassable terrain is never traversed, so returned targets are genuinely
- * reachable on foot. Occupied cells may be traversed but not selected as destinations.
- *
- * @returns {Map<string, {cell: Object, path: Array<Object>}>} visited cells with paths
+ * BFS from a unit across terrain the unit can stand on. Returns a map of
+ * "q,r" -> { cell, path } where path is the ordered list of cells from the
+ * start (excluding the start cell) to that cell.
  */
-function bfsWalkable(unit, gameState, maxNodes = BFS_NODE_CAP) {
+function bfsWalkable(unit, gameState, maxNodes = 6000) {
     const grid = gameState.hexGrid;
-    const start = { q: unit.q, r: unit.r };
+    const startQ = unit.q, startR = unit.r;
 
-    // Build an occupancy lookup once (getEntityAt is a linear scan per call)
     const occupied = new Set();
     for (const e of gameState.entities) {
         if (e.q !== undefined && e.r !== undefined) occupied.add(`${e.q},${e.r}`);
     }
 
     const visited = new Map();
-    visited.set(`${start.q},${start.r}`, { cell: grid.getCell(start.q, start.r), path: [] });
-    const queue = [{ q: start.q, r: start.r, path: [] }];
+    visited.set(`${startQ},${startR}`, { cell: grid.getCell(startQ, startR), path: [] });
+    const queue = [{ q: startQ, r: startR, path: [] }];
     let nodes = 0;
 
     while (queue.length > 0 && nodes < maxNodes) {
         const cur = queue.shift();
         nodes++;
-        for (const nb of grid.getNeighbors(cur.q, cur.r)) {
+        const nbrs = grid.getNeighbors(cur.q, cur.r);
+        for (const nb of nbrs) {
             const key = `${nb.q},${nb.r}`;
             if (visited.has(key)) continue;
-            if (!unit.canStandOn(nb)) continue; // impassable terrain (water etc.) — do not traverse
-
+            if (!unit.canStandOn(nb)) continue; // water/impassable: skip
             const path = [...cur.path, nb];
             visited.set(key, { cell: nb, path });
-
-            if (occupied.has(key)) continue; // can pass through but not stop here; don't expand from occupied cells
-
+            // We can pass through occupied cells, but don't expand from them
+            // (avoids squashing into a stack of units).
+            if (occupied.has(key)) continue;
             queue.push({ q: nb.q, r: nb.r, path });
         }
     }
@@ -497,27 +384,23 @@ function bfsWalkable(unit, gameState, maxNodes = BFS_NODE_CAP) {
 }
 
 /**
- * Moves a unit as far along a BFS path as its action points allow.
- * Tries the farthest reachable cell first to maximize progress per order.
- *
- * @returns {number} orders used (0 if move failed)
+ * Move a unit along a BFS path as far as action points allow. Each move is a
+ * separate order; we move as far as the unit can in a single action.
  */
-function moveAlongPath(player, unit, moveAction, path, gameState, logCategory, reason) {
+function moveAlongPath(player, unit, moveAction, path, gameState, category, reason) {
     if (!path || path.length === 0) return 0;
 
-    // Fast path: try the full route first (single canDo/pathfind call)
+    // Try the full route first.
     const lastCell = path[path.length - 1];
     if (!gameState.getEntityAt(lastCell.q, lastCell.r)) {
         const fullCheck = moveAction.canDo(lastCell, null);
         if (fullCheck && fullCheck.possible && moveAction.do(lastCell, null)) {
-            aiLog(player, logCategory, `Move ${unit.name} (${path.length}-cell route): advanced to (${lastCell.q},${lastCell.r}) [arrived]. Rationale: ${reason}`);
+            aiLog(player, category, `Move ${unit.name}: advanced to (${lastCell.q},${lastCell.r}) [arrived]. Reason: ${reason}`);            
             return 1;
         }
     }
 
-    // Fallback: estimate the farthest affordable cell from the AP budget using terrain
-    // costs along the BFS path, then verify with as few canDo calls as possible
-    // (each canDo triggers a full grid pathfind, so calls must stay bounded).
+    // Otherwise step back to the farthest affordable cell within AP budget.
     const apBudget = unit.actionPoints !== undefined ? unit.actionPoints : Infinity;
     let acc = 0;
     let furthest = -1;
@@ -526,18 +409,17 @@ function moveAlongPath(player, unit, moveAction, path, gameState, logCategory, r
         if (acc > apBudget) break;
         furthest = i;
     }
-
     for (let i = furthest; i >= 0; i--) {
         const stepCell = path[i];
-        if (gameState.getEntityAt(stepCell.q, stepCell.r)) continue; // destination must be free
-
+        if (gameState.getEntityAt(stepCell.q, stepCell.r)) continue;
         const check = moveAction.canDo(stepCell, null);
         if (check && check.possible) {
             const moved = moveAction.do(stepCell, null);
             if (moved) {
-                aiLog(player, logCategory, `Move ${unit.name} (${path.length}-cell route): advanced to (${stepCell.q},${stepCell.r})` +
-                    (i < path.length - 1 ? ` [partial: ${i + 1}/${path.length} cells, more next turn]` : ` [arrived]`) +
-                    `. Rationale: ${reason}`);
+                const note = i < path.length - 1
+                    ? ` [partial: ${i + 1}/${path.length} cells, more next turn]`
+                    : ` [arrived]`;
+                aiLog(player, category, `Move ${unit.name}: advanced to (${stepCell.q},${stepCell.r})${note}. Reason: ${reason}`);                
                 return 1;
             }
         }
@@ -546,273 +428,269 @@ function moveAlongPath(player, unit, moveAction, path, gameState, logCategory, r
 }
 
 // -----------------------------------------------------------------------------
-// Goal Executions
+// High-priority goals (executed round-robin each order)
 // -----------------------------------------------------------------------------
 
-/**
- * Goal 1: Build resources, workers, and infrastructure when under economic pressure.
- */
-async function executeBuildResourcesGoal(player, myEntities, economicPressure, gameState) {
+/** HIGH MIL: any military unit in our attackHistory on any of our entities
+ *  must be hunted down and killed. */
+function goalHighMilitaryRevenge(player, myEntities, gameState) {
     const manifestEntities = getManifestEntities(gameState);
-    const workerTypeNames = getWorkerTypes(manifestEntities);
-    const settlerTypeNames = getSettlerTypes(manifestEntities);
+    const militaryTypes = getMilitaryTypes(manifestEntities);
 
-    const workers = myEntities.filter(e => workerTypeNames.includes(e.name) && e.active);
-    const settlers = myEntities.filter(e => settlerTypeNames.includes(e.name) && e.active);
-
-    // 1. Repair seriously damaged structures first (below health threshold only)
-    const damagedEntity = myEntities.find(e => e.health < e.maxHealth * REPAIR_HEALTH_THRESHOLD);
-    if (damagedEntity) {
-        aiLog(player, 'build', `Damaged structure detected: ${damagedEntity.name} at ${(100 * damagedEntity.health / damagedEntity.maxHealth).toFixed(0)}% health (threshold ${REPAIR_HEALTH_THRESHOLD * 100}%). Attempting repair.`);
-        const repairers = myEntities.filter(e => e.getActions().some(a => a.name === "Repair"));
-        for (const repairer of repairers) {
-            const ordersUsed = repair(gameState, repairer, damagedEntity, player.orders);
-            if (ordersUsed > 0) {
-                aiLog(player, 'build', `Action: Repair ${damagedEntity.name} with ${repairer.name}. Rationale: Fix badly damaged infrastructure. Orders used: ${ordersUsed}`);
-                return true;
-            }
-        }
-        aiLog(player, 'warn', `Repair of ${damagedEntity.name} failed (no reachable repairer). Falling through to construction.`);
-    }
-
-    // 2. Build resource constructs matching highest-priority deficits via dynamic production chains
-    for (const deficitRes of economicPressure.deficits) {
-        const candidateYielders = findEntitiesYieldingResource(manifestEntities, deficitRes);
-        aiLog(player, 'build', `Deficit '${deficitRes}': candidate producers = [${candidateYielders.map(c => `${c.name}(+${c.yieldAmount})`).join(', ') || 'none'}]`);
-
-        for (const yielder of candidateYielders) {
-            const step = resolveProductionPath(player, gameState, yielder.name);
-            if (step && step.executor) {
-                aiLog(player, 'detail', `Production chain for ${yielder.name}: build via ${step.executor.name}`);
-                const ordersUsed = timeIt(player, `build ${yielder.name}`, () => build(gameState, step.executor, step.actionTarget));
-                if (ordersUsed > 0) {
-                    aiLog(player, 'build', `Action: Build ${camelToTitle(step.actionTarget)} with ${step.executor.name}. Rationale: Satisfy highest demand (${deficitRes}). Orders used: ${ordersUsed}`);
-                    return true;
-                }
-                aiLog(player, 'warn', `Build ${yielder.name} with ${step.executor.name} failed (resources/terrain/orders). Trying next candidate.`);
-            } else {
-                aiLog(player, 'detail', `No production path available for ${yielder.name} (missing builder in chain).`);
-            }
+    // Find any attacker IDs from our entities' attack history.
+    const revengeTargets = new Map(); // id -> { attacker, score }
+    for (const e of myEntities) {
+        if (!e.attackHistory) continue;
+        for (const entry of e.attackHistory) {
+            if (!entry || !entry.attackerId) continue;
+            const prior = revengeTargets.get(entry.attackerId) || { score: 0, lastEntry: entry };
+            prior.score += (entry.damage || 0);
+            prior.lastEntry = entry;
+            prior.attacker = entry;
+            revengeTargets.set(entry.attackerId, prior);
         }
     }
+    if (revengeTargets.size === 0) return false;
 
-    // 3. If workers are scarce, produce workers
-    if (workers.length < 2) {
-        aiLog(player, 'build', `Worker count low (${workers.length}/2). Attempting to train a worker.`);
-        for (const workerName of workerTypeNames) {
-            const step = resolveProductionPath(player, gameState, workerName);
-            if (step && step.executor) {
-                const ordersUsed = timeIt(player, `train ${workerName}`, () => build(gameState, step.executor, step.actionTarget));
-                if (ordersUsed > 0) {
-                    aiLog(player, 'build', `Action: Train ${camelToTitle(step.actionTarget)} at ${step.executor.name}. Rationale: Need builders for economy. Orders used: ${ordersUsed}`);
-                    return true;
-                }
-                aiLog(player, 'warn', `Training ${workerName} failed (insufficient resources?).`);
-            }
-        }
+    // Resolve the live enemy entity for each attacker ID.
+    const targetList = [];
+    for (const [, info] of revengeTargets) {
+        const live = gameState.entities.find(en => en.id === info.lastEntry.attackerId);
+        if (live && !live.destroyed) targetList.push({ entity: live, score: info.score });
     }
+    if (targetList.length === 0) return false;
+    targetList.sort((a, b) => b.score - a.score);
 
-    // 4. Settler expansion if settler available
-    const settlementCenterNames = getSettlementCenterTypes(manifestEntities);
-    for (const settler of settlers) {
-        for (const centerName of settlementCenterNames) {
-            const ordersUsed = build(gameState, settler, centerName);
-            if (ordersUsed > 0) {
-                aiLog(player, 'build', `Action: Found ${camelToTitle(centerName)} with Settler. Rationale: Expand empire territory and production. Orders used: ${ordersUsed}`);
-                return true;
-            }
-        }
-    }
+    aiLog(player, 'combat', `REVENGE list (${targetList.length}): ${targetList.map(t => `${t.entity.name}#${t.entity.id.slice(-4)} (total ${t.score.toFixed(0)} dmg on us)`).join('; ')}`);
 
-    // 5. Fallback: Exploration
-    aiLog(player, 'detail', `No construction/training action available; falling back to exploration.`);
-    return exploreFog(player, myEntities, gameState);
-}
-
-/**
- * Goal 2: Expand and explore when economy is strong and no enemies are visible.
- */
-async function executeExpandAndExploreGoal(player, myEntities, gameState) {
-    const manifestEntities = getManifestEntities(gameState);
-    const settlementCenterNames = getSettlementCenterTypes(manifestEntities);
-    const settlerTypeNames = getSettlerTypes(manifestEntities);
-    const militaryRanked = getRankedMilitaryTypes(manifestEntities);
-
-    const centers = myEntities.filter(e => settlementCenterNames.includes(e.name) && e.active);
-    const settlers = myEntities.filter(e => settlerTypeNames.includes(e.name) && e.active);
-    const military = myEntities.filter(e => militaryRanked.some(m => m.name === e.name) && e.active);
-
-    // 1. Build Settler if wealthy and few settlement centers
-    if (centers.length < 3 && settlers.length === 0) {
-        aiLog(player, 'build', `Expansion check: ${centers.length}/3 settlement centers, ${settlers.length} settlers. Attempting to train a settler.`);
-        for (const settlerTypeName of settlerTypeNames) {
-            const step = resolveProductionPath(player, gameState, settlerTypeName);
-            if (step && step.executor) {
-                const ordersUsed = build(gameState, step.executor, step.actionTarget);
-                if (ordersUsed > 0) {
-                    aiLog(player, 'build', `Action: Train ${camelToTitle(step.actionTarget)} at ${step.executor.name}. Rationale: Strong economy permits territorial expansion. Orders used: ${ordersUsed}`);
-                    return true;
-                }
-                aiLog(player, 'warn', `Training ${settlerTypeName} failed (insufficient resources?).`);
-            }
-        }
-    }
-
-    // 2. Found settlement center with settler
-    for (const settler of settlers) {
-        for (const centerName of settlementCenterNames) {
-            const ordersUsed = build(gameState, settler, centerName);
-            if (ordersUsed > 0) {
-                aiLog(player, 'build', `Action: Build ${camelToTitle(centerName)}. Rationale: Expand civilization with new settlement. Orders used: ${ordersUsed}`);
-                return true;
-            }
-        }
-    }
-
-    // 3. Train Military Units based on attribute combat ratings
-    if (military.length < centers.length * 3 && militaryRanked.length > 0) {
-        for (const milChoice of militaryRanked) {
-            const step = resolveProductionPath(player, gameState, milChoice.name);
-            if (step && step.executor) {
-                const ordersUsed = build(gameState, step.executor, step.actionTarget);
-                if (ordersUsed > 0) {
-                    aiLog(player, 'build', `Action: Train ${camelToTitle(step.actionTarget)} at ${step.executor.name}. Rationale: Build military forces (Rating: ${milChoice.rating.toFixed(0)}). Orders used: ${ordersUsed}`);
-                    return true;
-                }
-            }
-        }
-        aiLog(player, 'warn', `Military training attempted but all options failed (likely resource shortage).`);
-    }
-
-    // 4. Explore Fog of War
-    return exploreFog(player, myEntities, gameState);
-}
-
-/**
- * Goal 3: All-out attack when enemies are visible and economy is strong.
- */
-async function executeAllOutAttackGoal(player, myEntities, enemyEntities, gameState) {
-    const manifestEntities = getManifestEntities(gameState);
-    const combatUnits = selectCombatUnits(player, myEntities, manifestEntities);
+    const combatUnits = myEntities.filter(e => militaryTypes.includes(e.name) && e.active);
     if (combatUnits.length === 0) {
-        aiLog(player, 'combat', `No military units available for attack; switching to expansion/exploration mode.`);
-        return executeExpandAndExploreGoal(player, myEntities, gameState);
+        aiLog(player, 'warn', `REVENGE: no military unit available to retaliate.`);
+        return false;
     }
 
-    for (const unit of combatUnits) {
-        // Sort enemies by closest distance
-        const sortedEnemies = [...enemyEntities].sort((a, b) => HexGrid.distance(unit, a) - HexGrid.distance(unit, b));
-        aiLog(player, 'combat', `${unit.name}@(${unit.q},${unit.r}) AP:${unit.actionPoints} engaging nearest enemy ${sortedEnemies[0].name} (dist ${HexGrid.distance(unit, sortedEnemies[0])})`);
-        for (const enemy of sortedEnemies) {
-            const ordersUsed = timeIt(player, `attack ${unit.name}->${enemy.name}`, () => attack(gameState, unit, enemy, player.orders));
+    for (const { entity: target, score } of targetList) {
+        for (const unit of combatUnits) {
+            if (unit.actionPoints !== undefined && unit.actionPoints <= 0) continue;
+            const ordersUsed = attack(gameState, unit, target, player.orders);
             if (ordersUsed > 0) {
-                aiLog(player, 'combat', `Action: Attack ${enemy.name} with ${unit.name}. Rationale: Eliminate visible hostile threat. Orders used: ${ordersUsed}`);
+                aiLog(player, 'combat', `REVENGE: ${unit.name} attacks ${target.name} (they dealt ${score.toFixed(0)} dmg to us). Orders used: ${ordersUsed}`);                
                 return true;
             }
-        }
-        aiLog(player, 'detail', `${unit.name} could not attack any enemy directly (out of range/AP); will advance instead.`);
-    }
-
-    // If cannot attack directly, advance military units towards enemy positions
-    return advanceMilitaryTowardsEnemies(player, combatUnits, enemyEntities, gameState);
-}
-
-/**
- * Goal 4: Defend towns close to enemies first, then build resource infrastructure.
- */
-async function executeDefendTownsThenResourcesGoal(player, myEntities, enemyEntities, economicPressure, gameState) {
-    const manifestEntities = getManifestEntities(gameState);
-    const settlementCenterNames = getSettlementCenterTypes(manifestEntities);
-    const towns = myEntities.filter(e => settlementCenterNames.includes(e.name));
-    const combatUnits = selectCombatUnits(player, myEntities, manifestEntities);
-
-    // 1. Find enemies threatening towns (distance <= 4 from any town)
-    let threateningEnemies = [];
-    if (towns.length > 0) {
-        threateningEnemies = enemyEntities.filter(enemy => {
-            return towns.some(t => HexGrid.distance(enemy, t) <= 4);
-        });
-    }
-
-    if (threateningEnemies.length > 0) {
-        aiLog(player, 'combat', `THREAT DETECTED near settlements: ${threateningEnemies.map(e => `${e.name}@(${e.q},${e.r}, dist-to-town ${Math.min(...towns.map(t => HexGrid.distance(e, t)))})`).join('; ')}`);
-    } else {
-        aiLog(player, 'combat', `Enemies visible but none within threat radius (4) of settlements.`);
-    }
-
-    const targetList = threateningEnemies.length > 0 ? threateningEnemies : enemyEntities;
-
-    for (const unit of combatUnits) {
-        const sortedEnemies = [...targetList].sort((a, b) => HexGrid.distance(unit, a) - HexGrid.distance(unit, b));
-        for (const enemy of sortedEnemies) {
-            const ordersUsed = timeIt(player, `defend-attack ${unit.name}->${enemy.name}`, () => attack(gameState, unit, enemy, player.orders));
-            if (ordersUsed > 0) {
-                aiLog(player, 'combat', `Action: Defend Settlement - Attack ${enemy.name} with ${unit.name}. Rationale: Protect vulnerable settlement. Orders used: ${ordersUsed}`);
+            // If we couldn't reach, try to move closer.
+            const advanced = advanceUnitTowards(player, unit, target, gameState, 'combat', `closing on revenge target ${target.name}`);
+            if (advanced) {
+                aiLog(player, 'combat', `REVENGE: ${unit.name} couldn't reach ${target.name} to attack; moved closer instead.`);
                 return true;
             }
-        }
-    }
-
-    // 2. Advance military toward threatening enemies
-    if (combatUnits.length > 0 && threateningEnemies.length > 0) {
-        const advanced = advanceMilitaryTowardsEnemies(player, combatUnits, threateningEnemies, gameState);
-        if (advanced) return true;
-        aiLog(player, 'warn', `Military could not advance toward threats (blocked or out of AP); continuing economy.`);
-    }
-
-    // 3. Build required resource infrastructure
-    return executeBuildResourcesGoal(player, myEntities, economicPressure, gameState);
-}
-
-/**
- * Moves mobile combat units towards enemy entities.
- * FIX: now uses BFS pathfinding over walkable terrain instead of greedy neighbor stepping,
- * so units route around water/mountains instead of oscillating against obstacles.
- */
-function advanceMilitaryTowardsEnemies(player, combatUnits, enemyEntities, gameState) {
-    if (enemyEntities.length === 0) return false;
-
-    for (const unit of combatUnits) {
-        if (unit.actionPoints !== undefined && unit.actionPoints <= 0) continue;
-        const moveAction = unit.getActions().find(a => a.name === "Move");
-        if (!moveAction) continue;
-
-        const sortedEnemies = [...enemyEntities].sort((a, b) => HexGrid.distance(unit, a) - HexGrid.distance(unit, b));
-        const targetEnemy = sortedEnemies[0];
-
-        // BFS over walkable terrain; pick the reachable cell closest to the enemy
-        const reachable = timeIt(player, `bfs advance ${unit.name}`, () => bfsWalkable(unit, gameState));
-        let best = null;
-        let bestDist = Infinity;
-        for (const { cell, path } of reachable.values()) {
-            if (path.length === 0) continue; // skip starting cell
-            const d = HexGrid.distance(cell, targetEnemy);
-            if (d < bestDist || (d === bestDist && best && path.length < best.path.length)) {
-                bestDist = d;
-                best = { cell, path };
-            }
-        }
-
-        if (best) {
-            aiLog(player, 'combat', `Advance plan: ${unit.name} -> (${best.cell.q},${best.cell.r}) via ${best.path.length}-cell route (hex dist to ${targetEnemy.name}: ${bestDist}).`);
-            const ordersUsed = moveAlongPath(player, unit, moveAction, best.path, gameState, 'combat', `Close distance to engage ${targetEnemy.name}`);
-            if (ordersUsed > 0) return true;
-        } else {
-            aiLog(player, 'warn', `${unit.name}: no walkable route found toward ${targetEnemy.name}; unit holds position.`);
         }
     }
     return false;
 }
 
+/** HIGH ECON: stabilize any resource whose net income is negative by building
+ *  the cheapest construct that yields it. */
+function goalHighEconomyStabilize(player, myEntities, gameState) {
+    const manifestEntities = getManifestEntities(gameState);
+    const evalRes = evaluateResources(player, gameState);
+    if (evalRes.deficit.length === 0) return false;
+
+    // Try each deficit in priority order until we successfully build something.
+    for (const def of evalRes.deficit) {
+        const candidates = findConstructsYieldingResource(manifestEntities, def.res);
+        aiLog(player, 'econ', `Stabilize: ${def.res} net < 0. Candidates: [${candidates.map(c => `${c.name}(+${c.yieldAmount})`).join(', ') || 'none'}]`);
+
+        for (const cand of candidates) {
+            const step = resolveProductionPath(player, gameState, cand.name);
+            if (!step) {
+                aiLog(player, 'detail', `No production path for ${cand.name} (no builder).`);
+                continue;
+            }
+            const ordersUsed = build(gameState, step.executor, step.actionTarget);
+            if (ordersUsed > 0) {
+                aiLog(player, 'build', `STABILIZE: Build ${camelToTitle(step.actionTarget)} via ${step.executor.name} (resolves ${def.res} deficit). Orders used: ${ordersUsed}`);                
+                return true;
+            } else {
+                aiLog(player, 'detail', `Build ${cand.name} via ${step.executor.name} failed (resources/terrain/orders). Trying next candidate.`);
+            }
+        }
+    }
+    return false;
+}
+
+// -----------------------------------------------------------------------------
+// Medium-priority goals (round-robin after HIGH goals)
+// -----------------------------------------------------------------------------
+
+/** MED MIL: attack only when our forces outnumber the visible enemy military. */
+function goalMediumMilitaryAttack(player, myEntities, enemyEntities, gameState) {
+    const manifestEntities = getManifestEntities(gameState);
+    const militaryTypes = getMilitaryTypes(manifestEntities);
+    const myMilitary = myEntities.filter(e => militaryTypes.includes(e.name) && e.active);
+
+    // Compute visible enemy military strength.
+    const enemyMilitary = enemyEntities.filter(e => militaryTypes.includes(e.name));
+    if (enemyMilitary.length === 0) return false;
+    if (myMilitary.length === 0) return false;
+
+    const myStrength = myMilitary.reduce((s, e) => s + (manifestEntities[e.name]?.score?.military || 0), 0);
+    const theirStrength = enemyMilitary.reduce((s, e) => s + (manifestEntities[e.name]?.score?.military || 0), 0);
+    if (myStrength <= theirStrength) {
+        aiLog(player, 'detail', `MED MIL: not attacking — our military strength ${myStrength} <= enemy ${theirStrength}.`);
+        return false;
+    }
+
+    // Pick the weakest visible enemy target and attack with the closest unit.
+    const weakest = [...enemyMilitary].sort((a, b) =>
+        (manifestEntities[a.name]?.score?.military || 0) - (manifestEntities[b.name]?.score?.military || 0))[0];
+
+    for (const unit of myMilitary) {
+        if (unit.actionPoints !== undefined && unit.actionPoints <= 0) continue;
+        const ordersUsed = attack(gameState, unit, weakest, player.orders);
+        if (ordersUsed > 0) {
+            aiLog(player, 'combat', `MED MIL: ${unit.name} attacks ${weakest.name} (superiority: ${myStrength} vs ${theirStrength}). Orders used: ${ordersUsed}`);            
+            return true;
+        }
+        // Couldn't reach: move closer so we can attack next turn.
+        const advanced = advanceUnitTowards(player, unit, weakest, gameState, 'combat', `advancing on ${weakest.name}`);
+        if (advanced) {
+            aiLog(player, 'combat', `MED MIL: ${unit.name} out of range of ${weakest.name}; advanced closer.`);
+            return true;
+        }
+    }
+    return false;
+}
+
+/** MED ECON: when resources are above target stock, train more producers
+ *  (mobile units) to convert surplus into military score. */
+function goalMediumEconomySurplus(player, myEntities, gameState) {
+    const manifestEntities = getManifestEntities(gameState);
+    const evalRes = evaluateResources(player, gameState);
+    if (evalRes.surplus.length === 0) return false;
+
+    // We have surplus: train a military unit (best score first) to convert it
+    // into score and defense.
+    const militaryRanked = getMilitaryTypes(manifestEntities)
+        .map(name => ({ name, meta: manifestEntities[name] }))
+        .sort((a, b) => getMilitaryRating(b.meta) - getMilitaryRating(a.meta));
+
+    for (const mil of militaryRanked) {
+        // Check we can actually afford it.
+        const cost = mil.meta.spawnCost || {};
+        if (player.hasResources && !player.hasResources(cost)) continue;
+        const step = resolveProductionPath(player, gameState, mil.name);
+        if (step) {
+            const ordersUsed = build(gameState, step.executor, step.actionTarget);
+            if (ordersUsed > 0) {
+                aiLog(player, 'build', `MED ECON: surplus detected (top: ${evalRes.surplus[0].res}); training ${camelToTitle(step.actionTarget)} via ${step.executor.name}. Orders used: ${ordersUsed}`);                
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/** MED EXPANSION: build constructs that increase mobile production OR
+ *  increase orders. This is the path to economic growth. */
+function goalMediumExpansionInfrastructure(player, myEntities, gameState) {
+    const manifestEntities = getManifestEntities(gameState);
+    const settlementCenterNames = getSettlementCenterTypes(manifestEntities);
+    const mobileProducerTypes = getMobileProducerTypes(manifestEntities);
+
+    // 1. If we have a settler and no current settlement center of a given
+    //    type, found one.
+    const settlerTypes = getSettlerTypes(manifestEntities);
+    const settlers = myEntities.filter(e => settlerTypes.includes(e.name) && e.active);
+    const ownedSettlementCenters = myEntities.filter(e => settlementCenterNames.includes(e.name) && e.active);
+
+    for (const settler of settlers) {
+        for (const centerName of settlementCenterNames) {
+            const ordersUsed = build(gameState, settler, centerName);
+            if (ordersUsed > 0) {
+                aiLog(player, 'build', `MED EXPANSION: settler founds ${camelToTitle(centerName)}. Orders used: ${ordersUsed}`);                
+                return true;
+            }
+        }
+    }
+
+    // 2. Build additional mobile producers (villages, forges, etc.).
+    for (const prodName of mobileProducerTypes) {
+        // Skip if we already own one of this type (don't spam duplicates).
+        if (ownedSettlementCenters.some(e => e.name === prodName)) continue;
+        const step = resolveProductionPath(player, gameState, prodName);
+        if (step) {
+            const ordersUsed = build(gameState, step.executor, step.actionTarget);
+            if (ordersUsed > 0) {
+                aiLog(player, 'build', `MED EXPANSION: build ${camelToTitle(step.actionTarget)} via ${step.executor.name} (expands production). Orders used: ${ordersUsed}`);                
+                return true;
+            }
+        }
+    }
+
+    // 3. Train a settler if we have none and few settlement centers.
+    if (settlers.length === 0 && ownedSettlementCenters.length < 3) {
+        for (const settlerName of settlerTypes) {
+            const step = resolveProductionPath(player, gameState, settlerName);
+            if (step) {
+                const ordersUsed = build(gameState, step.executor, step.actionTarget);
+                if (ordersUsed > 0) {
+                    aiLog(player, 'build', `MED EXPANSION: train ${camelToTitle(step.actionTarget)} via ${step.executor.name} to enable new settlements. Orders used: ${ordersUsed}`);                    
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+/** MED EXPANSION: explore. Every idle mobile unit tries to reveal fog. */
+function goalMediumExploration(player, myEntities, gameState) {
+    return exploreFog(player, myEntities, gameState);
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
 /**
- * Moves idle units toward unexplored Fog of War cells.
- * FIX: previously this only compared immediate neighbors, so units oscillated back and
- * forth across already-explored cells and got stuck facing unexplored areas separated by
- * water. Now each explorer runs a BFS over walkable terrain to find the NEAREST REACHABLE
- * unexplored cell and follows that route, guaranteeing steady exploration progress.
- * Settlers never explore (they are too valuable); scouts are prioritized by sight range.
+ * Move a unit closer to a target cell/entity using BFS pathfinding. If a path
+ * exists, takes a single step (or as many as the AP budget allows). Returns
+ * true if at least one move action was executed.
+ */
+function advanceUnitTowards(player, unit, target, gameState, category, reason) {
+    if (unit.actionPoints !== undefined && unit.actionPoints <= 0) return false;
+    const moveAction = unit.getActions().find(a => a.name === "Move");
+    if (!moveAction) return false;
+
+    const reachable = bfsWalkable(unit, gameState);
+    let best = null;
+    let bestDist = Infinity;
+    for (const { cell, path } of reachable.values()) {
+        if (path.length === 0) continue;
+        const d = HexGrid.distance(cell, target);
+        if (d < bestDist || (d === bestDist && best && path.length < best.path.length)) {
+            bestDist = d;
+            best = { cell, path };
+        }
+    }
+    if (!best) {
+        aiLog(player, 'warn', `Advance: ${unit.name} has no walkable route to ${target.name}@(${target.q},${target.r}).`);
+        return false;
+    }
+    return moveAlongPath(player, unit, moveAction, best.path, gameState, category, reason) > 0;
+}
+
+/**
+ * Find the nearest reachable unexplored cell and move there. This is now
+ * path-driven and never bails out with "too far" unless the explorer is
+ * actually surrounded by occupied/unreachable cells.
  */
 function exploreFog(player, myEntities, gameState) {
+    const manifestEntities = getManifestEntities(gameState);
+    const settlerTypes = getSettlerTypes(manifestEntities);
+    const workerTypes = getWorkerTypes(manifestEntities);
+
     const explorers = myEntities.filter(e => {
         if (e.isConstruct || !e.active) return false;
         if (!e.getActions().some(a => a.name === "Move")) return false;
@@ -820,9 +698,9 @@ function exploreFog(player, myEntities, gameState) {
         return true;
     });
 
-    // Priority: settlers excluded entirely; workers lowest; then by sight range (better scouts)
-    explorers.sort((a, b) => explorerPriority(b) - explorerPriority(a));
-
+    // Priority: military > workers > settlers. Settlers almost never explore
+    // voluntarily because they're valuable.
+    explorers.sort((a, b) => explorerPriority(b, settlerTypes, workerTypes) - explorerPriority(a, settlerTypes, workerTypes));
     if (explorers.length === 0) {
         aiLog(player, 'explore', `No mobile units available to explore.`);
         return false;
@@ -831,34 +709,144 @@ function exploreFog(player, myEntities, gameState) {
     for (const unit of explorers) {
         const moveAction = unit.getActions().find(a => a.name === "Move");
         if (!moveAction) continue;
+        const reachable = bfsWalkable(unit, gameState);
 
-        const reachable = timeIt(player, `bfs explore ${unit.name}`, () => bfsWalkable(unit, gameState));
-
-        // Find nearest reachable unexplored cell (BFS gives us paths ordered by hop count)
+        // Pick the closest reachable unexplored cell.
         let target = null;
         for (const { cell, path } of reachable.values()) {
-            if (path.length === 0) continue; // starting cell
+            if (path.length === 0) continue;
             if (!player.isExplored(cell.q, cell.r)) {
                 target = { cell, path };
                 break;
             }
         }
-
         if (!target) {
-            aiLog(player, 'explore', `${unit.name}@(${unit.q},${unit.r}): no reachable unexplored cells (searched ${reachable.size} walkable cells). Unit holds position.`);
+            aiLog(player, 'detail', `Explore: ${unit.name}@(${unit.q},${unit.r}) searched ${reachable.size} walkable cells, none unexplored.`);
             continue;
         }
-
-        aiLog(player, 'explore', `Exploration target for ${unit.name}: unexplored cell (${target.cell.q},${target.cell.r}), ${target.path.length} cells away (walkable route confirmed).`);
+        aiLog(player, 'explore', `Explore: target for ${unit.name} is (${target.cell.q},${target.cell.r}), ${target.path.length} cells away.`);
         const ordersUsed = moveAlongPath(player, unit, moveAction, target.path, gameState, 'explore', 'Reveal fog of war');
         if (ordersUsed > 0) return true;
     }
     return false;
 }
 
-function explorerPriority(unit) {
+function explorerPriority(unit, settlerTypes, workerTypes) {
     const name = (unit.name || '').toLowerCase();
-    if (name.includes('settler')) return -100;   // never voluntarily explore with settlers
-    if (name.includes('worker')) return -10;     // workers only as last resort
-    return (unit.sightRange || 1) * 10;          // prefer dedicated scouts / military
+    if (settlerTypes.includes(unit.name)) return -100; // settlers last
+    if (workerTypes.includes(unit.name)) return -10;   // workers before settlers
+    return (unit.sightRange || 1) * 10;                 // military/scouts first
+}
+
+// -----------------------------------------------------------------------------
+// Main turn loop
+// -----------------------------------------------------------------------------
+
+/**
+ * Goal ordering each order:
+ *   HIGH (urgent, in round-robin order):
+ *     1. revenge attackers
+ *     2. stabilize negative net-income resources
+ *   MEDIUM (opportunistic, in round-robin order):
+ *     3. attack only when outnumbering enemy military
+ *     4. build military from surplus resources
+ *     5. expand infrastructure (producers, settlements, settlers)
+ *     6. explore
+ *
+ * We rotate which HIGH and which MEDIUM goal we attempt first based on the
+ * remaining order count so the AI doesn't hammer on the same track every turn.
+ */
+export async function processTurn(player, gameState) {
+    if (!player || player.orders <= 0) return;
+
+    const manifest = gameState.manifestData;
+    if (!manifest || !manifest.entities) return;
+
+    aiLog(player, 'turn', `=== Turn Start (Round ${gameState.currentRound}) | Orders: ${player.orders}/${player.maxOrders} | Resources: ${fmtRes(player.resources)} ===`);
+
+    const myEntities = player.getEntities ? player.getEntities(gameState) : [];
+    if (myEntities.length === 0) {
+        aiLog(player, 'warn', `No entities to act with; ending turn.`);
+        return;
+    }
+
+    // Per-turn resource summary for visibility.
+    const evalRes = evaluateResources(player, gameState);
+    aiLog(player, 'econ', `Resource targets (start-level-maintained): ${Object.entries(evalRes.targets).map(([k, v]) => `${k}>=${v}`).join(', ')}`);
+    evalRes.detailLines.forEach(l => aiLog(player, 'detail', l));
+
+    let maxLoops = Math.min(player.orders, 60); // up to one action per order
+    let lastGoalBand = null;
+    let lastGoalIndex = -1;
+
+    while (player.orders > 0 && maxLoops > 0) {
+        maxLoops--;
+        const actionStartOrders = player.orders;
+
+        // Refresh enemy/own lists every order.
+        const visibleOpponents = player.getOpponents ? player.getOpponents(gameState) : {};
+        const enemyEntities = [];
+        for (const opp of Object.values(visibleOpponents || {})) {
+            if (opp.entities) enemyEntities.push(...opp.entities);
+        }
+        const allMyEntities = player.getEntities(gameState).filter(e => e.active);
+
+        // Build the goal sequence: HIGH first, then MEDIUM.
+        const highGoals = [
+            { name: 'HIGH_REVENGE',      fn: () => goalHighMilitaryRevenge(player, allMyEntities, gameState) },
+            { name: 'HIGH_STABILIZE',    fn: () => goalHighEconomyStabilize(player, allMyEntities, gameState) }
+        ];
+        const medGoals = [
+            { name: 'MED_ATTACK',        fn: () => goalMediumMilitaryAttack(player, allMyEntities, enemyEntities, gameState) },
+            { name: 'MED_SURPLUS',       fn: () => goalMediumEconomySurplus(player, allMyEntities, gameState) },
+            { name: 'MED_EXPANSION',     fn: () => goalMediumExpansionInfrastructure(player, allMyEntities, gameState) },
+            { name: 'MED_EXPLORE',       fn: () => goalMediumExploration(player, allMyEntities, gameState) }
+        ];
+
+        // Try every goal in turn; the first one that both succeeds AND consumes an
+        // order is the one we use. We rotate the starting goal each iteration so
+        // the AI doesn't get fixated on a single track.
+        const goals = [
+            ...highGoals,
+            ...medGoals
+        ];
+        const startIdx = (lastGoalIndex + 1) % goals.length;
+
+        let executed = false;
+        let chosenGoal = null;
+        for (let i = 0; i < goals.length; i++) {
+            const goalIdx = (startIdx + i) % goals.length;
+            const goal = goals[goalIdx];
+            const ordersBefore = player.orders;
+            let ok = false;
+            try {
+                ok = await goal.fn();
+            } catch (e) {
+                aiLog(player, 'warn', `Goal ${goal.name} threw: ${e.message}`);
+                ok = false;
+            }
+            const ordersAfter = player.orders;
+            if (ok && ordersAfter < ordersBefore) {
+                executed = true;
+                chosenGoal = { name: goal.name, band: goalIdx < highGoals.length ? 'HIGH' : 'MED' };
+                lastGoalBand = chosenGoal.band;
+                lastGoalIndex = goalIdx;
+                break;
+            } else if (ok && ordersAfter >= ordersBefore) {
+                aiLog(player, 'warn', `Goal ${goal.name} returned true but consumed no order; skipping.`);
+            }
+        }
+
+        if (!executed) {
+            aiLog(player, 'warn', `No goal could consume an order with the remaining state. Ending turn early. Orders left: ${player.orders}`);
+            break;
+        }
+
+        aiLog(player, 'turn', `Order used (${chosenGoal.name}). Orders left: ${player.orders} (was ${actionStartOrders})`);
+        onActionDone(gameState);
+        await sleep(ACTION_SLEEP);
+    }
+
+    aiLog(player, 'turn', `=== Turn Completed. Remaining orders: ${player.orders} | Resources: ${fmtRes(player.resources)} ===`);
+    await sleep(TURN_SLEEP);
 }
