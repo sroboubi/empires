@@ -338,7 +338,7 @@ function handleStartGameClicked() {
     }
   };
 
-  startNewGame(settings);
+  startNewGame({ ...settings, ...defaultSettings });
   closeSetupModal();
 }
 

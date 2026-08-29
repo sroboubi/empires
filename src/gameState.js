@@ -1,5 +1,6 @@
 import { HexGrid } from './hexGrid.js';
 import { Player } from './player.js';
+import { manageBarbarians } from './ai/barbarians.js';
 
 /**
  * GameState tracks players, turn cycle, the hex grid, and active entity instances.
@@ -13,6 +14,7 @@ export class GameState {
     this.hexGrid = null;  // HexGrid instance
     this.entities = [];   // List of active BaseEntity instances
     this.manifestData = null;
+    this.settings = null;
   }
 
   /**
@@ -62,6 +64,7 @@ export class GameState {
   initializeManifest(manifestData, settings = null) {
     if (!manifestData) return;
     this.manifestData = manifestData;
+    this.settings = settings || {};
 
     // 1. Setup starting resources dynamically from settings or manifest initialization
     const init = settings?.initialization || manifestData.initialization || {};
@@ -215,10 +218,18 @@ export class GameState {
 
     this.activePlayerIndex = (this.activePlayerIndex + 1) % this.players.length;
     if (this.activePlayerIndex === 0) {
-      this.currentRound++;
+      this.onRoundEnd();
     }
 
     this.startTurn();
+  }
+
+  /**
+   * 
+   */
+  onRoundEnd() {
+    if (this.settings?.barbarians) manageBarbarians(this, this.settings.barbarians);
+    this.currentRound++;
   }
 
   /**

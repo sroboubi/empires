@@ -44,5 +44,20 @@
     "enabled": true,
     "intervalTurns": 5,
     "maxAutoSaves": 10
+  },
+  "barbarians": {
+    "horde": {
+      "barbarian": {
+        "min": 3,
+        "max": 5
+      },
+      "barbarianChief": {
+        "min": 1,
+        "max": 2
+      }
+    },
+    "spawnFrequencyTurns": 5,
+    "maxNumber": 20,
+    "maxAge": 30
   }
 }

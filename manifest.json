@@ -256,6 +256,80 @@
   ],
   "entities": [
     {
+      "name": "barbarian",
+      "modelUrl": "./assets/units/barbarian-optimized.glb",
+      "size": 1.5,
+      "controllerUrl": "./src/controllers/barbarian.js",
+      "health": 300,
+      "maxHealth": 300,
+      "actionPoints": 6,
+      "maxActionPoints": 6,
+      "attackCostScale": 1.2,
+      "damage": {
+        "value": 60,
+        "type": "slashing",
+        "elevationAdjustment": 1.1
+      },
+      "range": null,
+      "armor": {
+        "slashing": 1.5,
+        "piercing": 1.5,
+        "blunt": 1.5
+      },
+      "maintenance": {
+        "food": 6,
+        "gold": 3
+      },
+      "spawnCost": {
+        "food": 80,
+        "gold": 20,
+        "iron": 40
+      },
+      "rotationOffset": 90,
+      "sightRange": 4,
+      "score": {
+        "military": 0,
+        "economic": 0
+      }
+    },
+    {
+      "name": "barbarianChief",
+      "modelUrl": "./assets/units/barbarianChief-optimized.glb",
+      "size": 1.8,
+      "controllerUrl": "./src/controllers/barbarianChief.js",
+      "health": 500,
+      "maxHealth": 500,
+      "actionPoints": 6,
+      "maxActionPoints": 6,
+      "attackCostScale": 1.4,
+      "damage": {
+        "value": 100,
+        "type": "slashing",
+        "elevationAdjustment": 1.1
+      },
+      "range": null,
+      "armor": {
+        "slashing": 1.5,
+        "piercing": 1.5,
+        "blunt": 1.5
+      },
+      "maintenance": {
+        "food": 8,
+        "gold": 4
+      },
+      "spawnCost": {
+        "food": 100,
+        "gold": 50,
+        "iron": 40
+      },
+      "rotationOffset": 90,
+      "sightRange": 4,
+      "score": {
+        "military": 0,
+        "economic": 0
+      }
+    },
+    {
       "name": "swordsman",
       "modelUrl": "./assets/units/swordsman-optimized.glb",
       "size": 1.4,

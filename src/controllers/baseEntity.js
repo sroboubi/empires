@@ -26,6 +26,7 @@ export class BaseEntity {
 
     this.id = (initialState && initialState.id) || `${this.data.name || 'entity'}_${this.owner ? this.owner.id : 'neutral'}_${Math.random().toString(36).substr(2, 9)}`;
     this.name = this.data.name || 'entity';
+    this.age = 0; // turns
 
     // 1. Dynamic state via JS spread notation: defaults -> manifest data -> initialState
     this.state = {
@@ -152,7 +153,7 @@ export class BaseEntity {
 
     const ordersRequired = this.getOrdersRequired();
     if (!this.owner) {
-      return { possible: false, reason: "No owner to issue orders." };
+      return { possible: true, ordersRequired: 0 };
     }
     if (!this.owner.hasOrders(ordersRequired)) {
       return { possible: false, reason: `Insufficient Orders (${this.owner.orders}/${ordersRequired} required).` };
@@ -231,6 +232,8 @@ export class BaseEntity {
     if (this.active && this.owner && yields && this.health > this.maxHealth * 0.95) {
       this.owner.addResources(yields);
     }
+
+    this.age++;
   }
 
   /**
@@ -430,7 +433,7 @@ export class BaseEntity {
               this.state.buildCharges -= 1;
               if (this.state.buildCharges <= 0) {
                 this.destroy();
-              }              
+              }
             }
           }
           return true;

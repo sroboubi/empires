@@ -21,7 +21,7 @@ export function attack(gameState, sourceEntity, targetEntity, maxOrders = 1) {
     if (!gameState || !sourceEntity || !targetEntity || maxOrders <= 0) return 0;
     if (!sourceEntity.active) return 0;
 
-    const availableOrders = Math.min(maxOrders, sourceEntity.owner ? sourceEntity.owner.orders : 1);
+    const availableOrders = Math.min(maxOrders, sourceEntity.owner ? sourceEntity.owner.orders : maxOrders);
     if (availableOrders <= 0) return 0;
 
     const actions = sourceEntity.getActions ? sourceEntity.getActions() : [];
@@ -254,7 +254,7 @@ export function repair(gameState, sourceEntity, targetEntity, maxOrders = 1) {
     if (!gameState || !sourceEntity || !targetEntity || maxOrders <= 0) return 0;
     if (!sourceEntity.active) return 0;
 
-    const availableOrders = Math.min(maxOrders, sourceEntity.owner ? sourceEntity.owner.orders : 1);
+    const availableOrders = Math.min(maxOrders, sourceEntity.owner ? sourceEntity.owner.orders : maxOrders);
     if (availableOrders <= 0) return 0;
 
     const actions = sourceEntity.getActions ? sourceEntity.getActions() : [];
