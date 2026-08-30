@@ -6,11 +6,15 @@ import { drawGrid, reconcileEntities } from '../renderer.js';
 import { updatePlayersUI } from '../main.js';
 
 /**
- * Attacks targetEntity with sourceEntity.
- * If target is in range and (directional x elevation) multiplier >= 1, performs attack directly.
- * Otherwise, if possible and maxOrders > 1, moves to a cell within range that maximizes the multiplier, then attacks.
- * Continues performing attacks if orders remain, target is alive, and source has AP.
- * 
+ * Attacks targetEntity with sourceEntity using the specified algorithm:
+ * while (ordersUsed < maxOrders)
+ *   - if attackMultiplier > 1 then try to attack
+ *   - otherwise try to move
+ *      - choose a cell that you can reach using 1 order that you can attack from that provides the best attackMultiplier
+ *      - if no such cell, then move as close to the target as possible
+ *   - if you can NOT move at all but can do an attack from current cell then do the attack
+ *   - if all else fails, then break loop and return
+ *
  * @param {GameState} gameState
  * @param {BaseEntity} sourceEntity
  * @param {BaseEntity} targetEntity
@@ -31,114 +35,127 @@ export function attack(gameState, sourceEntity, targetEntity, maxOrders = 1) {
     const moveAction = actions.find(a => a.name === "Move");
 
     const targetCell = targetEntity.cell;
-    const currentAttackCheck = attackAction.canDo(targetCell, targetEntity);
-    const isCurrentPossible = currentAttackCheck && currentAttackCheck.possible;
-    const currentMult = isCurrentPossible ? calculateAttackMultiplier(gameState, sourceEntity.cell, sourceEntity.damage.elevationAdjustment, targetEntity).total : 0;
+    let ordersUsed = 0;
 
-    // 1. If currently in range and multiplier >= 1.0, attack directly
-    if (isCurrentPossible && currentMult >= 1.0) {
-        let ordersUsed = 0;
-        const didAttack = attackAction.do(targetCell, targetEntity);
-        if (didAttack) {
-            ordersUsed++;
-            // Chain consecutive attacks while orders remain and target is alive
-            while (ordersUsed < availableOrders && !targetEntity.destroyed && targetEntity.health > 0 && sourceEntity.active) {
-                const followCheck = attackAction.canDo(targetCell, targetEntity);
-                if (followCheck && followCheck.possible) {
-                    const followSuccess = attackAction.do(targetCell, targetEntity);
-                    if (followSuccess) ordersUsed++;
-                    else break;
-                } else {
-                    break;
-                }
-            }
-            return ordersUsed;
-        }
-    }
+    while (ordersUsed < availableOrders && sourceEntity.active && !targetEntity.destroyed && targetEntity.health > 0) {
+        // Check if we can attack from current position and get the multiplier
+        const currentAttackCheck = attackAction.canDo(targetCell, targetEntity);
+        const isCurrentPossible = currentAttackCheck && currentAttackCheck.possible;
+        const currentMult = isCurrentPossible ? calculateAttackMultiplier(gameState, sourceEntity.cell, sourceEntity.damage.elevationAdjustment, targetEntity).total : 0;
 
-    // 2. If not in range or multiplier < 1.0, attempt to reposition if maxOrders > 1
-    if (availableOrders > 1 && moveAction && sourceEntity.actionPoints > 0) {
-        const neighbors = gameState.hexGrid.getNeighbors(sourceEntity.q, sourceEntity.r);
-        let bestCell = null;
-        let bestMult = currentMult;
-
-        for (const candCell of neighbors) {
-            const occupant = gameState.getEntityAt(candCell.q, candCell.r);
-            if (occupant) continue;
-
-            const checkMove = moveAction.canDo(candCell, null);
-            if (!checkMove || !checkMove.possible) continue;
-
-            // Check if attack is possible from candCell
-            const dist = HexGrid.distance(candCell, targetCell);
-            let inRange = false;
-            if (sourceEntity.range && typeof sourceEntity.range === 'object') {
-                const minD = sourceEntity.range.minCells || 1;
-                const maxD = sourceEntity.range.maxCells || 1;
-                if (dist >= minD && dist <= maxD) {
-                    const sight = gameState.hexGrid.getSightAndTrajectory(candCell, targetCell);
-                    inRange = sight.visible || (sight.maxObstructionDelta < (sourceEntity.range.arcHeight || 0));
-                }
+        // If attackMultiplier > 1, try to attack
+        if (isCurrentPossible && currentMult > 1.0) {
+            const didAttack = attackAction.do(targetCell, targetEntity);
+            if (didAttack) {
+                ordersUsed++;
+                continue; // Continue loop to potentially attack again
             } else {
-                inRange = (dist === 1);
-            }
-
-            if (inRange) {
-                const mult = calculateAttackMultiplier(gameState, candCell, sourceEntity.damage.elevationAdjustment, targetEntity).total;
-                if (mult > bestMult || (!isCurrentPossible && mult >= 1.0) || (!bestCell && inRange)) {
-                    bestMult = mult;
-                    bestCell = candCell;
-                }
+                break; // Attack failed, exit loop
             }
         }
 
-        if (bestCell) {
-            const moved = moveAction.do(bestCell, null);
-            if (moved) {
-                let ordersUsed = 1;
-                const attackCheck = attackAction.canDo(targetCell, targetEntity);
-                if (attackCheck && attackCheck.possible) {
-                    const attacked = attackAction.do(targetCell, targetEntity);
-                    if (attacked) {
-                        ordersUsed++;
-                        while (ordersUsed < availableOrders && !targetEntity.destroyed && targetEntity.health > 0 && sourceEntity.active) {
-                            const followCheck = attackAction.canDo(targetCell, targetEntity);
-                            if (followCheck && followCheck.possible) {
-                                const followSuccess = attackAction.do(targetCell, targetEntity);
-                                if (followSuccess) ordersUsed++;
-                                else break;
-                            } else {
-                                break;
-                            }
-                        }
+        // Otherwise try to move to a better position
+        if (moveAction && sourceEntity.actionPoints > 0) {
+            // Find path to target and collect neighbors of path cells + current neighbors
+            const pathResult = gameState.hexGrid.movementCostTo(sourceEntity.cell, targetCell);
+            const pathCells = pathResult ? pathResult.path : [];
+            const candidateCells = new Set();
+            // Add current neighbors
+            for (const nb of gameState.hexGrid.getNeighbors(sourceEntity.q, sourceEntity.r)) {
+                candidateCells.add(nb);
+            }
+            // Add neighbors of all cells in path to target
+            for (const cell of pathCells) {
+                for (const nb of gameState.hexGrid.getNeighbors(cell.q, cell.r)) {
+                    candidateCells.add(nb);
+                }
+            }
+            const candidates = Array.from(candidateCells);
+            let bestMoveCell = null;
+            let bestMoveMult = -1;
+
+            for (const candCell of candidates) {
+                const occupant = gameState.getEntityAt(candCell.q, candCell.r);
+                if (occupant) continue;
+
+                const checkMove = moveAction.canDo(candCell, null);
+                if (!checkMove || !checkMove.possible) continue;
+
+                // Check if attack is possible from candCell
+                const dist = HexGrid.distance(candCell, targetCell);
+                let inRange = false;
+                if (sourceEntity.range && typeof sourceEntity.range === 'object') {
+                    const minD = sourceEntity.range.minCells || 1;
+                    const maxD = sourceEntity.range.maxCells || 1;
+                    if (dist >= minD && dist <= maxD) {
+                        const sight = gameState.hexGrid.getSightAndTrajectory(candCell, targetCell);
+                        inRange = sight.visible || (sight.maxObstructionDelta < (sourceEntity.range.arcHeight || 0));
+                    }
+                } else {
+                    inRange = (dist === 1);
+                }
+
+                if (inRange) {
+                    const mult = calculateAttackMultiplier(gameState, candCell, sourceEntity.damage.elevationAdjustment, targetEntity).total;
+                    if (mult > bestMoveMult) {
+                        bestMoveMult = mult;
+                        bestMoveCell = candCell;
                     }
                 }
-                return ordersUsed;
             }
-        }
-    }
 
-    // 3. Fallback: If currently in range (even if mult < 1.0) and could not reposition, attack anyway
-    if (isCurrentPossible && availableOrders >= 1) {
-        let ordersUsed = 0;
-        const didAttack = attackAction.do(targetCell, targetEntity);
-        if (didAttack) {
-            ordersUsed++;
-            while (ordersUsed < availableOrders && !targetEntity.destroyed && targetEntity.health > 0 && sourceEntity.active) {
-                const followCheck = attackAction.canDo(targetCell, targetEntity);
-                if (followCheck && followCheck.possible) {
-                    const followSuccess = attackAction.do(targetCell, targetEntity);
-                    if (followSuccess) ordersUsed++;
-                    else break;
-                } else {
-                    break;
+            // If found a cell with better multiplier, move there
+            if (bestMoveCell && bestMoveMult > currentMult) {
+                const moved = moveAction.do(bestMoveCell, null);
+                if (moved) {
+                    ordersUsed++;
+                    continue; // Continue loop, will try to attack from new position
                 }
             }
-            return ordersUsed;
+
+            // If no cell with better multiplier, move as close to target as possible
+            let closestCell = null;
+            let closestDist = Infinity;
+
+            for (const candCell of candidates) {
+                const occupant = gameState.getEntityAt(candCell.q, candCell.r);
+                if (occupant) continue;
+
+                const checkMove = moveAction.canDo(candCell, null);
+                if (!checkMove || !checkMove.possible) continue;
+
+                const dist = HexGrid.distance(candCell, targetCell);
+                if (dist < closestDist) {
+                    closestDist = dist;
+                    closestCell = candCell;
+                }
+            }
+
+            if (closestCell) {
+                const moved = moveAction.do(closestCell, null);
+                if (moved) {
+                    ordersUsed++;
+                    continue; // Continue loop, will try to attack from new position
+                }
+            }
         }
+
+        // If we can NOT move at all but can do an attack from current cell then do the attack
+        if (isCurrentPossible) {
+            const didAttack = attackAction.do(targetCell, targetEntity);
+            if (didAttack) {
+                ordersUsed++;
+                continue;
+            } else {
+                break;
+            }
+        }
+
+        // If all else fails, break loop and return
+        break;
     }
 
-    return 0;
+    return ordersUsed;
 }
 
 /**

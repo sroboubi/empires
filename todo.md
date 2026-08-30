@@ -65,4 +65,4 @@ If anything about the game mechanics, resource system, map generation, or expect
     - medium priority military: attack opponent entities only if your forces are stronger - build more military if excess resources
     - medium priority economy: produce surplus resources so we can build more buildings and units and increase score
     - medium priority expansion: build entitites that can build more mobile entities or entities to increase orders
-    - medium priority expansion: explore    
+    - medium priority expansion: explore

@@ -1,6 +1,6 @@
 import { HexGrid } from './hexGrid.js';
 import { Player } from './player.js';
-import { manageBarbarians } from './ai/barbarians.js';
+import { manageBarbarians } from './ai/barbarians/manager.js';
 
 /**
  * GameState tracks players, turn cycle, the hex grid, and active entity instances.
@@ -290,7 +290,8 @@ export class GameState {
       currentRound: this.currentRound,
       players: this.players.map(p => p.toJSON()),
       entities: this.entities.map(e => e.toJSON()),
-      cells: this.cells
+      cells: this.cells,
+      settings: this.settings
     });
   }
 
@@ -301,6 +302,10 @@ export class GameState {
   deserialize(jsonString) {
     try {
       const data = JSON.parse(jsonString);
+
+      if (data.settings) {
+        this.settings = data.settings;
+      }
 
       if (data.activePlayerIndex !== undefined) {
         this.activePlayerIndex = data.activePlayerIndex;

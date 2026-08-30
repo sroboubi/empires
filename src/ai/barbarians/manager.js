@@ -1,5 +1,5 @@
-import { HexGrid } from '../hexGrid.js';
-import { attack } from './utils.js';
+import { HexGrid } from '../../hexGrid.js';
+import { attack } from '../utils.js';
 
 /**
  * Returns all border cells on the hex grid (cells with fewer than 6 neighbors).
@@ -58,16 +58,10 @@ export function findOppositeBorderCell(fromCell, hexGrid, entity = null) {
  * based on the provided settings configuration.
  *
  * @param {GameState} gameState
- * @param {Object} [settings] - Barbarian configuration settings containing horde definitions
+ * @param {Object} [config] - Barbarian configuration settings containing horde definitions
  */
-export function manageBarbarians(gameState, settings = {}) {
-  if (!gameState || !gameState.hexGrid) return;
-
-  const config = settings?.barbarians || settings;
-  if (!config || !config.horde) {
-    // If there is no barbarian/horde config, no barbarians are configured to operate
-    return;
-  }
+export function manageBarbarians(gameState, config) {
+  if (!gameState || !gameState.hexGrid || !config) return;
 
   const hordeConfig = config.horde;
   const barbarianUnitNames = new Set(Object.keys(hordeConfig));
@@ -180,8 +174,12 @@ export function manageBarbarians(gameState, settings = {}) {
     });
 
     if (visibleEnemies.length > 0) {
-      // Attack closest visible enemy using attack() with unlimited orders (constrained only by AP)
-      visibleEnemies.sort((a, b) => HexGrid.distance(entity, a) - HexGrid.distance(entity, b));
+      // Attack closest visible enemy, or weakest at same distance, using attack() with unlimited orders (constrained only by AP)
+      visibleEnemies.sort((a, b) => {
+        const distDiff = HexGrid.distance(entity, a) - HexGrid.distance(entity, b);
+        if (distDiff !== 0) return distDiff;
+        return a.health - b.health;
+      });
       const targetEnemy = visibleEnemies[0];
       console.log(`[Barbarians] ${entity.name} at (${entity.q}, ${entity.r}) attacking ${targetEnemy.name} (Owner: ${targetEnemy.owner?.name || 'neutral'}) at (${targetEnemy.q}, ${targetEnemy.r})`);
       attack(gameState, entity, targetEnemy, Infinity);

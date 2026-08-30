@@ -1,6 +1,6 @@
 import { animateToTimeOfDay } from "./renderer.js";
 import { nextTurn } from "./main.js";
-import { processTurn } from "./ai/standard/core.js";
+import { processTurn } from "./ai/standard/manager.js";
 import { CONFIG } from './config.js';
 
 const turnHours = { start: 7, end: 17 }
