@@ -193,7 +193,7 @@ export class Player {
    * @returns {boolean}
    */
   isExplored(q, r) {
-    return (!this.isAI() && CONFIG.SHOW_ALL) || this.exploredCells.has(`${q},${r}`);
+    return (!this.isAI && CONFIG.SHOW_ALL) || this.exploredCells.has(`${q},${r}`);
   }
 
   /**
@@ -203,7 +203,7 @@ export class Player {
    * @returns {boolean}
    */
   isVisible(q, r) {
-    return (!this.isAI() && CONFIG.SHOW_ALL) || this.visibleCells.has(`${q},${r}`);
+    return (!this.isAI && CONFIG.SHOW_ALL) || this.visibleCells.has(`${q},${r}`);
   }
 
   /**
