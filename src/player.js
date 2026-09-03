@@ -1,6 +1,6 @@
 import { animateToTimeOfDay } from "./renderer.js";
 import { nextTurn } from "./main.js";
-import { processTurn } from "./ai/standard/manager.js";
+import { processTurn } from "./ai/standard/smartManager.js";
 import { CONFIG } from './config.js';
 
 const turnHours = { start: 7, end: 17 }
@@ -193,7 +193,7 @@ export class Player {
    * @returns {boolean}
    */
   isExplored(q, r) {
-    return CONFIG.SHOW_ALL || this.exploredCells.has(`${q},${r}`);
+    return (!this.isAI() && CONFIG.SHOW_ALL) || this.exploredCells.has(`${q},${r}`);
   }
 
   /**
@@ -203,7 +203,7 @@ export class Player {
    * @returns {boolean}
    */
   isVisible(q, r) {
-    return CONFIG.SHOW_ALL || this.visibleCells.has(`${q},${r}`);
+    return (!this.isAI() && CONFIG.SHOW_ALL) || this.visibleCells.has(`${q},${r}`);
   }
 
   /**

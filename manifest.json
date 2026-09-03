@@ -468,9 +468,9 @@
       "maxActionPoints": 6,
       "attackCostScale": 1.0,
       "damage": {
-        "value": 25,
+        "value": 30,
         "type": "piercing",
-        "elevationAdjustment": 1.3
+        "elevationAdjustment": 1.5
       },
       "range": {
         "minCells": 1,

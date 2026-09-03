@@ -218,17 +218,22 @@ export class GameState {
 
     this.activePlayerIndex = (this.activePlayerIndex + 1) % this.players.length;
     if (this.activePlayerIndex === 0) {
-      this.onRoundEnd();
-    }
-
-    this.startTurn();
+      this.onRoundEnd().then(() => {
+        this.startTurn();
+      }).catch(err => {
+        console.error('Error during onRoundEnd:', err);
+        this.startTurn();
+      });      
+    } else {
+      this.startTurn();
+    }    
   }
 
   /**
    * 
    */
-  onRoundEnd() {
-    if (this.settings?.barbarians) manageBarbarians(this, this.settings.barbarians);
+  async onRoundEnd() {
+    if (this.settings?.barbarians) await manageBarbarians(this, this.settings.barbarians);
     this.currentRound++;
   }
 

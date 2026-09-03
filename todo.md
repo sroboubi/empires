@@ -26,12 +26,6 @@
 - smooth move
 
 ----
-convention AI:
-
-why do you keep thinking you need gems?
-exploration - why do you do it? and you keep hitting water and going back and forth?
-attacking with settler?
-
 Analyze and fix the AI implementation in @/src/ai/standard/core.js, which controls a player in this strategy game. The code contains logic bugs that cause poor decision-making. Known issues include:
 
 1. **Resource prioritization**: At the start of the game, the AI over-prioritizes gems when other resources (e.g., food, wood) should come first for early-game progression.
@@ -51,14 +45,6 @@ If anything about the game mechanics, resource system, map generation, or expect
 
 +++
 
-- add an attribute to baseEntity to track the last 5 entity IDs to attack it, and the damage they did
-- when AI is doing actions I don't see units moving or getting built until after the turn is over - fix this
-- units are not exploring (say unexplored cell is too far) - fix this
-- resource goals are wrong, for example it tries to build a force when the ONLY resource with negative net income is wood, so it should ONLY try to build lumberMill
-- when trying to attack even if unit can't be reached for attack in one turn, you should try to get closer so you can attack next turn, instead of doing nothing
-- do NOT use ESSENTIAL_RESOURCES constants - determine appropriate resource levels based on some multiple of the starting levels in the manifest and based on consumption of existing units. Try to maintain starting levels of each resource.
-- the ONLY hardcoded resource should be "orders" as it is not a normal resource, and you can filter out of other resources.
-- do NOT use magic number logic to determine what is a settlement or a builder - for example based on minSeparation or destroyOnBuild
 - for EVERY order, pick alternating high priority goals if they exist, otherwise pick alternating medium priority:
     - high priority military: if a military unit has attacked your entities then it has to be killed
     - high priority economy: stabalize resources
@@ -66,3 +52,5 @@ If anything about the game mechanics, resource system, map generation, or expect
     - medium priority economy: produce surplus resources so we can build more buildings and units and increase score
     - medium priority expansion: build entitites that can build more mobile entities or entities to increase orders
     - medium priority expansion: explore
+
+

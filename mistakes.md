@@ -29,3 +29,26 @@ This file documents mistakes made during development, reasons why they occurred,
 - **Description**: Barbarians performed spawn, march, attack, and despawn actions silently without `console.log` feedback.
 - **Why it was made**: Focused on functionality without providing operational visibility.
 - **What to avoid in the future**: Always add informative logging for AI actions (spawning, targeting, attacking, moving, dying of old age) so that their decisions and lifecycle are easy to trace in the console.
+
+---
+
+### Mistake 5: Spending scarce resources on proactive growth while critical deficits are pending
+- **Description**: In `smartManager.js`, when a deficit build step could not be afforded immediately, `handleProactiveGrowth()` spent remaining resources on other non-essential entities.
+- **Why it was made**: Did not track or reserve the resources needed for the pending deficit resolution step.
+- **What to avoid in the future**: Keep track of scarce resources needed to resolve deficits and prevent proactive growth from spending those required resources.
+
+---
+
+### Mistake 6: Flawed exploration targeting adjacent cells instead of pathfinding to nearest unexplored hex
+- **Description**: In `handleExploration()`, the AI picked adjacent neighbor cells (already explored) resulting in 1-hex oscillation, and used `destroyOnBuild` checks.
+- **Why it was made**: Did not use BFS/pathfinding across traversable terrain to the nearest unexplored hex and did not consume available AP along the route.
+- **What to avoid in the future**: Exclude all builder units from exploration, find the closest reachable unexplored cell using BFS, and move the unit as far along the path as possible in a single order.
+
+---
+
+### Mistake 7: Querying gameState.entities directly instead of using player.getOpponents() for visible enemies
+- **Description**: In `handleCombatAndThreats()`, visible enemies were retrieved from `gameState.entities` with a custom filter instead of calling `player.getOpponents(gameState)`.
+- **Why it was made**: Attempted to catch arbitrary entities without respecting the designated `player.getOpponents(gameState)` API.
+- **What to avoid in the future**: Always use `player.getOpponents(gameState)` to retrieve visible opponent entities, strictly following Guideline 19.
+
+

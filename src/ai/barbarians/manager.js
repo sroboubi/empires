@@ -1,5 +1,6 @@
 import { HexGrid } from '../../hexGrid.js';
 import { attack } from '../utils.js';
+import { onActionDone } from '../utils.js';
 
 /**
  * Returns all border cells on the hex grid (cells with fewer than 6 neighbors).
@@ -60,7 +61,7 @@ export function findOppositeBorderCell(fromCell, hexGrid, entity = null) {
  * @param {GameState} gameState
  * @param {Object} [config] - Barbarian configuration settings containing horde definitions
  */
-export function manageBarbarians(gameState, config) {
+export async function manageBarbarians(gameState, config) {
   if (!gameState || !gameState.hexGrid || !config) return;
 
   const hordeConfig = config.horde;
@@ -183,6 +184,7 @@ export function manageBarbarians(gameState, config) {
       const targetEnemy = visibleEnemies[0];
       console.log(`[Barbarians] ${entity.name} at (${entity.q}, ${entity.r}) attacking ${targetEnemy.name} (Owner: ${targetEnemy.owner?.name || 'neutral'}) at (${targetEnemy.q}, ${targetEnemy.r})`);
       attack(gameState, entity, targetEnemy, Infinity);
+      await onActionDone(gameState);
     } else {
       // Restore target cell reference if needed
       if (!entity.targetCell && entity.state.targetCell) {
@@ -227,6 +229,7 @@ export function manageBarbarians(gameState, config) {
 
             const moved = moveAction.do(bestNeighbor, null);
             if (!moved) break;
+            await onActionDone(gameState);
 
             console.log(`[Barbarians] ${entity.name} moved to (${bestNeighbor.q}, ${bestNeighbor.r}) (Target: (${entity.targetCell.q}, ${entity.targetCell.r}), Remaining AP: ${entity.actionPoints})`);
           }

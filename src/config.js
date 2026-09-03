@@ -5,5 +5,6 @@
 export const CONFIG = {
   HEX_SIZE: 1.0,
   FRIENDLY_FIRE: true,
-  SHOW_ALL: true
+  SHOW_ALL: true,
+  AI_ACTION_SLEEP: 500  // ms
 };

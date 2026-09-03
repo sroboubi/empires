@@ -53,9 +53,6 @@ const LOG_STYLES = {
     detail:  'color: #95a5a6;'
 };
 
-const TURN_SLEEP = 2000;       // ms between actions, keeps UI responsive
-const ACTION_SLEEP = 1000;     // ms after each action to allow the renderer to paint
-
 function aiLog(player, category, message) {
     const line = `[AI ${player.name}][${category}] ${message}`;
     console.log(`%c${line}`, LOG_STYLES[category] || '');
@@ -78,10 +75,6 @@ function aiLog(player, category, message) {
 
 function fmtRes(obj) {
     return Object.entries(obj || {}).map(([k, v]) => `${k}:${v}`).join(', ') || '(empty)';
-}
-
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 // -----------------------------------------------------------------------------
@@ -843,10 +836,8 @@ export async function processTurn(player, gameState) {
         }
 
         aiLog(player, 'turn', `Order used (${chosenGoal.name}). Orders left: ${player.orders} (was ${actionStartOrders})`);
-        onActionDone(gameState);
-        await sleep(ACTION_SLEEP);
+        await onActionDone(gameState);        
     }
 
-    aiLog(player, 'turn', `=== Turn Completed. Remaining orders: ${player.orders} | Resources: ${fmtRes(player.resources)} ===`);
-    await sleep(TURN_SLEEP);
+    aiLog(player, 'turn', `=== Turn Completed. Remaining orders: ${player.orders} | Resources: ${fmtRes(player.resources)} ===`);    
 }

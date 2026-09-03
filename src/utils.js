@@ -4,6 +4,8 @@ export const camelToTitle = (text) => {
     return text.replace(/([A-Z])/g, ' $1').replace(/^./, (str) => str.toUpperCase()).trim();
 };
 
+export const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 /**
  * Calculates the directional and elevation damage multiplier from an attacker against a target entity.
  */
