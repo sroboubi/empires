@@ -23,16 +23,9 @@ GUIDELINES:
 18. Handle exploration as per combat, don't just use any unit that can move. Pick ones that can move the most and have some ability to defend themselves, and are not needed for building and repairing. Also don't send all units in the same direction - spread out but also keep some military power to defend.
 19. You must use player.getOpponents() to get visible units. Also use entity.attackHistory to see what units are attacking you and are high threats. 
 20. You MAY harcode the "orders" resource name and filter it out of other resources as it is not a normal resource and the stock/income/deficit should not be considered the same as others.
+21. When there is a critical deficit that can't be remedied because of resource shortage, keep track of the resources needed so that you don't spend subsequent actions in handleProactiveGrowth() building entities that use up the scarce resources.
 
 IMPORTANT: Before implementation, ask me for any clarifications.
 
-1. When there is a critical deficit that can't be remedied because of resource shortage, keep track of the resources needed so that you don't spend subsequent actions in handleProactiveGrowth() building entities that use up the scarce resources.
-2. handleCombatAndThreats() is not working at all. Fix any bugs and add more logging to determine exactly what is happening (e.g. what enemies are detected, which unit is selected to engage, why it fails to engage, etc)
-3. handleExploration() is broken. Do NOT use destroyOnBuild to determine settlers. Instead, just don't use any builder units to explore. Also, you can't consider the neighbors of the explorer units, as these are always visible and explored, and if you randomly go to them you will go back and forth, moving only one cell per order, which is inefficient. Instead find the closest unexplored reachable cell, and move the explorer towards it by using as many actions as possible in a single order. 
 
-1. I should not see "No reachable unexplored cells found" - when exploring the unit must move TOWARDS the unexplored cell, but doesn't need to reach it in the same turn
-2. Review smartManager.js and fix any bugs and enhance logic
-3. Move common AI functions to utils.js or add functions as needed. Consider moving functions that determine entity capabilities like builder/repairer/mobile/combat capable/combat power, etc. Also add functions that return a list of owned entities filtered by capabilities, or list of entities sorted by combat power, effectiveness, etc. 
-
-1. Addressing iron deficit (net: 0, stock: 20/300). Candidate producers: [forge(+15)]
-   Deficit resolution step forge via worker at (8,13) requires {"wood":80,"gold":40}. Reserving these resources from proactive spending. 
+* handleCombatAndThreats() is not working at all. Fix any bugs and add more logging to determine exactly what is happening (e.g. what enemies are detected, which unit is selected to engage, why it fails to engage, etc) - no one is attacking barbarians, even after they attack units
