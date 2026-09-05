@@ -117,6 +117,9 @@ async function init() {
     document.getElementById('btn-close-profile').addEventListener('click', closeProfileModal);
     document.getElementById('btn-do-manual-save').addEventListener('click', handleManualSaveClicked);
 
+    // Barbarian setup UI bindings
+    setupBarbarianUI();
+
     // Open Setup Modal automatically on initial load
     openSetupModal(false);
 
@@ -165,6 +168,39 @@ function openSetupModal(canClose = true) {
   document.getElementById('setup-autosave-enabled').checked = autoSave.enabled;
   document.getElementById('setup-autosave-interval').value = autoSave.intervalTurns;
   document.getElementById('setup-autosave-max').value = autoSave.maxAutoSaves;
+
+  // Barbarian Settings
+  const barbarians = defaultSettings.barbarians || {
+    horde: { barbarian: { min: 3, max: 5 }, barbarianChief: { min: 1, max: 2 } },
+    spawnFrequencyTurns: 5,
+    maxNumber: 20,
+    maxAge: 30
+  };
+  const enabledCheckbox = document.getElementById('setup-barbarians-enabled');
+  const collapsible = document.getElementById('setup-barbarian-collapsible');
+  enabledCheckbox.checked = barbarians !== null && barbarians !== undefined;
+  collapsible.classList.toggle('expanded', enabledCheckbox.checked);
+
+  const setRange = (minId, maxId, minVal, maxVal) => {
+    const minEl = document.getElementById(minId);
+    const maxEl = document.getElementById(maxId);
+    const minLabel = document.getElementById(`${minId}-val`);
+    const maxLabel = document.getElementById(`${maxId}-val`);
+    const lo = Math.min(minVal, maxVal);
+    const hi = Math.max(minVal, maxVal);
+    minEl.value = lo;
+    maxEl.value = hi;
+    if (minLabel) minLabel.textContent = lo;
+    if (maxLabel) maxLabel.textContent = hi;
+  };
+  setRange('setup-barbarian-barbarian-min', 'setup-barbarian-barbarian-max',
+    barbarians.horde?.barbarian?.min ?? 3, barbarians.horde?.barbarian?.max ?? 5);
+  setRange('setup-barbarian-chief-min', 'setup-barbarian-chief-max',
+    barbarians.horde?.barbarianChief?.min ?? 1, barbarians.horde?.barbarianChief?.max ?? 2);
+  updateAllRangeFills();
+  document.getElementById('setup-barbarian-spawn-frequency').value = barbarians.spawnFrequencyTurns || 5;
+  document.getElementById('setup-barbarian-max-number').value = barbarians.maxNumber || 20;
+  document.getElementById('setup-barbarian-max-age').value = barbarians.maxAge || 30;
 
   overlay.classList.add('active');
 }
@@ -302,6 +338,65 @@ function addSetupUnitRow() {
   }
 }
 
+/* --------------------------------------------------------------------------
+   BARBARIAN SETUP UI: enable toggle, range slider, collapsible section
+   -------------------------------------------------------------------------- */
+
+const RANGE_SLIDER_IDS = [
+  { id: 'barbarian', minId: 'setup-barbarian-barbarian-min', maxId: 'setup-barbarian-barbarian-max', fillId: 'setup-barbarian-barbarian-range-fill' },
+  { id: 'chief', minId: 'setup-barbarian-chief-min', maxId: 'setup-barbarian-chief-max', fillId: 'setup-barbarian-chief-range-fill' }
+];
+
+function setupBarbarianUI() {
+  const enabledCheckbox = document.getElementById('setup-barbarians-enabled');
+  const collapsible = document.getElementById('setup-barbarian-collapsible');
+  if (!enabledCheckbox || !collapsible) return;
+
+  enabledCheckbox.addEventListener('change', () => {
+    collapsible.classList.toggle('expanded', enabledCheckbox.checked);
+  });
+
+  RANGE_SLIDER_IDS.forEach(cfg => {
+    const minEl = document.getElementById(cfg.minId);
+    const maxEl = document.getElementById(cfg.maxId);
+    if (!minEl || !maxEl) return;
+    const handler = (e) => {
+      let lo = parseInt(minEl.value, 10);
+      let hi = parseInt(maxEl.value, 10);
+      if (lo > hi) {
+        // Enforce min <= max: clamp the moved handle so it does not cross the other
+        if (e.target === minEl) { minEl.value = hi; lo = hi; }
+        else { maxEl.value = lo; hi = lo; }
+      }
+      document.getElementById(`${cfg.minId}-val`).textContent = lo;
+      document.getElementById(`${cfg.maxId}-val`).textContent = hi;
+      updateRangeFill(cfg);
+    };
+    minEl.addEventListener('input', handler);
+    maxEl.addEventListener('input', handler);
+  });
+}
+
+function updateRangeFill(cfg) {
+  const minEl = document.getElementById(cfg.minId);
+  const maxEl = document.getElementById(cfg.maxId);
+  const fill = document.getElementById(cfg.fillId);
+  if (!minEl || !maxEl || !fill) return;
+  const min = parseInt(minEl.min, 10);
+  const max = parseInt(minEl.max, 10);
+  const range = max - min;
+  const lo = parseInt(minEl.value, 10);
+  const hi = parseInt(maxEl.value, 10);
+  const leftPct = ((lo - min) / range) * 100;
+  const widthPct = ((hi - lo) / range) * 100;
+  fill.style.left = `${leftPct}%`;
+  fill.style.width = `${widthPct}%`;
+}
+
+function updateAllRangeFills() {
+  RANGE_SLIDER_IDS.forEach(updateRangeFill);
+}
+
 function handleStartGameClicked() {
   if (setupPlayers.length < 1) {
     showToast('Add at least 1 player!', true);
@@ -335,7 +430,24 @@ function handleStartGameClicked() {
       enabled: document.getElementById('setup-autosave-enabled').checked,
       intervalTurns: parseInt(document.getElementById('setup-autosave-interval').value, 10) || 5,
       maxAutoSaves: parseInt(document.getElementById('setup-autosave-max').value, 10) || 10
-    }
+    },
+    barbarians: document.getElementById('setup-barbarians-enabled').checked
+      ? {
+          horde: {
+            barbarian: {
+              min: parseInt(document.getElementById('setup-barbarian-barbarian-min').value, 10) || 0,
+              max: parseInt(document.getElementById('setup-barbarian-barbarian-max').value, 10) || 0
+            },
+            barbarianChief: {
+              min: parseInt(document.getElementById('setup-barbarian-chief-min').value, 10) || 0,
+              max: parseInt(document.getElementById('setup-barbarian-chief-max').value, 10) || 0
+            }
+          },
+          spawnFrequencyTurns: parseInt(document.getElementById('setup-barbarian-spawn-frequency').value, 10) || 5,
+          maxNumber: parseInt(document.getElementById('setup-barbarian-max-number').value, 10) || 20,
+          maxAge: parseInt(document.getElementById('setup-barbarian-max-age').value, 10) || 30
+        }
+      : null
   };
 
   startNewGame({ ...defaultSettings, ...settings });

@@ -1,3 +1,5 @@
+# AI Manager Specification
+
 Examine the AI manager implemetations in ai/standard - but don't copy the implementation as they are all flawed.
 Create a new manager like ai/standard/manager.js that implements processTurn(). The goal is to maximize the player score as quickly as possible. Do not hardcode actions, numbers, or unit names - these can all be modified in the settings and manifest, and this AI should work with ANY settings and configuration. Use the ai/utils.js functions as needed - don't duplicate functionality.
 
