@@ -12,6 +12,7 @@ import {
     isDedicatedMilitary,
     getEntitiesByCapability,
     getEntitiesSortedByPower,
+    selectCandidateCombatUnits,
     moveAlongPath,
     findPathTowardsUnexplored
 } from '../utils.js';
@@ -281,21 +282,32 @@ async function handleCombatAndThreats(player, gameState, manifest, myEntities) {
     // D. Priority 1: Retaliate against visible revenge targets
     if (revengeTargets.length > 0) {
         const topRevenge = revengeTargets[0];
-        const warriors = dedicatedMilitary.length > 0 ? dedicatedMilitary : combatCapable.filter(e => !isBuilder(e));
+        const target = topRevenge.entity;
 
-        for (const warrior of warriors) {
-            if (warrior.actionPoints !== undefined && warrior.actionPoints <= 0) {
-                aiLog(player, 'detail', `Retaliation skipped for ${warrior.name} at (${warrior.q},${warrior.r}): 0 AP remaining.`);
-                continue;
-            }
+        // Select candidate combat units ordered primarily by proximity to the target (Guideline 15)
+        const candidates = selectCandidateCombatUnits(myEntities, target, manifest);
 
-            aiLog(player, 'combat', `Retaliating: ${warrior.name} at (${warrior.q},${warrior.r}) engaging ${topRevenge.entity.name} at (${topRevenge.entity.q},${topRevenge.entity.r}) (Target dealt ${topRevenge.damageDealt.toFixed(0)} damage to us).`);
-            const ordersUsed = attack(gameState, warrior, topRevenge.entity, player.orders);
-            if (ordersUsed > 0) {
-                aiLog(player, 'combat', `Retaliation attack executed by ${warrior.name}. Orders used: ${ordersUsed}.`);
-                return true;
-            } else {
-                aiLog(player, 'detail', `Retaliation attack by ${warrior.name} against ${topRevenge.entity.name} used 0 orders (target out of reach or impassable terrain).`);
+        if (candidates.length > 0) {
+            aiLog(player, 'combat', `Retaliation target identified: ${target.name}#${target.id.slice(-4)} (${target.owner?.name || 'Enemy'}) at (${target.q},${target.r}) (Target dealt ${topRevenge.damageDealt.toFixed(0)} damage to us). Candidates by proximity: [${candidates.map(c => `${c.name}#${c.id.slice(-4)} (dist:${HexGrid.distance(c, target)}, AP:${c.actionPoints})`).join(', ')}]`);
+
+            for (const warrior of candidates) {
+                const dist = HexGrid.distance(warrior, target);
+                if (warrior.actionPoints !== undefined && warrior.actionPoints <= 0) {
+                    aiLog(player, 'detail', `Closer candidate ${warrior.name} at (${warrior.q},${warrior.r}) (dist: ${dist}) ran out of AP (0 remaining). Checking farther units...`);
+                    continue;
+                }
+
+                aiLog(player, 'combat', `Retaliating: Deploying closer unit ${warrior.name} at (${warrior.q},${warrior.r}) (dist: ${dist}, AP: ${warrior.actionPoints}) against revenge target ${target.name} at (${target.q},${target.r}).`);
+                const ordersUsed = attack(gameState, warrior, target, player.orders);
+                if (ordersUsed > 0) {
+                    const status = target.destroyed || target.health <= 0
+                        ? 'TARGET DESTROYED'
+                        : `Target HP: ${Math.round(target.health)}/${target.maxHealth}`;
+                    aiLog(player, 'combat', `Retaliation attack executed by ${warrior.name}. Orders used: ${ordersUsed}. Outcome: ${status}.`);
+                    return true;
+                } else {
+                    aiLog(player, 'detail', `Retaliation attack by ${warrior.name} against ${target.name} used 0 orders (target out of reach or impassable terrain). Trying next candidate.`);
+                }
             }
         }
     }
@@ -305,24 +317,44 @@ async function handleCombatAndThreats(player, gameState, manifest, myEntities) {
         const enemyMilitary = visibleOpponents.filter(e => isDedicatedMilitary(e, manifest));
         const targetPool = enemyMilitary.length > 0 ? enemyMilitary : visibleOpponents;
 
-        if (dedicatedMilitary.length > 0) {
-            for (const warrior of dedicatedMilitary) {
-                if (warrior.actionPoints !== undefined && warrior.actionPoints <= 0) {
-                    aiLog(player, 'detail', `Combat skipped for ${warrior.name} at (${warrior.q},${warrior.r}): 0 AP remaining.`);
-                    continue;
-                }
+        // Check if we have any dedicated military units among our forces
+        const dedicatedMilitaryUnits = myEntities.filter(e => e.active && !e.destroyed && isDedicatedMilitary(e, manifest));
 
-                // Pick closest enemy to this warrior
-                const sortedTargets = [...targetPool].sort((a, b) => HexGrid.distance(warrior, a) - HexGrid.distance(warrior, b));
-                for (const target of sortedTargets) {
+        if (dedicatedMilitaryUnits.length > 0) {
+            // Sort target threats by minimum proximity to our dedicated military forces (closest threats first)
+            const sortedTargets = [...targetPool].sort((a, b) => {
+                const minDistA = Math.min(...dedicatedMilitaryUnits.map(m => HexGrid.distance(m, a)));
+                const minDistB = Math.min(...dedicatedMilitaryUnits.map(m => HexGrid.distance(m, b)));
+                if (minDistA !== minDistB) return minDistA - minDistB;
+                const powerA = getCombatPower(a, manifest?.entities?.[a.name]);
+                const powerB = getCombatPower(b, manifest?.entities?.[b.name]);
+                return powerB - powerA;
+            });
+
+            for (const target of sortedTargets) {
+                // Select candidate combat units ordered primarily by proximity to this specific target
+                const candidates = selectCandidateCombatUnits(myEntities, target, manifest);
+                if (candidates.length === 0) continue;
+
+                aiLog(player, 'combat', `Tactical Engagement: Target ${target.owner?.name || 'Enemy'}'s ${target.name} at (${target.q},${target.r}). Candidate combat units by proximity: [${candidates.map(c => `${c.name}#${c.id.slice(-4)} (dist:${HexGrid.distance(c, target)}, AP:${c.actionPoints})`).join(', ')}]`);
+
+                for (const warrior of candidates) {
                     const dist = HexGrid.distance(warrior, target);
-                    aiLog(player, 'combat', `Tactical Strike: ${warrior.name} at (${warrior.q},${warrior.r}) targeting ${target.owner?.name || 'Enemy'}'s ${target.name} at (${target.q},${target.r}) (distance: ${dist}).`);
+                    if (warrior.actionPoints !== undefined && warrior.actionPoints <= 0) {
+                        aiLog(player, 'detail', `Closer unit ${warrior.name} at (${warrior.q},${warrior.r}) (dist: ${dist}) ran out of AP (0 remaining). Checking farther units...`);
+                        continue;
+                    }
+
+                    aiLog(player, 'combat', `Tactical Strike: Deploying closer unit ${warrior.name} at (${warrior.q},${warrior.r}) (dist: ${dist}, AP: ${warrior.actionPoints}) targeting ${target.owner?.name || 'Enemy'}'s ${target.name} at (${target.q},${target.r}).`);
                     const ordersUsed = attack(gameState, warrior, target, player.orders);
                     if (ordersUsed > 0) {
-                        aiLog(player, 'combat', `Tactical strike executed by ${warrior.name}. Orders used: ${ordersUsed}.`);
+                        const status = target.destroyed || target.health <= 0
+                            ? 'TARGET DESTROYED'
+                            : `Target HP: ${Math.round(target.health)}/${target.maxHealth}`;
+                        aiLog(player, 'combat', `Tactical strike executed by ${warrior.name}. Orders used: ${ordersUsed}. Outcome: ${status}.`);
                         return true;
                     } else {
-                        aiLog(player, 'detail', `Tactical strike by ${warrior.name} against ${target.name} used 0 orders (cannot reach or blocked). Trying next target.`);
+                        aiLog(player, 'detail', `Tactical strike by ${warrior.name} against ${target.name} used 0 orders (cannot reach or blocked). Trying next candidate.`);
                     }
                 }
             }
@@ -348,15 +380,27 @@ async function handleCombatAndThreats(player, gameState, manifest, myEntities) {
             }
 
             // Emergency close-quarters defense if enemy is directly adjacent (distance <= 1)
+            // Pick candidate units closest to the threat first
             const adjacentThreats = visibleOpponents.filter(h => myEntities.some(my => HexGrid.distance(my, h) <= 1));
             if (adjacentThreats.length > 0) {
-                const emergencyFighters = combatCapable.filter(e => e.actionPoints === undefined || e.actionPoints > 0);
-                for (const fighter of emergencyFighters) {
-                    const adj = adjacentThreats.find(h => HexGrid.distance(fighter, h) <= 1);
-                    if (adj) {
-                        aiLog(player, 'warn', `Emergency Defense: Adjacent enemy ${adj.name} at (${adj.q},${adj.r})! Fighting back with ${fighter.name} at (${fighter.q},${fighter.r}).`);
+                for (const adj of adjacentThreats) {
+                    const candidates = selectCandidateCombatUnits(myEntities, adj, manifest);
+                    for (const fighter of candidates) {
+                        const dist = HexGrid.distance(fighter, adj);
+                        if (dist > 1) continue; // Only adjacent for emergency
+                        if (fighter.actionPoints !== undefined && fighter.actionPoints <= 0) {
+                            aiLog(player, 'detail', `Emergency defender ${fighter.name} at (${fighter.q},${fighter.r}) has 0 AP. Checking other adjacent defenders...`);
+                            continue;
+                        }
+                        aiLog(player, 'warn', `Emergency Defense: Adjacent enemy ${adj.name} at (${adj.q},${adj.r})! Fighting back with ${fighter.name} at (${fighter.q},${fighter.r}) (AP: ${fighter.actionPoints}).`);
                         const ordersUsed = attack(gameState, fighter, adj, player.orders);
-                        if (ordersUsed > 0) return true;
+                        if (ordersUsed > 0) {
+                            const status = adj.destroyed || adj.health <= 0
+                                ? 'TARGET DESTROYED'
+                                : `Target HP: ${Math.round(adj.health)}/${adj.maxHealth}`;
+                            aiLog(player, 'combat', `Emergency defense executed by ${fighter.name}. Orders used: ${ordersUsed}. Outcome: ${status}.`);
+                            return true;
+                        }
                     }
                 }
             }

@@ -17,7 +17,7 @@ GUIDELINES:
 12. when addressing deficits, you can't just find anything that produces the resource and try to build all of it. Instead build the most effective entities. For example if X and Y both produce the required resource, but X only produces half of Y then maybe building Y is better. However if the builder to build Y does not exist then maybe you should build X so you don't run out completely. You need some reasonable weighing of the choices and then pick the best. Also, don't build BOTH X and Y, pick the best option.
 13. Use player.getResourceProfile() to determine resource yields and consumption.
 14. We can't ONLY build if we have a deficit. We should also build proactively if there are not other critical goals.
-15. Don't use any unit that can "attack" for combat. Instead pick the best ones. Even workers can attack, but if better units are available then pick them. If not available then consider building them.
+15. Don't use any unit that can "attack" for combat. Instead pick the best ones. Even workers can attack, but if better units are available then pick them. If not available then consider building them. When selecting candidate combat units, pick units that are close to the target if possible. First move and attack with closer combat units, only move farther units if closer ones run out of AP.
 16. Only repair entities if they are heavily damaged.
 17. Don't just build the entities for best score, also consider which ones gives yields that are useful. E.g. if you already have a large surplus of wood, don't keep building wood producing entities even if they give the best score.
 18. Handle exploration as per combat, don't just use any unit that can move. Pick ones that can move the most and have some ability to defend themselves, and are not needed for building and repairing. Also don't send all units in the same direction - spread out but also keep some military power to defend.
@@ -26,7 +26,3 @@ GUIDELINES:
 21. When there is a critical deficit that can't be remedied because of resource shortage, keep track of the resources needed so that you don't spend subsequent actions in handleProactiveGrowth() building entities that use up the scarce resources.
 
 IMPORTANT: Before implementation, ask me for any clarifications.
-
-
-1. enhance logging to indicate attack results and who is attacking who. 
-2. when selecting candidate combat units, pick units that are close to the target if possible. First move and attack with closer combat units, only move farther units if closer ones run out of AP.

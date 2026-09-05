@@ -38,19 +38,38 @@ export function attack(gameState, sourceEntity, targetEntity, maxOrders = 1) {
     const targetCell = targetEntity.cell;
     let ordersUsed = 0;
 
+    const attackerPlayer = sourceEntity.owner || { name: 'Barbarian' };
+    const targetPlayer = targetEntity.owner || { name: 'Neutral' };
+    const initialDist = HexGrid.distance(sourceEntity.cell || sourceEntity, targetEntity.cell || targetEntity);
+
+    aiLog(attackerPlayer, 'combat', `Engaging Target: ${sourceEntity.name}#${sourceEntity.id?.slice(-4)} (${attackerPlayer.name}) at (${sourceEntity.q},${sourceEntity.r}) [HP:${Math.round(sourceEntity.health)}/${sourceEntity.maxHealth}, AP:${sourceEntity.actionPoints}] attacking ${targetPlayer.name}'s ${targetEntity.name}#${targetEntity.id?.slice(-4)} at (${targetEntity.q},${targetEntity.r}) [HP:${Math.round(targetEntity.health)}/${targetEntity.maxHealth}, Dist:${initialDist} hexes, MaxOrders:${availableOrders}].`);
+
+    let lastCheckReason = 'Target unreachable or insufficient AP';
+
     while (ordersUsed < availableOrders && sourceEntity.active && !targetEntity.destroyed && targetEntity.health > 0) {
         // Check if we can attack from current position and get the multiplier
         const currentAttackCheck = attackAction.canDo(targetCell, targetEntity);
         const isCurrentPossible = currentAttackCheck && currentAttackCheck.possible;
+        if (currentAttackCheck && !currentAttackCheck.possible) {
+            lastCheckReason = currentAttackCheck.reason;
+        }
         const currentMult = isCurrentPossible ? calculateAttackMultiplier(gameState, sourceEntity.cell, sourceEntity.damage.elevationAdjustment, targetEntity).total : 0;
 
         // If attackMultiplier > 1, try to attack
         if (isCurrentPossible && currentMult > 1.0) {
+            const prevHealth = targetEntity.health;
             const didAttack = attackAction.do(targetCell, targetEntity);
             if (didAttack) {
                 ordersUsed++;
+                const damageDealt = Math.max(0, prevHealth - targetEntity.health);
+                const isDestroyed = targetEntity.destroyed || targetEntity.health <= 0;
+                const statusMsg = isDestroyed
+                    ? `TARGET DESTROYED!`
+                    : `Target HP remaining: ${Math.round(targetEntity.health)}/${targetEntity.maxHealth}`;
+                aiLog(attackerPlayer, 'combat', `Attack Result [Hit]: ${sourceEntity.name}#${sourceEntity.id?.slice(-4)} attacked ${targetPlayer.name}'s ${targetEntity.name}#${targetEntity.id?.slice(-4)} for ${damageDealt.toFixed(1)} dmg (multiplier: ${currentMult.toFixed(2)}x). ${statusMsg}. Attacker AP left: ${sourceEntity.actionPoints}. Order used: ${ordersUsed}/${availableOrders}.`);
                 continue; // Continue loop to potentially attack again
             } else {
+                aiLog(attackerPlayer, 'warn', `Attack Action Failed: ${sourceEntity.name} attempted attack on ${targetEntity.name} at (${targetCell.q},${targetCell.r}) but action.do() returned false.`);
                 break; // Attack failed, exit loop
             }
         }
@@ -111,9 +130,11 @@ export function attack(gameState, sourceEntity, targetEntity, maxOrders = 1) {
 
             // If found a cell with better multiplier, move there
             if (bestMoveCell && bestMoveMult > currentMult) {
+                const fromCoord = `(${sourceEntity.q},${sourceEntity.r})`;
                 const moved = moveAction.do(bestMoveCell, null);
                 if (moved) {
                     ordersUsed++;
+                    aiLog(attackerPlayer, 'combat', `Repositioning: ${sourceEntity.name} moved from ${fromCoord} to (${bestMoveCell.q},${bestMoveCell.r}) for better attack multiplier (${bestMoveMult.toFixed(2)}x vs ${currentMult.toFixed(2)}x). AP left: ${sourceEntity.actionPoints}. Order used: ${ordersUsed}/${availableOrders}.`);
                     continue; // Continue loop, will try to attack from new position
                 }
             }
@@ -137,9 +158,11 @@ export function attack(gameState, sourceEntity, targetEntity, maxOrders = 1) {
             }
 
             if (closestCell) {
+                const fromCoord = `(${sourceEntity.q},${sourceEntity.r})`;
                 const moved = moveAction.do(closestCell, null);
                 if (moved) {
                     ordersUsed++;
+                    aiLog(attackerPlayer, 'combat', `Repositioning: ${sourceEntity.name} moved from ${fromCoord} to (${closestCell.q},${closestCell.r}) to close distance on ${targetEntity.name} (dist: ${closestDist}). AP left: ${sourceEntity.actionPoints}. Order used: ${ordersUsed}/${availableOrders}.`);
                     continue; // Continue loop, will try to attack from new position
                 }
             }
@@ -147,17 +170,34 @@ export function attack(gameState, sourceEntity, targetEntity, maxOrders = 1) {
 
         // If we can NOT move at all but can do an attack from current cell then do the attack
         if (isCurrentPossible) {
+            const prevHealth = targetEntity.health;
             const didAttack = attackAction.do(targetCell, targetEntity);
             if (didAttack) {
                 ordersUsed++;
+                const damageDealt = Math.max(0, prevHealth - targetEntity.health);
+                const isDestroyed = targetEntity.destroyed || targetEntity.health <= 0;
+                const statusMsg = isDestroyed
+                    ? `TARGET DESTROYED!`
+                    : `Target HP remaining: ${Math.round(targetEntity.health)}/${targetEntity.maxHealth}`;
+                aiLog(attackerPlayer, 'combat', `Attack Result [Hit]: ${sourceEntity.name}#${sourceEntity.id?.slice(-4)} attacked ${targetPlayer.name}'s ${targetEntity.name}#${targetEntity.id?.slice(-4)} from current position for ${damageDealt.toFixed(1)} dmg (multiplier: ${currentMult.toFixed(2)}x). ${statusMsg}. Attacker AP left: ${sourceEntity.actionPoints}. Order used: ${ordersUsed}/${availableOrders}.`);
                 continue;
             } else {
+                aiLog(attackerPlayer, 'warn', `Attack Action Failed: ${sourceEntity.name} attempted attack on ${targetEntity.name} from current position but action.do() returned false.`);
                 break;
             }
         }
 
         // If all else fails, break loop and return
         break;
+    }
+
+    if (ordersUsed > 0) {
+        const finalStatus = (targetEntity.destroyed || targetEntity.health <= 0)
+            ? 'TARGET DESTROYED'
+            : `Target survived (HP: ${Math.round(targetEntity.health)}/${targetEntity.maxHealth})`;
+        aiLog(attackerPlayer, 'combat', `Attack Sequence Complete: ${sourceEntity.name} used ${ordersUsed} order(s) against ${targetPlayer.name}'s ${targetEntity.name}. Result: ${finalStatus}. Attacker AP left: ${sourceEntity.actionPoints}.`);
+    } else {
+        aiLog(attackerPlayer, 'detail', `Attack Sequence Incomplete (0 orders used): ${sourceEntity.name} could not attack ${targetEntity.name} (${lastCheckReason}).`);
     }
 
     return ordersUsed;
@@ -346,7 +386,8 @@ const LOG_STYLES = {
 };
 
 export function aiLog(player, category, message) {
-    console.log(`%c[AI ${player.name}][${category}] ${message}`, LOG_STYLES[category] || '');
+    const pName = (typeof player === 'string' ? player : player?.name) || 'AI';
+    console.log(`%c[AI ${pName}][${category}] ${message}`, LOG_STYLES[category] || '');
 }
 
 // --- Capability Helpers ---
@@ -533,6 +574,54 @@ export function findClosestEntity(fromCoord, entities) {
         }
     }
     return closest;
+}
+
+/**
+ * Selects candidate combat units to engage targetEntity following Guideline 15:
+ * - Prioritizes best available units (dedicated military > combat non-builders > all combat-capable).
+ * - Sorts candidates primarily by proximity to targetEntity (closest first).
+ * - Uses combat power as tie-breaker for units at the same distance.
+ * 
+ * @param {Array<Object>} myEntities 
+ * @param {Object} targetEntity 
+ * @param {Object} [manifest] 
+ * @returns {Array<Object>} Candidate combat units sorted with closest to target first
+ */
+export function selectCandidateCombatUnits(myEntities, targetEntity, manifest = null) {
+    if (!Array.isArray(myEntities) || !targetEntity) return [];
+
+    const activeCombatCapable = myEntities.filter(e => e && e.active && !e.destroyed && isCombatCapable(e));
+    if (activeCombatCapable.length === 0) return [];
+
+    // Tier 1: Dedicated military units
+    const dedicatedMilitary = activeCombatCapable.filter(e => isDedicatedMilitary(e, manifest));
+
+    // Tier 2: Non-builder combat units
+    const nonBuilderCombat = activeCombatCapable.filter(e => !isBuilder(e));
+
+    // Select the best available tier
+    let candidates = [];
+    if (dedicatedMilitary.length > 0) {
+        candidates = dedicatedMilitary;
+    } else if (nonBuilderCombat.length > 0) {
+        candidates = nonBuilderCombat;
+    } else {
+        candidates = activeCombatCapable;
+    }
+
+    const manifestEntities = manifest?.entities || {};
+
+    // Sort primarily by proximity to target (closest first), secondary by combat power (higher first)
+    return [...candidates].sort((a, b) => {
+        const distA = HexGrid.distance(a.cell || a, targetEntity.cell || targetEntity);
+        const distB = HexGrid.distance(b.cell || b, targetEntity.cell || targetEntity);
+        if (distA !== distB) {
+            return distA - distB;
+        }
+        const powerA = getCombatPower(a, manifestEntities[a.name]);
+        const powerB = getCombatPower(b, manifestEntities[b.name]);
+        return powerB - powerA;
+    });
 }
 
 // --- Pathfinding & Exploration Utilities ---
