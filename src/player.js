@@ -141,24 +141,25 @@ export class Player {
   }
 
   /**
-   * Returns all visible opponents and their owned entities in the given game state.
+   * Returns all visible opponents and their owned entities in the given game state. Any entity without an owner is grouped under the null owner.
    * @param {GameState} gameState
    * @returns {Object} Mapping opponent player IDs to { name, score, description, entities }
    */
   getOpponents(gameState) {
     if (!gameState || !gameState.entities) return [];
-    const opponentEntities = gameState.entities.filter(e => e.owner && e.owner.id !== this.id && this.visibleCells.has(`${e.q},${e.r}`));
+    const opponentEntities = gameState.entities.filter(e => (!e.owner || e.owner.id !== this.id) && this.visibleCells.has(`${e.q},${e.r}`));
     const opponent = {};
     for (const entity of opponentEntities) {
-      if (!opponent[entity.owner.id]) {
-        opponent[entity.owner.id] = {
-          name: entity.owner.name,
-          score: entity.owner.score,
-          description: entity.owner.description,
+      const ownerId = entity.owner ? entity.owner.id : null;
+      if (!opponent[ownerId]) {
+        opponent[ownerId] = {
+          name: entity.owner ? entity.owner.name : 'None',
+          score: entity.owner ? entity.owner.score : 0,
+          description: entity.owner ? entity.owner.description : '',
           entities: []
         };
       }
-      opponent[entity.owner.id].entities.push(entity);
+      opponent[ownerId].entities.push(entity);
     }
     return opponent;
   }

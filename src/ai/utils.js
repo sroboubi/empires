@@ -432,7 +432,7 @@ export function isDedicatedMilitary(entity, manifest) {
     const meta = manifest?.entities?.[entity.name] || entity.data || {};
     const dmg = entity.damage?.value || meta.damage?.value || 0;
     const milScore = meta.score?.military || entity.state?.score?.military || 0;
-    
+
     // Dedicated combat units deal notable damage and either have military score or are not primary builders
     if (dmg <= 10 && isBuilder(entity)) return false;
     return dmg >= 20 || (milScore >= 5 && dmg > 10);
@@ -604,12 +604,14 @@ export function findWalkablePath(gameState, unit, targetCoord, maxNodes = 5000) 
 export function moveAlongPath(player, unit, moveAction, path, gameState, category = 'explore', reason = '') {
     if (!path || path.length === 0 || !moveAction) return 0;
 
+    const startCoord = `${unit.q},${unit.r}`;
+
     // Try destination first if directly affordable
     const lastCell = path[path.length - 1];
     if (!gameState.getEntityAt(lastCell.q, lastCell.r)) {
         const fullCheck = moveAction.canDo(lastCell, null);
         if (fullCheck && fullCheck.possible && moveAction.do(lastCell, null)) {
-            aiLog(player, category, `Move ${unit.name} at (${unit.q},${unit.r}): arrived at destination (${lastCell.q},${lastCell.r}). ${reason}`);
+            aiLog(player, category, `Move ${unit.name} from (${startCoord}) to (${lastCell.q},${lastCell.r}). ${reason}`);
             return 1;
         }
     }
@@ -634,7 +636,7 @@ export function moveAlongPath(player, unit, moveAction, path, gameState, categor
                 const note = (i < path.length - 1)
                     ? `advanced ${i + 1}/${path.length} hexes towards target`
                     : `arrived at target`;
-                aiLog(player, category, `Move ${unit.name}: ${note} -> now at (${stepCell.q},${stepCell.r}). ${reason}`);
+                aiLog(player, category, `Move ${unit.name}: ${note} from (${startCoord}) to (${stepCell.q},${stepCell.r}). ${reason}`);
                 return 1;
             }
         }

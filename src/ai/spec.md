@@ -28,4 +28,5 @@ GUIDELINES:
 IMPORTANT: Before implementation, ask me for any clarifications.
 
 
-* handleCombatAndThreats() is not working at all. Fix any bugs and add more logging to determine exactly what is happening (e.g. what enemies are detected, which unit is selected to engage, why it fails to engage, etc) - no one is attacking barbarians, even after they attack units
+1. enhance logging to indicate attack results and who is attacking who. 
+2. when selecting candidate combat units, pick units that are close to the target if possible. First move and attack with closer combat units, only move farther units if closer ones run out of AP.
