@@ -209,12 +209,14 @@ function openSetupModal(canClose = true) {
 
   // Win Conditions
   const winCondition = defaultSettings.winCondition || { absoluteScore: 1000, relativeScore: 2 };
-  document.getElementById('setup-win-absolute-enabled').checked = false;
+  const absoluteEnabled = winCondition.absoluteScore !== undefined && winCondition.absoluteScore !== null;
+  const relativeEnabled = winCondition.relativeScore !== undefined && winCondition.relativeScore !== null;
+  document.getElementById('setup-win-absolute-enabled').checked = absoluteEnabled;
   document.getElementById('setup-win-absolute-value').value = winCondition.absoluteScore || 1000;
-  document.getElementById('setup-win-absolute-value').disabled = true;
-  document.getElementById('setup-win-relative-enabled').checked = false;
+  document.getElementById('setup-win-absolute-value').disabled = !absoluteEnabled;
+  document.getElementById('setup-win-relative-enabled').checked = relativeEnabled;
   document.getElementById('setup-win-relative-value').value = winCondition.relativeScore || 2;
-  document.getElementById('setup-win-relative-value').disabled = true;
+  document.getElementById('setup-win-relative-value').disabled = !relativeEnabled;
 
   // Add event listeners for win condition checkboxes
   document.getElementById('setup-win-absolute-enabled').addEventListener('change', (e) => {
@@ -223,6 +225,9 @@ function openSetupModal(canClose = true) {
   document.getElementById('setup-win-relative-enabled').addEventListener('change', (e) => {
     document.getElementById('setup-win-relative-value').disabled = !e.target.checked;
   });
+
+  // Initialize custom spinner buttons
+  initNumberInputSpinners();
 
   overlay.classList.add('active');
 }
@@ -298,10 +303,18 @@ function renderSetupResources() {
 
     box.innerHTML = `
       <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">${res}</span>
-      <input type="number" id="res-val-${res}" class="form-input" value="${val}" min="0" style="padding: 4px 8px;">
+      <div class="number-input-wrapper" style="width: 100%;">
+        <input type="number" id="res-val-${res}" class="form-input" value="${val}" min="0" style="padding: 4px 8px;">
+        <div class="spinner-buttons">
+          <button type="button" class="spinner-btn up" data-target="res-val-${res}">▲</button>
+          <button type="button" class="spinner-btn down" data-target="res-val-${res}">▼</button>
+        </div>
+      </div>
     `;
     container.appendChild(box);
   };
+  // Re-initialize spinners for dynamically added inputs
+  initNumberInputSpinners();
 }
 
 function populateUnitSelectOptions() {
@@ -325,10 +338,17 @@ function renderSetupUnits() {
     const row = document.createElement('div');
     row.className = 'dynamic-row';
 
+    const inputId = `setup-unit-count-${unitName}`;
     row.innerHTML = `
       <strong style="font-size: 13px; text-transform: uppercase; flex: 1;">${unitName}</strong>
       <span style="font-size: 11px; color: var(--text-muted);">Count:</span>
-      <input type="number" class="form-input" value="${qty}" min="1" style="width: 70px; padding: 4px 8px;">
+      <div class="number-input-wrapper" style="width: 80px;">
+        <input type="number" id="${inputId}" class="form-input" value="${qty}" min="1" style="padding: 4px 8px;">
+        <div class="spinner-buttons">
+          <button type="button" class="spinner-btn up" data-target="${inputId}">▲</button>
+          <button type="button" class="spinner-btn down" data-target="${inputId}">▼</button>
+        </div>
+      </div>
       <button type="button" class="btn btn-danger btn-small">✕</button>
     `;
 
@@ -349,6 +369,8 @@ function renderSetupUnits() {
 
     container.appendChild(row);
   });
+  // Re-initialize spinners for dynamically added inputs
+  initNumberInputSpinners();
 }
 
 function addSetupUnitRow() {
@@ -417,6 +439,79 @@ function updateRangeFill(cfg) {
 
 function updateAllRangeFills() {
   RANGE_SLIDER_IDS.forEach(updateRangeFill);
+}
+
+/**
+ * Initialize custom spinner buttons for number inputs in the setup modal
+ */
+function initNumberInputSpinners() {
+  const modal = document.getElementById('setup-modal-overlay');
+  if (!modal) return;
+
+  const spinners = modal.querySelectorAll('.number-input-wrapper');
+  spinners.forEach(wrapper => {
+    const input = wrapper.querySelector('input[type="number"]');
+    const upBtn = wrapper.querySelector('.spinner-btn.up');
+    const downBtn = wrapper.querySelector('.spinner-btn.down');
+
+    if (!input || !upBtn || !downBtn) return;
+
+    const min = parseFloat(input.min) || 0;
+    const max = parseFloat(input.max) || Infinity;
+    const step = parseFloat(input.step) || 1;
+
+    const updateValue = (delta) => {
+      let value = parseFloat(input.value) || 0;
+      value = Math.max(min, Math.min(max, value + delta * step));
+      // Handle step precision for decimals
+      if (step < 1) {
+        value = Math.round(value / step) * step;
+      }
+      input.value = value;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+
+    upBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      updateValue(1);
+    });
+
+    downBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      updateValue(-1);
+    });
+
+    // Also support long-press for rapid increment/decrement
+    let pressTimer = null;
+    const startPress = (delta) => {
+      updateValue(delta);
+      pressTimer = setTimeout(() => {
+        pressTimer = setInterval(() => updateValue(delta), 100);
+      }, 400);
+    };
+    const stopPress = () => {
+      if (pressTimer) {
+        clearTimeout(pressTimer);
+        clearInterval(pressTimer);
+        pressTimer = null;
+      }
+    };
+
+    upBtn.addEventListener('mousedown', (e) => { e.preventDefault(); startPress(1); });
+    upBtn.addEventListener('mouseup', stopPress);
+    upBtn.addEventListener('mouseleave', stopPress);
+    downBtn.addEventListener('mousedown', (e) => { e.preventDefault(); startPress(-1); });
+    downBtn.addEventListener('mouseup', stopPress);
+    downBtn.addEventListener('mouseleave', stopPress);
+
+    // Touch support
+    upBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startPress(1); });
+    upBtn.addEventListener('touchend', stopPress);
+    downBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startPress(-1); });
+    downBtn.addEventListener('touchend', stopPress);
+  });
 }
 
 function handleStartGameClicked() {
@@ -491,6 +586,10 @@ function startNewGame(settings) {
   deselectEntity();
   hideContextMenu();
   clearEntityMeshes();
+
+  const button = document.getElementById('btn-next-turn');
+  button.disabled = false;
+  button.textContent = 'Next Turn';
 
   gameState = new GameState();
   gameState.generateMap(settings.mapSize, manifestData.terrains);

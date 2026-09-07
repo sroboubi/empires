@@ -2,7 +2,7 @@
 
 ## Visual ##
 
-- only zoom to human player units
+- remove new game button (can just refresh browser)
 
 ## Audio ##
 
@@ -11,6 +11,7 @@
 
 ## Game ##
 
+- turn excess orders into some resources
 - prevent movement through enemy entities, and implement zone of control
 - prevent movement across tiles that units can't stand on, like water (check intermediate path)
 - call onActionDone with affected cells so we don't delay for invisible actions 
@@ -22,8 +23,3 @@
 - unit vision considers center of cell, some cells that are partly visible are hidden - fix?
 - frame drop and lagging?
 - smooth move and animations
-
-BUGS:
-
-spinners look bad again
-Max Orders and Orders Per Turn are not on same row and are offset and look bad
