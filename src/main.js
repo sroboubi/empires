@@ -96,6 +96,7 @@ async function init() {
         deselectEntity();
         closeSaveLoadModal();
         closeProfileModal();
+        closeVictoryModal();
         if (gameState) {
           closeSetupModal();
         }
@@ -116,6 +117,11 @@ async function init() {
     document.getElementById('btn-close-saveload').addEventListener('click', closeSaveLoadModal);
     document.getElementById('btn-close-profile').addEventListener('click', closeProfileModal);
     document.getElementById('btn-do-manual-save').addEventListener('click', handleManualSaveClicked);
+    document.getElementById('btn-victory-new-game').addEventListener('click', () => {
+      closeVictoryModal();
+      openSetupModal(true);
+    });
+    document.getElementById('btn-victory-close').addEventListener('click', closeVictoryModal);
 
     // Barbarian setup UI bindings
     setupBarbarianUI();
@@ -143,9 +149,8 @@ function openSetupModal(canClose = true) {
   document.getElementById('setup-map-size').value = defaultSettings.mapSize || 64;
 
   // Orders
-  const orders = defaultSettings.initialization?.orders || { max: 8, initial: 8, perTurn: 6 };
+  const orders = defaultSettings.initialization?.orders || { max: 8, perTurn: 6 };
   document.getElementById('setup-orders-max').value = orders.max;
-  document.getElementById('setup-orders-initial').value = orders.initial;
   document.getElementById('setup-orders-perturn').value = orders.perTurn;
 
   // Players
@@ -201,6 +206,23 @@ function openSetupModal(canClose = true) {
   document.getElementById('setup-barbarian-spawn-frequency').value = barbarians.spawnFrequencyTurns || 5;
   document.getElementById('setup-barbarian-max-number').value = barbarians.maxNumber || 20;
   document.getElementById('setup-barbarian-max-age').value = barbarians.maxAge || 30;
+
+  // Win Conditions
+  const winCondition = defaultSettings.winCondition || { absoluteScore: 1000, relativeScore: 2 };
+  document.getElementById('setup-win-absolute-enabled').checked = false;
+  document.getElementById('setup-win-absolute-value').value = winCondition.absoluteScore || 1000;
+  document.getElementById('setup-win-absolute-value').disabled = true;
+  document.getElementById('setup-win-relative-enabled').checked = false;
+  document.getElementById('setup-win-relative-value').value = winCondition.relativeScore || 2;
+  document.getElementById('setup-win-relative-value').disabled = true;
+
+  // Add event listeners for win condition checkboxes
+  document.getElementById('setup-win-absolute-enabled').addEventListener('change', (e) => {
+    document.getElementById('setup-win-absolute-value').disabled = !e.target.checked;
+  });
+  document.getElementById('setup-win-relative-enabled').addEventListener('change', (e) => {
+    document.getElementById('setup-win-relative-value').disabled = !e.target.checked;
+  });
 
   overlay.classList.add('active');
 }
@@ -409,6 +431,15 @@ function handleStartGameClicked() {
     startingResources[res] = el ? parseInt(el.value, 10) || 0 : val;
   };
 
+  // Win conditions
+  const winCondition = {};
+  if (document.getElementById('setup-win-absolute-enabled').checked) {
+    winCondition.absoluteScore = parseInt(document.getElementById('setup-win-absolute-value').value, 10) || 1000;
+  }
+  if (document.getElementById('setup-win-relative-enabled').checked) {
+    winCondition.relativeScore = parseFloat(document.getElementById('setup-win-relative-value').value) || 2;
+  }
+
   const settings = {
     mapSize: parseInt(document.getElementById('setup-map-size').value, 10),
     players: setupPlayers.map((p, i) => ({
@@ -420,7 +451,7 @@ function handleStartGameClicked() {
     initialization: {
       orders: {
         max: parseInt(document.getElementById('setup-orders-max').value, 10) || 8,
-        initial: parseInt(document.getElementById('setup-orders-initial').value, 10) || 8,
+        initial: parseInt(document.getElementById('setup-orders-max').value, 10) || 8,
         perTurn: parseInt(document.getElementById('setup-orders-perturn').value, 10) || 6
       },
       startingResources: startingResources,
@@ -447,7 +478,8 @@ function handleStartGameClicked() {
         maxNumber: parseInt(document.getElementById('setup-barbarian-max-number').value, 10) || 20,
         maxAge: parseInt(document.getElementById('setup-barbarian-max-age').value, 10) || 30
       }
-      : null
+      : null,
+    winCondition: Object.keys(winCondition).length > 0 ? winCondition : null
   };
 
   startNewGame({ ...defaultSettings, ...settings });
@@ -638,11 +670,27 @@ async function doLoadGame(saveName) {
 /**
  * Next Turn: triggers endTurn on gameState, cycling to next player turn and updating Fog of War.
  */
-export function nextTurn() {
+export async function nextTurn() {
+  if (gameState.gameOver) {
+    showToast('Game is over. Start a new game.', true);
+    return;
+  }
+
+  const button = document.getElementById('btn-next-turn');
+  button.disabled = true;
+  button.textContent = 'Running AI...';
+
   deselectEntity();
   hideContextMenu();
 
-  gameState.endTurn();
+  // this updates the gameState.activePlayer and increments the round if needed
+  await gameState.endTurn();
+
+  // enable the button again if the next player is human
+  if (gameState.activePlayer && !gameState.activePlayer.isAI) {
+    button.disabled = false;
+    button.textContent = 'Next Turn';
+  }
 
   drawGrid(gameState.cells, gameState.activePlayer);
   reconcileEntities(gameState);
@@ -662,6 +710,9 @@ export function nextTurn() {
 
   // Check auto-save condition
   checkAutoSave();
+
+  // Check win conditions
+  checkWinConditions();
 }
 
 async function checkAutoSave() {
@@ -675,6 +726,75 @@ async function checkAutoSave() {
     await doSaveGame(autoSaveName, true);
     showToast(`Auto-saved (${autoSaveName})`);
   }
+}
+
+/**
+ * Checks if any player has met the win conditions.
+ * Called at the end of each turn.
+ */
+function checkWinConditions() {
+  if (!gameState || !gameState.settings?.winCondition) return false;
+
+  const winCondition = gameState.settings.winCondition;
+  const players = gameState.players;
+
+  for (const player of players) {
+    const reasons = [];
+
+    // Check absolute score
+    if (winCondition.absoluteScore && player.score.total >= winCondition.absoluteScore) {
+      reasons.push(`Absolute Score: ${player.score.total} >= ${winCondition.absoluteScore}`);
+    }
+
+    // Check relative score
+    if (winCondition.relativeScore) {
+      // Find the next highest score among other players
+      let nextHighest = 0;
+      for (const other of players) {
+        if (other.id !== player.id && other.score.total > nextHighest) {
+          nextHighest = other.score.total;
+        }
+      }
+      const threshold = winCondition.relativeScore * nextHighest;
+      if (player.score.total >= threshold) {
+        reasons.push(`Relative Score: ${player.score.total} >= ${winCondition.relativeScore} × ${nextHighest} (next highest)`);
+      }
+    }
+
+    if (reasons.length > 0) {
+      showVictoryModal(player, reasons);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Shows the victory modal with the winning player and reasons.
+ */
+function showVictoryModal(player, reasons) {
+  const overlay = document.getElementById('victory-modal-overlay');
+  const messageDiv = document.getElementById('victory-message');
+
+  messageDiv.innerHTML = `
+    <div style="font-size: 24px; font-weight: 700; color: ${player.color}; margin-bottom: 12px;">${player.name.toUpperCase()} WINS!</div>
+    <div style="font-size: 14px; color: var(--text-muted); margin-bottom: 16px;">Round ${gameState.currentRound}</div>
+    <div style="text-align: left; font-size: 13px; color: var(--text-main);">
+      ${reasons.map(r => `<div style="margin: 8px 0; padding: 8px; background: rgba(52, 152, 219, 0.1); border-radius: 4px;">${r}</div>`).join('')}
+    </div>
+  `;
+
+  overlay.classList.add('active');
+  gameState.gameOver = true;
+}
+
+/**
+ * Closes the victory modal.
+ */
+function closeVictoryModal() {
+  const overlay = document.getElementById('victory-modal-overlay');
+  overlay.classList.remove('active');
 }
 
 /* ==========================================================================
@@ -907,6 +1027,13 @@ export function updatePlayersUI() {
   header.textContent = `ROUND ${gameState.currentRound} — TURN: ${activePlayer ? activePlayer.name.toUpperCase() : ''}${activePlayer && activePlayer.isAI ? ' (AI)' : ''}`;
   container.appendChild(header);
 
+  // Find highest and second highest scores for relative score calculation
+  const sortedScores = [...gameState.players].sort((a, b) => b.score.total - a.score.total);
+  const highestScore = sortedScores[0]?.score.total || 0;
+  const secondHighestScore = sortedScores[1]?.score.total || 0;
+
+  const winCondition = gameState.settings?.winCondition || {};
+
   gameState.players.forEach(player => {
     const isActive = activePlayer && activePlayer.id === player.id;
     const li = document.createElement('li');
@@ -921,18 +1048,30 @@ export function updatePlayersUI() {
     li.style.background = isActive ? 'rgba(167, 139, 250, 0.15)' : 'rgba(255, 255, 255, 0.02)';
     li.style.border = isActive ? '1px solid var(--accent-color)' : '1px solid rgba(255, 255, 255, 0.08)';
 
-    let resourceStr = '';
-    if (player.resources) {
-      resourceStr = Object.entries(player.resources)
-        .map(([name, qty]) => `${name}: ${qty}`)
-        .join(' | ');
-    }
-
     const ordersStr = player.maxOrders > 0
       ? `orders: ${player.orders}/${player.maxOrders}`
       : '';
 
     const scoreStr = `total score: ${player.score.total} (${player.score.military} military, ${player.score.economic} economic, ${player.score.exploration} exploration)`;
+
+    console.debug("D001", scoreStr);
+
+    // Calculate score to win
+    let scoreToWinParts = [];
+    if (winCondition.absoluteScore) {
+      scoreToWinParts.push(`Absolute: ${winCondition.absoluteScore}`);
+    }
+    if (winCondition.relativeScore) {
+      // Use highest score if this player is not the highest, otherwise use second highest
+      const targetScore = (player.score.total >= highestScore && sortedScores[0]?.id === player.id)
+        ? secondHighestScore
+        : highestScore;
+      const relativeTarget = Math.ceil(winCondition.relativeScore * targetScore);
+      scoreToWinParts.push(`Relative: ${relativeTarget} (${winCondition.relativeScore}×${targetScore})`);
+    }
+    const scoreToWinStr = scoreToWinParts.length > 0
+      ? `score to win: ${scoreToWinParts.join(' | ')}`
+      : '';
 
     li.innerHTML = `
       <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
@@ -944,7 +1083,7 @@ export function updatePlayersUI() {
       </div>
       ${ordersStr ? `<div style="font-size: 11px; color: var(--accent-color); margin-left: 18px;">${ordersStr}</div>` : ''}
       ${scoreStr ? `<div style="font-size: 11px; color: var(--accent-color); margin-left: 18px;">${scoreStr}</div>` : ''}
-      ${resourceStr ? `<div style="font-size: 11px; color: var(--text-muted); margin-left: 18px;">${resourceStr}</div>` : ''}
+      ${scoreToWinStr ? `<div style="font-size: 11px; color: #f1c40f; margin-left: 18px;">${scoreToWinStr}</div>` : ''}
     `;
 
     // Long Hover (Tooltip) setup

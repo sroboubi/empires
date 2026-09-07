@@ -822,6 +822,32 @@
       color: #3498db;
       border: 1px solid #3498db;
     }
+
+    /* Number input spinner styling to match panel theme */
+    .modal-card input[type="number"] {
+      -moz-appearance: textfield;
+    }
+    /* WebKit/Blink: show native spinner but allow some styling */
+    .modal-card input[type="number"]::-webkit-outer-spin-button,
+    .modal-card input[type="number"]::-webkit-inner-spin-button {
+      -webkit-appearance: auto;
+      appearance: auto;
+      margin: 0;
+      opacity: 1;
+    }
+    /* Firefox: ensure spinner shows */
+    @-moz-document url-prefix() {
+      .modal-card input[type="number"] {
+        -moz-appearance: number-input;
+      }
+    }
+
+    /* Disabled number input styling for win conditions */
+    .modal-card input[type="number"]:disabled {
+      opacity: 0.5;
+      background: rgba(15, 15, 22, 0.5);
+      color: var(--text-muted);
+    }
   </style>
 </head>
 
@@ -935,15 +961,14 @@
           </select>
         </div>
 
-        <div class="form-group">
-          <label class="form-label">Orders</label>
-          <div style="display: flex; gap: 6px;">
-            <input type="number" id="setup-orders-max" class="form-input" placeholder="Max" value="8" min="1"
-              style="width: 33%;">
-            <input type="number" id="setup-orders-initial" class="form-input" placeholder="Initial" value="8" min="1"
-              style="width: 33%;">
-            <input type="number" id="setup-orders-perturn" class="form-input" placeholder="Per Turn" value="6" min="1"
-              style="width: 34%;">
+        <div class="form-group" style="display: flex; gap: 16px;">
+          <div style="flex: 1;">
+            <label class="form-label">Max Orders</label>
+            <input type="number" id="setup-orders-max" class="form-input" value="8" min="1">
+          </div>
+          <div style="flex: 1;">
+            <label class="form-label">Orders Per Turn</label>
+            <input type="number" id="setup-orders-perturn" class="form-input" value="6" min="1">
           </div>
         </div>
 
@@ -954,6 +979,21 @@
             <button id="btn-add-player" class="btn btn-secondary btn-small" type="button">+ Add Player</button>
           </div>
           <div id="setup-players-container" class="dynamic-list"></div>
+        </div>
+
+        <!-- Win Conditions -->
+        <div class="form-group full-width">
+          <label class="form-label">Win Conditions</label>
+          <div style="display: flex; flex-direction: column; gap: 10px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="setup-win-absolute-enabled"> Absolute Score
+              <input type="number" id="setup-win-absolute-value" class="form-input" value="1000" min="1" style="width: 100px;" disabled>
+            </label>
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="setup-win-relative-enabled"> Relative Score (× next highest)
+              <input type="number" id="setup-win-relative-value" class="form-input" value="2" min="1" step="0.1" style="width: 100px;" disabled>
+            </label>
+          </div>
         </div>
 
         <!-- Starting Resources -->
@@ -1097,6 +1137,22 @@
   <!-- Resource Profile Hover Tooltip (Long-Hover over Empire in Empires Panel) -->
   <div id="resource-profile-tooltip" class="profile-tooltip">
     <div id="profile-tooltip-content"></div>
+  </div>
+
+  <!-- Victory Modal -->
+  <div id="victory-modal-overlay" class="modal-overlay">
+    <div class="glass-panel modal-card" style="width: 500px; text-align: center;">
+      <div class="modal-header">
+        <div class="modal-title">VICTORY</div>
+      </div>
+      <div class="divider"></div>
+      <div id="victory-message" style="font-size: 16px; margin: 20px 0; line-height: 1.6;"></div>
+      <div class="divider"></div>
+      <div style="display: flex; gap: 12px; justify-content: center;">
+        <button id="btn-victory-new-game" class="btn" style="width: 160px;">NEW GAME</button>
+        <button id="btn-victory-close" class="btn btn-secondary" style="width: 160px;">CLOSE</button>
+      </div>
+    </div>
   </div>
 
   <!-- Toast Feedbacks -->

@@ -15,6 +15,7 @@ export class GameState {
     this.entities = [];   // List of active BaseEntity instances
     this.manifestData = null;
     this.settings = null;
+    this.gameOver = false;
   }
 
   /**
@@ -213,20 +214,13 @@ export class GameState {
    * Advances game turn to the next player.
    * If all players have taken a turn, increments currentRound.
    */
-  endTurn() {
-    if (this.players.length === 0) return;
-
+  async endTurn() {
+    if (this.players.length === 0 || this.gameOver) return;
     this.activePlayerIndex = (this.activePlayerIndex + 1) % this.players.length;
     if (this.activePlayerIndex === 0) {
-      this.onRoundEnd().then(() => {
-        this.startTurn();
-      }).catch(err => {
-        console.error('Error during onRoundEnd:', err);
-        this.startTurn();
-      });
-    } else {
-      this.startTurn();
+      await this.onRoundEnd();    
     }
+    this.startTurn();      
   }
 
   /**
@@ -304,6 +298,7 @@ export class GameState {
     return JSON.stringify({
       activePlayerIndex: this.activePlayerIndex,
       currentRound: this.currentRound,
+      gameOver: this.gameOver,
       players: this.players.map(p => p.toJSON()),
       entities: this.entities.map(e => e.toJSON()),
       cells: this.cells,
@@ -328,6 +323,9 @@ export class GameState {
       }
       if (data.currentRound !== undefined) {
         this.currentRound = data.currentRound;
+      }
+      if (data.gameOver !== undefined) {
+        this.gameOver = data.gameOver;
       }
 
       // Re-hydrate Players

@@ -22,3 +22,8 @@
 - unit vision considers center of cell, some cells that are partly visible are hidden - fix?
 - frame drop and lagging?
 - smooth move and animations
+
+BUGS:
+
+spinners look bad again
+Max Orders and Orders Per Turn are not on same row and are offset and look bad

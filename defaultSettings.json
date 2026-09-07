@@ -26,7 +26,6 @@
   "initialization": {
     "orders": {
       "max": 6,
-      "initial": 6,
       "perTurn": 5
     },
     "startingResources": {

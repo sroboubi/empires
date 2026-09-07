@@ -209,9 +209,9 @@ export class BaseEntity {
   /**
    * Lifecycle Hook called at turn start / game loop step.
    * Deducts maintenance costs. Set active to false if maintenance resources not met.
-   * @param {Object} globalContext
+   * @param {Object} gameState - GameState reference
    */
-  step(globalContext) {
+  step(gameState) {
     const cost = this.getCostToMaintain();
     const hasCost = Object.keys(cost).length > 0;
 

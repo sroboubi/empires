@@ -35,7 +35,7 @@ export class Player {
     };
 
     this.ordersConfig = ordersConfig || {};
-    this.orders = ordersConfig?.initial ?? 0;
+    this.orders = ordersConfig?.initial ?? ordersConfig?.max ?? 0;
     this.maxOrders = ordersConfig?.max ?? 0;
     this.ordersPerTurn = ordersConfig?.perTurn ?? 0;
 
@@ -66,22 +66,20 @@ export class Player {
     for (const entity of ownedEntities) {
       this.score.military += entity.state.score.military;
       this.score.economic += entity.state.score.economic;
-      try {
-        entity.step({ gameState });
-      } catch (err) {
-        console.error(`Error stepping entity ${entity.name} during turn step:`, err);
-      }
+      entity.step(gameState);      
     }
 
     this.updateVisibility(gameState);
     this.score.exploration = Math.round(Math.pow(this.visibleCells.size * this.exploredCells.size, 1 / 3));
     this.score.total = Math.round(Math.pow(this.score.military * this.score.economic * this.score.exploration, 1 / 3));
 
+    console.debug("Player score recalc", this.score);
+
     if (this.controller) {
       processTurn(this, gameState).then(() => {
         nextTurn();
       }).catch(err => {
-        console.error(`Error processing turn for player ${this.name}:`, err);
+        console.error(`Error processing turn for AI player ${this.name}:`, err);
       });
     }
   }
