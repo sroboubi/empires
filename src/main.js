@@ -104,7 +104,6 @@ async function init() {
     });
 
     // Control buttons
-    document.getElementById('btn-new-game').addEventListener('click', () => openSetupModal(true));
     document.getElementById('btn-save-game').addEventListener('click', () => openSaveLoadModal('save'));
     document.getElementById('btn-load-game').addEventListener('click', () => openSaveLoadModal('load'));
     document.getElementById('btn-next-turn').addEventListener('click', nextTurn);
@@ -117,10 +116,6 @@ async function init() {
     document.getElementById('btn-close-saveload').addEventListener('click', closeSaveLoadModal);
     document.getElementById('btn-close-profile').addEventListener('click', closeProfileModal);
     document.getElementById('btn-do-manual-save').addEventListener('click', handleManualSaveClicked);
-    document.getElementById('btn-victory-new-game').addEventListener('click', () => {
-      closeVictoryModal();
-      openSetupModal(true);
-    });
     document.getElementById('btn-victory-close').addEventListener('click', closeVictoryModal);
 
     // Barbarian setup UI bindings

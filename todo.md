@@ -2,8 +2,6 @@
 
 ## Visual ##
 
-- remove new game button (can just refresh browser)
-
 ## Audio ##
 
 - sound effects
@@ -11,6 +9,7 @@
 
 ## Game ##
 
+- only allow relative score victory after some turns (maybe 5)
 - turn excess orders into some resources
 - prevent movement through enemy entities, and implement zone of control
 - prevent movement across tiles that units can't stand on, like water (check intermediate path)
