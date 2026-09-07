@@ -2,7 +2,7 @@ import { HexGrid } from '../hexGrid.js';
 import { camelToTitle } from '../utils.js';
 import { SeaLevel } from '../terrainProvider.js';
 import { sleep, calculateAttackMultiplier } from '../utils.js';
-import { drawGrid, reconcileEntities } from '../renderer.js';
+import { reconcileEntities } from '../renderer.js';
 import { updatePlayersUI } from '../main.js';
 import { CONFIG } from '../config.js';
 
@@ -368,8 +368,15 @@ export function repair(gameState, sourceEntity, targetEntity, maxOrders = 1) {
  * Update UI and render after an action is done.
  * @param {GameState} gameState 
  */
-export async function onActionDone(gameState) {
-    drawGrid(gameState.cells, gameState.activePlayer);
+export async function onActionDone(gameState, involvedCells = null) {
+    if (Array.isArray(involvedCells)) {
+        const humanVisibleCells = gameState.humanVisibleCells();
+        if (!involvedCells.some(cell => humanVisibleCells.has(cell))) {
+            updatePlayersUI();
+            return;
+        }
+    }
+    console.log("AI action done");
     reconcileEntities(gameState);
     updatePlayersUI();
     await sleep(CONFIG.AI_ACTION_SLEEP);

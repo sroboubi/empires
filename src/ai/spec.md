@@ -1,9 +1,9 @@
 # AI Manager Specification
 
 Examine the AI manager implemetations in ai/standard - but don't copy the implementation as they are all flawed.
-Create a new manager like ai/standard/manager.js that implements processTurn(). The goal is to maximize the player score as quickly as possible. Do not hardcode actions, numbers, or unit names - these can all be modified in the settings and manifest, and this AI should work with ANY settings and configuration. Use the ai/utils.js functions as needed - don't duplicate functionality.
+Create a new manager like ai/standard/smartManager.js that implements processTurn(). The goal is to maximize the player total score as quickly as possible. Do not hardcode actions, numbers, or unit names - these can all be modified in the settings and manifest, and this AI should work with ANY settings and configuration. Use the ai/utils.js functions as needed - don't duplicate functionality. Use the following hints if needed, but they are not hard rules, just hints.
 
-GUIDELINES:
+## Hints
 
 1. The score provided by each units is defined in the entity definition in the manifest. In addition to that, there is an "exploratrion" score based on number of visible and explored cells.
 2. Entities have resource costs to build and maintain, and produce resources each turn - all defined in the entity definition in the manifest

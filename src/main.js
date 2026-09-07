@@ -433,20 +433,20 @@ function handleStartGameClicked() {
     },
     barbarians: document.getElementById('setup-barbarians-enabled').checked
       ? {
-          horde: {
-            barbarian: {
-              min: parseInt(document.getElementById('setup-barbarian-barbarian-min').value, 10) || 0,
-              max: parseInt(document.getElementById('setup-barbarian-barbarian-max').value, 10) || 0
-            },
-            barbarianChief: {
-              min: parseInt(document.getElementById('setup-barbarian-chief-min').value, 10) || 0,
-              max: parseInt(document.getElementById('setup-barbarian-chief-max').value, 10) || 0
-            }
+        horde: {
+          barbarian: {
+            min: parseInt(document.getElementById('setup-barbarian-barbarian-min').value, 10) || 0,
+            max: parseInt(document.getElementById('setup-barbarian-barbarian-max').value, 10) || 0
           },
-          spawnFrequencyTurns: parseInt(document.getElementById('setup-barbarian-spawn-frequency').value, 10) || 5,
-          maxNumber: parseInt(document.getElementById('setup-barbarian-max-number').value, 10) || 20,
-          maxAge: parseInt(document.getElementById('setup-barbarian-max-age').value, 10) || 30
-        }
+          barbarianChief: {
+            min: parseInt(document.getElementById('setup-barbarian-chief-min').value, 10) || 0,
+            max: parseInt(document.getElementById('setup-barbarian-chief-max').value, 10) || 0
+          }
+        },
+        spawnFrequencyTurns: parseInt(document.getElementById('setup-barbarian-spawn-frequency').value, 10) || 5,
+        maxNumber: parseInt(document.getElementById('setup-barbarian-max-number').value, 10) || 20,
+        maxAge: parseInt(document.getElementById('setup-barbarian-max-age').value, 10) || 30
+      }
       : null
   };
 
@@ -649,7 +649,9 @@ export function nextTurn() {
   updatePlayersUI();
 
   // Focus camera on center of mass of active player's entities
-  if (gameState.activePlayer && gameState.entities.length > 0) {
+  if (gameState.activePlayer && gameState.entities.length > 0 &&
+    ((gameState.activePlayer.isAI && CONFIG.PAN_CAMERA_ON_AI_TURN) ||
+      (!gameState.activePlayer.isAI && CONFIG.PAN_CAMERA_ON_HUMAN_TURN))) {
     const playerEntities = gameState.activePlayer.getEntities(gameState);
     if (playerEntities.length > 0) {
       focusCameraOnEntities(playerEntities);

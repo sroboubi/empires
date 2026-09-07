@@ -602,6 +602,7 @@
       cursor: pointer;
       padding: 4px 8px;
     }
+
     .modal-close-btn:hover {
       color: white;
     }
@@ -631,7 +632,8 @@
       color: var(--accent-color);
     }
 
-    .form-input, .form-select {
+    .form-input,
+    .form-select {
       background: rgba(15, 15, 22, 0.8);
       border: 1px solid var(--border-color);
       border-radius: 6px;
@@ -643,7 +645,8 @@
       transition: border-color 0.2s ease;
     }
 
-    .form-input:focus, .form-select:focus {
+    .form-input:focus,
+    .form-select:focus {
       border-color: var(--accent-color);
     }
 
@@ -682,6 +685,7 @@
     .btn-danger {
       background: #e74c3c;
     }
+
     .btn-danger:hover {
       background: #c0392b;
     }
@@ -932,11 +936,14 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label">Orders Per Player</label>
+          <label class="form-label">Orders</label>
           <div style="display: flex; gap: 6px;">
-            <input type="number" id="setup-orders-max" class="form-input" placeholder="Max" value="8" min="1" style="width: 33%;">
-            <input type="number" id="setup-orders-initial" class="form-input" placeholder="Initial" value="8" min="1" style="width: 33%;">
-            <input type="number" id="setup-orders-perturn" class="form-input" placeholder="Per Turn" value="6" min="1" style="width: 34%;">
+            <input type="number" id="setup-orders-max" class="form-input" placeholder="Max" value="8" min="1"
+              style="width: 33%;">
+            <input type="number" id="setup-orders-initial" class="form-input" placeholder="Initial" value="8" min="1"
+              style="width: 33%;">
+            <input type="number" id="setup-orders-perturn" class="form-input" placeholder="Per Turn" value="6" min="1"
+              style="width: 34%;">
           </div>
         </div>
 
@@ -952,7 +959,8 @@
         <!-- Starting Resources -->
         <div class="form-group full-width">
           <label class="form-label">Starting Resources (All Players)</label>
-          <div id="setup-resources-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px;"></div>
+          <div id="setup-resources-container"
+            style="display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px;"></div>
         </div>
 
         <!-- Starting Units -->
@@ -960,7 +968,8 @@
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
             <label class="form-label">Starting Units (All Players)</label>
             <div style="display: flex; gap: 6px; align-items: center;">
-              <select id="setup-add-unit-select" class="form-select" style="width: 140px; padding: 4px 8px; font-size: 11px;"></select>
+              <select id="setup-add-unit-select" class="form-select"
+                style="width: 140px; padding: 4px 8px; font-size: 11px;"></select>
               <button id="btn-add-starting-unit" class="btn btn-secondary btn-small" type="button">+ Add Unit</button>
             </div>
           </div>
@@ -975,10 +984,12 @@
               <input type="checkbox" id="setup-autosave-enabled" checked> Enable Auto-Save
             </label>
             <label style="display: flex; align-items: center; gap: 6px;">
-              Every <input type="number" id="setup-autosave-interval" class="form-input" value="5" min="1" style="width: 65px;"> turns
+              Every <input type="number" id="setup-autosave-interval" class="form-input" value="5" min="1"
+                style="width: 65px;"> turns
             </label>
             <label style="display: flex; align-items: center; gap: 6px;">
-              Keep max <input type="number" id="setup-autosave-max" class="form-input" value="10" min="1" style="width: 65px;"> saves
+              Keep max <input type="number" id="setup-autosave-max" class="form-input" value="10" min="1"
+                style="width: 65px;"> saves
             </label>
           </div>
         </div>

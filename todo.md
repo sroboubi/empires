@@ -11,16 +11,14 @@
 
 ## Game ##
 
-- fix AI building wrong resource entities
 - prevent movement through enemy entities, and implement zone of control
 - prevent movement across tiles that units can't stand on, like water (check intermediate path)
-- barbarians and other non-aligned hostiles
+- call onActionDone with affected cells so we don't delay for invisible actions 
 - resources init on grid - adjust resource extractor yields next to resources
-- win condition: total score is 2X the next largest score
 
 ## Later ##
 
 - entities add/remove themselves from gamestate?
 - unit vision considers center of cell, some cells that are partly visible are hidden - fix?
 - frame drop and lagging?
-- smooth move
+- smooth move and animations

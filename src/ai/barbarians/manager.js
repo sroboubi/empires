@@ -1,6 +1,7 @@
 import { HexGrid } from '../../hexGrid.js';
 import { attack } from '../utils.js';
 import { onActionDone } from '../utils.js';
+import { reconcileEntities } from '../../renderer.js';
 
 /**
  * Returns all border cells on the hex grid (cells with fewer than 6 neighbors).
@@ -184,7 +185,7 @@ export async function manageBarbarians(gameState, config) {
       const targetEnemy = visibleEnemies[0];
       console.log(`[Barbarians] ${entity.name} at (${entity.q}, ${entity.r}) attacking ${targetEnemy.name} (Owner: ${targetEnemy.owner?.name || 'neutral'}) at (${targetEnemy.q}, ${targetEnemy.r})`);
       attack(gameState, entity, targetEnemy, Infinity);
-      await onActionDone(gameState);
+      await onActionDone(gameState, [entity.cell, targetEnemy.cell]);
     } else {
       // Restore target cell reference if needed
       if (!entity.targetCell && entity.state.targetCell) {
@@ -229,7 +230,7 @@ export async function manageBarbarians(gameState, config) {
 
             const moved = moveAction.do(bestNeighbor, null);
             if (!moved) break;
-            await onActionDone(gameState);
+            await onActionDone(gameState, [entity.cell]);
 
             console.log(`[Barbarians] ${entity.name} moved to (${bestNeighbor.q}, ${bestNeighbor.r}) (Target: (${entity.targetCell.q}, ${entity.targetCell.r}), Remaining AP: ${entity.actionPoints})`);
           }
@@ -237,4 +238,7 @@ export async function manageBarbarians(gameState, config) {
       }
     }
   }
+
+  // ensure entities are in the right place after all moves (e.g. in case SHOW_ALL is true)
+  reconcileEntities(gameState);
 }

@@ -223,10 +223,10 @@ export class GameState {
       }).catch(err => {
         console.error('Error during onRoundEnd:', err);
         this.startTurn();
-      });      
+      });
     } else {
       this.startTurn();
-    }    
+    }
   }
 
   /**
@@ -284,6 +284,17 @@ export class GameState {
    */
   getEntityAt(q, r) {
     return this.entities.find(e => e.q === q && e.r === r) || null;
+  }
+
+  /**
+   * Returns a set of all visible cells to humans.
+   */
+  humanVisibleCells() {
+    const visibleCells = new Set();
+    this.players.filter(p => !p.isAI).forEach(p => {
+      visibleCells.add(...p.visibleCells);
+    });
+    return visibleCells;
   }
 
   /**

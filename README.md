@@ -173,14 +173,14 @@ Implement the game configuration loading system using the provided JSON architec
 2. on player turn start, focus camera on center of mass of player entities (average position of all entities)
 3. on load - gameState.deserialize can not call new HexGrid() as this will try to regen the terrain and fail because there is no terrain config provided. Make terrain config manditory in the existing hexGrid constructor. Make a new constructor for load that just takes the cells and does not try to generate new ones.
 
-## Task: Phase 14 - Conventional AI and UI
+## Task: Phase 14 - Conventional AI and UI ##
 
 1. Fix and enhance the conventional AI in ai/standard/core.js
 2. The action menu goes off the bottom of the screen when there are lots of actions - suggest making a radial menu instead or just fix current menu placement
 3. When the user clicks on an empire in the empires panel, show a panel that to visualize the player resource profile using output from player.getResourceProfile(). Use a stacked barchart or sankey diagram, or something better if you can think of it. You can use external JS libraries, but only if needed.
 4. When the user long hovers over an empire in the empires panel, show the same resource profile panel as a tooltip.
 
-## Task: Phase 15 - Enhance AI and Utilities
+## Task: Phase 15 - Enhance AI and Utilities ##
 
 1. Add functions to ai/utils.js
    - attack(gameState, sourceEntity, targetEntity, maxOrders): if target is in range and (directional x elevation) multiplier >= 1, perform attack; otherwise, if possible, and maxOrders is > 1, move to within range, preferring a cell that maximises the directional x elevation multiplier, then perform attack. Once an attack is performed, if the number of orders used is less than maxOrders and the target is still alive, and the source has enough action points, continue to perform attacks. Return number of orders used.
@@ -198,7 +198,7 @@ Implement the game configuration loading system using the provided JSON architec
 4. Add a log of what actions are taken by the AI during a turn and the rational - log these to the console.   
 5. Update the resource profile panel to show a bar for each resource indicating the current stock. If the net income is negative, add a red bar over the end portion to indicate the change in the stock over the next turn. If the net income is positive, add a green bar at the end to indicate the projected gain in the stock over the next turn.
 
-## Task: Phase 16 - AI Bug Fixes
+## Task: Phase 16 - AI Bug Fixes ##
 
 1. Remove hard coded values from the AI logic as much as possible. For example:
    - Do not hardcode resource types, except for "orders" - you should exclude orders from the stock/yield calculations
@@ -207,9 +207,19 @@ Implement the game configuration loading system using the provided JSON architec
    - Don't use entity names to determine what unit to build, look at unit attributes and actions. E.g. if you need wood, then determine what entity gives you wood, then determine what entity   can build it. If that entity is not available, then determine what entity can build it. If that entity does not exist, then determine what entity can build it. Follow this chain until you find and entity that can start the process needed to eventually build what you need to yield more wood.
    - Don't use entity names to find military units. Instead look at their damage and armor relative to other entities.
 
-## Task: Phase 17 - Visual/UX Improvements
+## Task: Phase 17 - Visual/UX Improvements ##
 
 1. When action panel opens it flies in from the top left of the screen. Fix this.
 2. When unit selected has the "move" action, show movement path and cost as mouse hovers on other cells
 3. On hover over unit, show building exclusion zone defined by entity spawnConditions.minSeparation value - it is a circle of hexes with that radius. It should be semi-transparent and use the same color as the owning player
 4. For build actions, show maintenance and yield of entities to build
+
+## Task: Phase 18 - Game setup and win conditions ##
+
+1. Game Setup Panel:
+   - Orders: Just have 2 inputs, one for max orders and another for orders per turn. Add labels to these. Use the max orders as the inital value are remove "initial" from the defaultSettings.json and from the code.
+   - The up/down arrow keys on all the number input fields look bad and don't match the styling of the rest of the panel. They have the default grey style - update them to match the panel style and colors.
+   - After the player selection div, add another section for "Win Condition". Here, have a inputs to allow changing the defaults from winCondition in defaultSettings. Each condition should have a checkbox, so it is only enabled if selected. Both, either one, or neither can be selected.
+2. Implement the win conditions as per game settings. At the end of each turn, check if any player has met the win conditions - if so, then display a victory popup with a message including the winning player and the conditions met, and end the game.
+
+      

@@ -19,6 +19,10 @@
       }
     }
   ],
+  "winCondition": {
+    "absoluteScore": 1000,
+    "relativeScore": 2
+  },
   "initialization": {
     "orders": {
       "max": 6,
