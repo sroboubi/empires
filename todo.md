@@ -22,5 +22,4 @@
 - smooth move and animations
 
 BUGS: 
-- move attack history to player, and display it
 - extra day/night cycle on player action?

@@ -230,7 +230,7 @@ async function handleCriticalDeficits(player, gameState, manifest, myEntities, e
 
 /**
  * 2. COMBAT & THREAT RESPONSE:
- * Detects visible opponents strictly via player.getOpponents(gameState) and attackers in entity.attackHistory.
+ * Detects visible opponents strictly via player.getOpponents(gameState) and attackers in player history.
  * Engages with dedicated military units with extensive diagnostic logging.
  */
 async function handleCombatAndThreats(player, gameState, manifest, myEntities, involvedCells) {
@@ -247,16 +247,29 @@ async function handleCombatAndThreats(player, gameState, manifest, myEntities, i
         }
     }
 
-    // B. Gather revenge targets from attack history of all our entities, filtered to currently visible opponents
+    // B. Gather revenge targets from player history (damage received entries from previous round)
+    // Look at entries from the previous round where damage was received or units were destroyed
     const revengeMap = new Map(); // attackerId -> { score, attackerName }
-    const allOurEntities = player.getEntities ? player.getEntities(gameState) : myEntities;
-    for (const e of allOurEntities) {
-        if (!e.attackHistory) continue;
-        for (const record of e.attackHistory) {
-            if (!record || !record.attackerId) continue;
-            const existing = revengeMap.get(record.attackerId) || { score: 0, attackerName: record.attackerName };
-            existing.score += (record.damage || 0);
-            revengeMap.set(record.attackerId, existing);
+    const currentRound = gameState.currentRound || 1;
+    const previousRound = currentRound - 1;
+    
+    // Get history entries from previous round for damage received
+    const historyEntries = player.getHistoryRange(previousRound, previousRound);
+    for (const entry of historyEntries) {
+        if (entry.category === 'damaged' || entry.category === 'destroy') {
+            // Use structured extra fields instead of parsing details string
+            const extra = entry.extra || {};
+            const attackerId = extra.attackerId;
+            const damage = extra.damage || 0;
+            
+            if (attackerId) {
+                const attackerEntity = visibleOpponents.find(en => en.id === attackerId);
+                if (attackerEntity) {
+                    const existing = revengeMap.get(attackerId) || { score: 0, attackerName: attackerEntity.name };
+                    existing.score += damage;
+                    revengeMap.set(attackerId, existing);
+                }
+            }
         }
     }
 
@@ -273,7 +286,7 @@ async function handleCombatAndThreats(player, gameState, manifest, myEntities, i
         return false;
     }
 
-    aiLog(player, 'combat', `Threat Evaluation: ${visibleOpponents.length} visible opponent unit(s) detected via getOpponents(), ${revengeTargets.length} active revenge target(s). Opponents: [${visibleOpponents.map(h => `${h.name}#${h.id.slice(-4)} (${h.owner?.name || 'Enemy'}, HP:${Math.round(h.health)}/${h.maxHealth} at (${h.q},${h.r}))`).join('; ')}]`);
+    aiLog(player, 'combat', `Threat Evaluation: ${visibleOpponents.length} visible opponent unit(s) detected via getOpponents(), ${revengeTargets.length} active revenge target(s) from history. Opponents: [${visibleOpponents.map(h => `${h.name}#${h.id.slice(-4)} (${h.owner?.name || 'Enemy'}, HP:${Math.round(h.health)}/${h.maxHealth} at (${h.q},${h.r}))`).join('; ')}]`);
 
     // C. Identify all military-capable friendly units
     const combatCapable = getEntitiesByCapability(myEntities, 'combat');

@@ -1230,6 +1230,26 @@ function openProfileModal(player) {
   nameSpan.textContent = `${player.name.toUpperCase()} — RESOURCE PROFILE`;
   content.innerHTML = renderResourceProfileHTML(player, gameState, false);
 
+  // Add event listeners for history pagination (using sessionStorage)
+  const prevBtn = document.getElementById('history-prev-page');
+  const nextBtn = document.getElementById('history-next-page');
+  
+  if (prevBtn) {
+    prevBtn.onclick = () => {
+      const currentPage = parseInt(sessionStorage.getItem('historyCurrentPage') || '0', 10);
+      sessionStorage.setItem('historyCurrentPage', String(currentPage - 1));
+      content.innerHTML = renderResourceProfileHTML(player, gameState, false);
+    };
+  }
+  
+  if (nextBtn) {
+    nextBtn.onclick = () => {
+      const currentPage = parseInt(sessionStorage.getItem('historyCurrentPage') || '0', 10);
+      sessionStorage.setItem('historyCurrentPage', String(currentPage + 1));
+      content.innerHTML = renderResourceProfileHTML(player, gameState, false);
+    };
+  }
+
   overlay.classList.add('active');
 }
 
@@ -1403,6 +1423,91 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
     `;
   }
 
+  // History panel section for full modal view
+  let historyHTML = '';
+  if (!isCompact) {
+    // Get all rounds that have history (newest first)
+    const allRounds = Array.from(player.history.keys()).sort((a, b) => b - a);
+    
+    // Pagination settings - fixed 5 rounds per page
+    const roundsPerPage = 5;
+    const currentPage = parseInt(sessionStorage.getItem('historyCurrentPage') || '0', 10);
+    const totalPages = Math.ceil(allRounds.length / roundsPerPage);
+    const validPage = Math.max(0, Math.min(currentPage, totalPages - 1));
+    
+    const startIdx = validPage * roundsPerPage;
+    const endIdx = Math.min(startIdx + roundsPerPage, allRounds.length);
+    const pageRounds = allRounds.slice(startIdx, endIdx);
+    
+    let historyEntriesHTML = '';
+    if (pageRounds.length > 0) {
+      for (const round of pageRounds) {
+        const entries = player.history.get(round) || [];
+        if (entries.length === 0) continue;
+        
+        historyEntriesHTML += `
+          <div class="history-round-group" style="margin-bottom: 12px;">
+            <div class="history-round-header" style="font-weight: 600; color: var(--accent-color); margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid var(--border-color);">
+              Round ${round} (${entries.length} events)
+            </div>
+            <div class="history-entries" style="display: flex; flex-direction: column; gap: 4px;">
+        `;
+        
+        for (const entry of entries) {
+          const time = new Date(entry.timestamp).toLocaleTimeString();
+          const categoryColors = {
+            'action': '#a78bfa',
+            'damage': '#e74c3c',
+            'spawn': '#2ecc71',
+            'destroy': '#e67e22',
+            'orders': '#f1c40f'
+          };
+          const categoryColor = categoryColors[entry.category] || 'var(--text-main)';
+          
+          historyEntriesHTML += `
+            <div class="history-entry" style="font-size: 11px; padding: 6px 8px; background: rgba(255,255,255,0.03); border-radius: 4px; border-left: 3px solid ${categoryColor};">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: ${categoryColor}; font-weight: 600; text-transform: uppercase; font-size: 10px;">${entry.category}</span>
+                <span style="color: var(--text-muted); font-size: 10px;">${time}</span>
+              </div>
+              <div style="margin-top: 2px; color: var(--text-main);">
+                ${entry.details}
+              </div>
+            </div>
+          `;
+        }
+        
+        historyEntriesHTML += `
+            </div>
+          </div>
+        `;
+      }
+    } else {
+      historyEntriesHTML = '<div style="color: var(--text-muted); font-size: 12px; text-align: center; padding: 20px;">No history entries yet.</div>';
+    }
+    
+    // Simple pagination controls (fixed 5 rounds per page)
+    const paginationHTML = totalPages > 1 ? `
+      <div class="history-pagination" style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border-color);">
+        <button id="history-prev-page" class="btn btn-small" ${validPage === 0 ? 'disabled' : ''} style="width: auto;">← Prev</button>
+        <span style="font-size: 12px; color: var(--text-muted);">Page ${validPage + 1} of ${totalPages} (5 rounds/page)</span>
+        <button id="history-next-page" class="btn btn-small" ${validPage >= totalPages - 1 ? 'disabled' : ''} style="width: auto;">Next →</button>
+      </div>
+    ` : '';
+    
+    historyHTML = `
+      <div class="divider" style="margin: 16px 0 12px 0;"></div>
+      <div class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
+        <span>History</span>
+        <span style="font-size: 11px; color: var(--text-muted);">${allRounds.length} rounds recorded</span>
+      </div>
+      <div id="history-panel-content" style="max-height: 300px; overflow-y: auto;">
+        ${historyEntriesHTML}
+      </div>
+      ${paginationHTML}
+    `;
+  }
+
   const titleHeader = isCompact ? `
     <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
       <span class="player-color-dot" style="background-color: ${player.color};"></span>
@@ -1416,6 +1521,7 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
     <div class="section-title" style="margin-bottom: 8px;">Resource Flow & Balance</div>
     ${chartsHTML}
     ${entityBreakdownHTML}
+    ${historyHTML}
   `;
 }
 

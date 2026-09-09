@@ -35,9 +35,6 @@ export class BaseEntity {
       ...(initialState || {})
     };
 
-    // Attack tracking - last 5 attackers with damage dealt
-    this.attackHistory = (initialState && initialState.attackHistory) || [];
-
     // Actions list defined on BaseEntity instance
     this.actions = [];
     this.setupActions();
@@ -275,21 +272,28 @@ export class BaseEntity {
 
     this.state.health -= effectiveDamage;
 
-    // Track attack history - keep last 5 attackers
-    if (attacker) {
-      this.attackHistory.unshift({
-        attackerId: attacker.id,
-        attackerName: attacker.name,
-        damage: effectiveDamage,
-        damageType: damageType,
-        turn: this.gameState?.currentRound || 0
+    const wasDestroyed = this.state.health <= 0;
+
+    // Add history entry for damage received
+    if (this.owner && this.gameState) {
+      const attackerName = attacker ? attacker.name : 'Unknown';
+      const attackerId = attacker ? attacker.id : null;      
+      this.owner.addHistoryEntry(this.gameState.currentRound, {
+        category: 'damaged',        
+        details: `${this.name} at (${this.q}, ${this.r}) received ${effectiveDamage} ${damageType} damage from ${attackerName}${wasDestroyed ? ' (DESTROYED)' : ''}`,
+        extra: {
+          entityName: this.name,
+          entityId: this.id,
+          damage: effectiveDamage,
+          damageType: damageType,
+          attackerName: attackerName,
+          attackerId: attackerId,
+          destroyed: wasDestroyed
+        }
       });
-      if (this.attackHistory.length > 5) {
-        this.attackHistory.pop();
-      }
     }
 
-    if (this.state.health <= 0) {
+    if (wasDestroyed) {
       this.destroy();
     }
 
@@ -297,7 +301,7 @@ export class BaseEntity {
     spawnDamageText(x, this.cell.terrain.height, z, effectiveDamage);
     spawnParticleBurst(x, this.cell.terrain.height, z, 0xff3300);
 
-    return { damageDealt: effectiveDamage, destroyed: this.destroyed };
+    return { damageDealt: effectiveDamage, destroyed: wasDestroyed };
   }
 
   /**
@@ -339,7 +343,28 @@ export class BaseEntity {
           const check = actionObj.canDo(cell, target);
           if (!check.possible) return false;
           this.spendActionCost(check.cost, check.ordersRequired);
+          const oldHealth = target.health;
           target.health = Math.min(target.maxHealth, target.health + check.healAmount);
+          const actualHeal = target.health - oldHealth;
+          
+          // Add history entry for repair action
+          if (this.owner && this.gameState) {
+            this.owner.addHistoryEntry(this.gameState.currentRound, {
+              category: 'action',              
+              details: `${this.name} at (${this.q}, ${this.r}) repaired ${target.name} for +${actualHeal} HP at (${target.q}, ${target.r})`,
+              extra: {
+                entityName: this.name,
+                entityId: this.id,
+                actionName: 'Repair',
+                targetEntityName: target.name,
+                targetEntityId: target.id,
+                healAmount: actualHeal,
+                apCost: check.cost,
+                ordersCost: check.ordersRequired
+              }
+            });
+          }
+          
           return true;
         }
       });
@@ -426,7 +451,7 @@ export class BaseEntity {
           }
           this.spendActionCost(check.apCost, check.ordersRequired);
           if (this.gameState) {
-            this.gameState.spawnEntity(buildable, cell, this.owner);
+            const newEntity = this.gameState.spawnEntity(buildable, cell, this.owner);
             const { x, z } = HexGrid.axialToPixel(cell.q, cell.r);
             spawnParticleBurst(x, cell.terrain.height, z, 0xcca055);
             if (this.state.buildCharges !== undefined) {
@@ -434,6 +459,25 @@ export class BaseEntity {
               if (this.state.buildCharges <= 0) {
                 this.destroy();
               }
+            }
+            
+            // Add history entry for build action
+            if (this.owner && newEntity) {
+              this.owner.addHistoryEntry(this.gameState.currentRound, {
+                category: 'action',                
+                details: `${this.name} at (${this.q}, ${this.r}) built ${newEntity.name} at (${cell.q}, ${cell.r})`,
+                extra: {
+                  entityName: this.name,
+                  entityId: this.id,
+                  actionName: 'Build',
+                  builtEntityName: newEntity.name,
+                  builtEntityId: newEntity.id,
+                  targetCell: { q: cell.q, r: cell.r },
+                  resourceCost: check.cost,
+                  apCost: check.apCost,
+                  ordersCost: check.ordersRequired
+                }
+              });
             }
           }
           return true;
@@ -465,8 +509,7 @@ export class BaseEntity {
       ownerId: this.owner ? this.owner.id : null,
       q: this.q,
       r: this.r,
-      state: this.state,
-      attackHistory: this.attackHistory
+      state: this.state
     };
   }
 }

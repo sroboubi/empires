@@ -4,7 +4,7 @@ import { processTurn } from "./ai/standard/smartManager.js";
 import { CONFIG } from './config.js';
 
 const turnHours = { start: 7, end: 17 }
-const orderToResourceConversionRate = 3; 
+const orderToResourceConversionRate = 3;
 
 /**
  * Player class representing a participant in the game.
@@ -43,6 +43,10 @@ export class Player {
     // Fog of war tracking sets (stores coordinate key strings "q,r")
     this.exploredCells = new Set();
     this.visibleCells = new Set();
+
+    // Player history: Map<roundNumber, Array<historyEntry>>
+    // Each entry: { round, timestamp, category, entityName, entityId, details }
+    this.history = new Map();
   }
 
   /**
@@ -51,6 +55,72 @@ export class Player {
    */
   get isAI() {
     return this.controller !== null && this.controller !== undefined;
+  }
+
+  /**
+   * Adds a history entry for a specific round.
+   * Entries are inserted at the beginning for reverse chronological order (newest first).
+   * @param {number} round - Round number
+   * @param {Object} entry - History entry object
+   * @param {string} entry.category - Category of the event (e.g., 'action', 'damage', 'spawn', 'destroy', 'orders')
+   * @param {string} [entry.entityName] - Name of the entity involved
+   * @param {string} [entry.entityId] - ID of the entity involved
+   * @param {string} entry.details - Description of what happened
+   * @param {Object} [entry.extra] - Additional structured data (e.g., attackerId, damage, actionName, etc.)
+   */
+  addHistoryEntry(round, entry) {
+    const timestamp = new Date().toISOString();
+    
+    const historyEntry = {
+      timestamp,
+      category: entry.category,
+      entityName: entry.entityName || null,
+      entityId: entry.entityId || null,
+      details: entry.details,
+      extra: entry.extra || {}
+    };
+
+    if (!this.history.has(round)) {
+      this.history.set(round, []);
+    }
+    
+    // Insert at beginning for reverse chronological order (newest first)
+    this.history.get(round).unshift(historyEntry);
+  }
+
+  /**
+   * Gets history entries for a specific round.
+   * @param {number} [round] - Specific round number, or undefined for all rounds
+   * @returns {Array} Array of history entries in reverse chronological order (newest first)
+   */
+  getHistory(round = null) {
+    if (round !== null) {
+      return this.history.get(round) || [];
+    }
+    
+    // Return all entries in reverse round order (newest round first), then reverse chronological within each round
+    const allEntries = [];
+    const sortedRounds = Array.from(this.history.keys()).sort((a, b) => b - a); // Descending round order
+    for (const r of sortedRounds) {
+      allEntries.push(...this.history.get(r));
+    }
+    return allEntries;
+  }
+
+  /**
+   * Gets history entries for a range of rounds (for pagination).
+   * @param {number} startRound - Starting round (inclusive)
+   * @param {number} endRound - Ending round (inclusive)
+   * @returns {Array} Array of history entries for the round range in reverse chronological order
+   */
+  getHistoryRange(startRound, endRound) {
+    const entries = [];
+    // Iterate from endRound down to startRound for reverse chronological order
+    for (let r = endRound; r >= startRound; r--) {
+      const roundEntries = this.history.get(r) || [];
+      entries.push(...roundEntries);
+    }
+    return entries;
   }
 
   /**
@@ -296,6 +366,7 @@ export class Player {
     this.maxOrders = this.ordersConfig.max + orderBonus;
     this.ordersPerTurn = this.ordersConfig.perTurn + orderBonus;
     const overflow = this.orders + this.ordersPerTurn - this.maxOrders;
+    console.debug(`Player ${this.name} - orders before refill: ${this.orders}, ordersPerTurn: ${this.ordersPerTurn}, maxOrders: ${this.maxOrders}, overflow: ${overflow}`);
     if (overflow > 0) {
       this.orders = this.maxOrders;
       const resourceProfile = this.getResourceProfile(gameState);
@@ -305,13 +376,25 @@ export class Player {
         const resourceNames = Object.keys(this.resources);
         pickedResource = resourceNames[Math.floor(Math.random() * resourceNames.length)];
       }
-      if (pickedResource) {        
-        this.resources[pickedResource] = (this.resources[pickedResource] || 0) + (overflow * orderToResourceConversionRate);
-        console.log(`Player ${this.name} - converting ${overflow} excess orders to ${overflow * orderToResourceConversionRate} ${pickedResource}`);
-      } 
+      if (pickedResource) {
+        const amount = overflow * orderToResourceConversionRate;
+        this.resources[pickedResource] = (this.resources[pickedResource] || 0) + amount;
+        console.log(`Player ${this.name} - converting ${overflow} excess orders to ${amount} ${pickedResource}`);
+        
+        // Add history entry for orders conversion
+        this.addHistoryEntry(gameState.currentRound, {
+          category: 'orders',          
+          details: `Converted ${overflow} excess orders to ${amount} ${pickedResource}`,
+          extra: {
+            overflowOrders: overflow,
+            resource: pickedResource,
+            amount: amount
+          }
+        });
+      }
     } else {
       this.orders += this.ordersPerTurn;
-    }    
+    }
     this.setTimeOfDay(2);
   }
 
@@ -329,6 +412,9 @@ export class Player {
    * Serializes player state.
    */
   toJSON() {
+    // Serialize history map to array of [round, entries] pairs
+    const historyArray = Array.from(this.history.entries()).map(([round, entries]) => [round, entries]);
+    
     return {
       id: this.id,
       name: this.name,
@@ -343,7 +429,8 @@ export class Player {
       startCoord: this.startCoord,
       score: this.score,
       exploredCells: Array.from(this.exploredCells),
-      visibleCells: Array.from(this.visibleCells)
+      visibleCells: Array.from(this.visibleCells),
+      history: historyArray
     };
   }
 
@@ -366,6 +453,9 @@ export class Player {
     }
     if (data.visibleCells && Array.isArray(data.visibleCells)) {
       player.visibleCells = new Set(data.visibleCells);
+    }
+    if (data.history && Array.isArray(data.history)) {
+      player.history = new Map(data.history);
     }
     return player;
   }

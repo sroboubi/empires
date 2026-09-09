@@ -222,4 +222,15 @@ Implement the game configuration loading system using the provided JSON architec
    - After the player selection div, add another section for "Win Condition". Here, have a inputs to allow changing the defaults from winCondition in defaultSettings. Each condition should have a checkbox, so it is only enabled if selected. Both, either one, or neither can be selected.
 2. Implement the win conditions as per game settings. At the end of each turn, check if any player has met the win conditions - if so, then display a victory popup with a message including the winning player and the conditions met, and end the game.
 
-      
+## Task: Phase 19 - Player history ##
+
+1. Remove attackHistory from BaseEntity class and instead add a generic history map to the Player class where the key is a game Round number, and the value is an array of history entries sorted by time.
+2. Each entry should have a round number, date/time, category (e.g. action name like "move"/"attack", recieved damage etc), entity name and ID (if applicable), details (how much damage was done to what target, what was built costing how much resources, etc)
+3. Add methods to Player class to add new entries and get entries.
+4. This should capture
+   - actions performed by owned entities
+   - damage recieved by owned entities
+   - owned entities created or destroyed
+   - events like orders being converted to resources
+5. Update ai/standard/smartManager.js to use this instead of entity.attackHistory by looking at entries from the previous turn where damage was received or units were destroyed.
+6. Enhance the Resource Profile panel. This should become a generic player info panel. In addition to current information (resources, score, units), add a panel to the side or bottom to list the player history. The history panel should be paged by some number of rounds (where rounds per page is a selectable dropdown or numeric selector of 1 to 10 and there is a next/previous page button)

@@ -255,6 +255,20 @@ export class GameState {
     try {
       const entity = new ControllerClass(meta, owner, this, cell, initialState);
       this.entities.push(entity);
+      
+      // Add history entry for entity creation
+      if (owner) {
+        owner.addHistoryEntry(this.currentRound, {
+          category: 'spawn',          
+          details: `Created ${entity.name} at (${cell.q}, ${cell.r})`,
+          extra: {
+            entityName: entity.name,
+            entityId: entity.id,
+            cell: { q: cell.q, r: cell.r }
+          }
+        });
+      }
+      
       return entity;
     } catch (err) {
       console.error(`Failed to instantiate entity controller for "${entityName}":`, err);
@@ -267,6 +281,17 @@ export class GameState {
    * @param {string} entityId
    */
   removeEntity(entityId) {
+    const entity = this.entities.find(e => e.id === entityId);    
+    if (entity && entity.owner) {      
+      entity.owner.addHistoryEntry(this.currentRound, {
+        category: 'destroy',        
+        details: `${entity.name} at (${entity.q}, ${entity.r}) was destroyed`,
+        extra: {
+          entityName: entity.name,
+          entityId: entity.id,            
+        }        
+      });
+    }
     this.entities = this.entities.filter(e => e.id !== entityId);
   }
 

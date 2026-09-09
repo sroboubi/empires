@@ -103,6 +103,10 @@ export class UnitEntity extends BaseEntity {
         const check = actionObj.canDo(cell, entity);
         if (!check.possible) return false;
 
+        const oldCell = this.cell;
+        const oldQ = this.q;
+        const oldR = this.r;
+
         if (this.gameState && this.gameState.hexGrid) {
           const dirInfo = this.gameState.hexGrid.directionTo(this, cell);
           this.facing = dirInfo.fromSource;
@@ -115,6 +119,24 @@ export class UnitEntity extends BaseEntity {
 
         // Update entity vision & player visibility on move
         this.updateVisibility();
+
+        // Add history entry for move action
+        if (this.owner && this.gameState) {
+          this.owner.addHistoryEntry(this.gameState.currentRound, {
+            category: 'action',            
+            details: `${this.name} moved from (${oldQ}, ${oldR}) to (${cell.q}, ${cell.r})`,
+            extra: {
+              entityName: this.name,
+              entityId: this.id,
+              actionName: 'Move',
+              fromCell: { q: oldQ, r: oldR },
+              toCell: { q: cell.q, r: cell.r },
+              apCost: check.cost,
+              ordersCost: check.ordersRequired,
+              pathLength: check.path ? check.path.length - 1 : 0
+            }
+          });
+        }
 
         return true;
       }
@@ -192,8 +214,33 @@ export class UnitEntity extends BaseEntity {
           }
 
           this.spendActionCost(check.cost, check.ordersRequired);
+          const targetHealthBefore = entity.health;
           entity.receiveDamage({ value: check.rawDamage, type: this.damage.type }, this);
+          const actualDamage = targetHealthBefore - entity.health;
           this.state.battleExhaustion++;
+
+          // Add history entry for attack action
+          if (this.owner && this.gameState) {
+            this.owner.addHistoryEntry(this.gameState.currentRound, {
+              category: 'action',              
+              details: `${this.name} at (${this.q}, ${this.r}) attacked ${entity.name} for ${actualDamage.toFixed(1)} ${this.damage.type} damage`,
+              extra: {
+                entityName: this.name,
+                entityId: this.id,
+                actionName: 'Attack',
+                targetEntityName: entity.name,
+                targetEntityId: entity.id,
+                damageDealt: actualDamage,
+                damageType: this.damage.type,
+                apCost: check.cost,
+                ordersCost: check.ordersRequired,
+                multiplier: check.multiplier,
+                elevationFactor: check.elevationFactor,
+                targetDestroyed: entity.destroyed
+              }
+            });
+          }
+
           return true;
         }
       });
@@ -230,8 +277,27 @@ export class UnitEntity extends BaseEntity {
         const check = actionObj.canDo(cell, entity);
         if (!check.possible) return false;
 
+        const oldFacing = this.facing;
         this.spendActionCost(check.cost, check.ordersRequired);
         this.facing = check.facingDir;
+
+        // Add history entry for face action
+        if (this.owner && this.gameState) {
+          this.owner.addHistoryEntry(this.gameState.currentRound, {
+            category: 'action',            
+            details: `${this.name} at (${this.q}, ${this.r}) faced direction ${check.facingDir} (was ${oldFacing})`,
+            extra: {
+              entityName: this.name,
+              entityId: this.id,
+              actionName: 'Face Direction',
+              oldFacing: oldFacing,
+              newFacing: check.facingDir,
+              apCost: check.cost,
+              ordersCost: check.ordersRequired
+            }
+          });
+        }
+
         return true;
       }
     });
