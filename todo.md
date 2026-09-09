@@ -11,7 +11,6 @@
 
 - prevent movement through enemy entities, and implement zone of control
 - prevent movement across tiles that units can't stand on, like water (check intermediate path)
-- call onActionDone with affected cells so we don't delay for invisible actions
 - resources init on grid - adjust resource extractor yields next to resources
 
 ## Later ##
@@ -21,5 +20,6 @@
 - frame drop and lagging?
 - smooth move and animations
 
-BUGS: 
+## BUGS ##
+
 - extra day/night cycle on player action?
