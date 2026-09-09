@@ -9,6 +9,7 @@ export var CONFIG = {
   AI_ACTION_SLEEP: 500,  // ms
   PAN_CAMERA_ON_HUMAN_TURN: true,
   PAN_CAMERA_ON_AI_TURN: false,
+  MIN_GAME_ROUNDS: 5,
 };
 
 // Parse the current URL parameters

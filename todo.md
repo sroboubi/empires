@@ -9,11 +9,9 @@
 
 ## Game ##
 
-- only allow relative score victory after some turns (maybe 5)
-- turn excess orders into some resources
 - prevent movement through enemy entities, and implement zone of control
 - prevent movement across tiles that units can't stand on, like water (check intermediate path)
-- call onActionDone with affected cells so we don't delay for invisible actions 
+- call onActionDone with affected cells so we don't delay for invisible actions
 - resources init on grid - adjust resource extractor yields next to resources
 
 ## Later ##
@@ -22,3 +20,7 @@
 - unit vision considers center of cell, some cells that are partly visible are hidden - fix?
 - frame drop and lagging?
 - smooth move and animations
+
+BUGS: 
+- move attack history to player, and display it
+- extra day/night cycle on player action?

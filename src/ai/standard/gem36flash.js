@@ -1,3 +1,5 @@
+/** DEPRECATED **/
+
 import { attack, build, repair, onActionDone } from '../utils.js';
 import { HexGrid } from '../../hexGrid.js';
 import { camelToTitle } from '../../utils.js';

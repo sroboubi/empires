@@ -564,7 +564,7 @@ function getDesaturatedTerrainMaterial(terrain) {
   return material;
 }
 
-export function drawGrid(cells, activePlayer = null) {
+export function drawGrid(gameState) {  
   while (hexGroup.children.length > 0) {
     hexGroup.remove(hexGroup.children[0]);
   }
@@ -573,22 +573,26 @@ export function drawGrid(cells, activePlayer = null) {
 
   let maxDistanceSq = 0;
 
-  Object.values(cells).forEach(cell => {
-    const isExplored = activePlayer ? activePlayer.isExplored(cell.q, cell.r) : true;
-    const isVisible = activePlayer ? activePlayer.isVisible(cell.q, cell.r) : true;
-
-    let height = cell.terrain.height;
+  Object.values(gameState.cells).forEach(cell => {    
+    const isExplored = gameState.isExploredByHuman(cell);
+    const isVisible = gameState.isVisibleToHuman(cell);
+    
+    let height;
     let material;
+    let shadows;
 
-    if (!isExplored) {
+    if (!isExplored && !CONFIG.SHOW_ALL) {
       height = hiddenTerrain.height;
       material = hiddenTerrain.material;
-    } else if (!isVisible) {
+      shadows = false;
+    } else if (!isVisible && !CONFIG.SHOW_ALL) {
       height = cell.terrain.height;
       material = getDesaturatedTerrainMaterial(cell.terrain);
+      shadows = true;
     } else {
       height = cell.terrain.height;
       material = getTerrainMaterial(cell.terrain);
+      shadows = true;
     }
 
     let geometry = geometryCache[height];
@@ -604,7 +608,7 @@ export function drawGrid(cells, activePlayer = null) {
     const distSq = x * x + z * z;
     if (distSq > maxDistanceSq) maxDistanceSq = distSq;
 
-    if (isExplored) {
+    if (shadows) {
       mesh.castShadow = true;
       mesh.receiveShadow = true;
     }
@@ -657,14 +661,11 @@ const FACING_ROTATIONS = {
 
 export function reconcileEntities(gameState) {
   const activeIds = new Set();
-  const activePlayer = gameState.activePlayer;
+  
+  gameState.entities.forEach(entity => {    
+    const isEntityVisibleInScene = gameState.isVisibleToHuman(entity.cell);
 
-  gameState.entities.forEach(entity => {
-    const isVisibleToActivePlayer = activePlayer ? activePlayer.isVisible(entity.q, entity.r) : true;
-    const isOwnedByActivePlayer = activePlayer && entity.owner && entity.owner.id === activePlayer.id;
-    const isEntityVisibleInScene = isOwnedByActivePlayer ? (activePlayer ? activePlayer.isExplored(entity.q, entity.r) : true) : isVisibleToActivePlayer;
-
-    if (isEntityVisibleInScene) {
+    if (isEntityVisibleInScene || CONFIG.SHOW_ALL) {
       activeIds.add(entity.id);
 
       const cell = entity.cell || gameState.cells[`${entity.q},${entity.r}`];
@@ -685,6 +686,7 @@ export function reconcileEntities(gameState) {
     }
   });
 
+  // remove meshes for entities that are not visible
   for (const id in entityMeshMap) {
     if (!activeIds.has(id)) {
       const meshGroup = entityMeshMap[id];

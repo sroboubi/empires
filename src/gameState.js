@@ -281,14 +281,23 @@ export class GameState {
   }
 
   /**
-   * Returns a set of all visible cells to humans.
+   * Returns true if a human can see this cell
    */
-  humanVisibleCells() {
-    const visibleCells = new Set();
-    this.players.filter(p => !p.isAI).forEach(p => {
-      visibleCells.add(...p.visibleCells);
-    });
-    return visibleCells;
+  isVisibleToHuman(cell) {
+    for (const p of this.players.filter(p => !p.isAI)) {
+      if (p.isVisible(cell.q, cell.r)) return true;
+    }    
+    return false;
+  }
+
+  /**
+   * Returns true if a human has explored this cell
+   */
+  isExploredByHuman(cell) {
+    for (const p of this.players.filter(p => !p.isAI)) {
+      if (p.isExplored(cell.q, cell.r)) return true;
+    }    
+    return false;
   }
 
   /**

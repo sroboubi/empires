@@ -369,14 +369,13 @@ export function repair(gameState, sourceEntity, targetEntity, maxOrders = 1) {
  * @param {GameState} gameState 
  */
 export async function onActionDone(gameState, involvedCells = null) {
-    if (Array.isArray(involvedCells)) {
-        const humanVisibleCells = gameState.humanVisibleCells();
-        if (!involvedCells.some(cell => humanVisibleCells.has(cell))) {
-            updatePlayersUI();
+    if (!CONFIG.SHOW_ALL && Array.isArray(involvedCells) && involvedCells.length > 0) {
+        if (!involvedCells.some(cell => gameState.isVisibleToHuman(cell))) {
+            console.debug("AI action done (no visible cells)"); 
             return;
         }
     }
-    console.log("AI action done");
+    console.log("AI action done (visible)");
     reconcileEntities(gameState);
     updatePlayersUI();
     await sleep(CONFIG.AI_ACTION_SLEEP);

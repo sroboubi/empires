@@ -4,6 +4,7 @@ import { processTurn } from "./ai/standard/smartManager.js";
 import { CONFIG } from './config.js';
 
 const turnHours = { start: 7, end: 17 }
+const orderToResourceConversionRate = 3; 
 
 /**
  * Player class representing a participant in the game.
@@ -73,8 +74,6 @@ export class Player {
     this.score.exploration = Math.round(Math.pow(this.visibleCells.size * this.exploredCells.size, 1 / 3));
     this.score.total = Math.round(Math.pow(this.score.military * this.score.economic * this.score.exploration, 1 / 3));
 
-    console.debug("Player score recalc", this.score);
-
     if (this.controller) {
       processTurn(this, gameState).then(() => {
         nextTurn();
@@ -91,12 +90,15 @@ export class Player {
    *  - totalUpkeep: An object with the total upkeep for each resource.
    *  - totalYields: An object with the total yields for each resource.
    *  - netIncome: An object with the net income for each resource (yields - upkeep).
+   *  - turnsRemaining: An object with the number of turns remaining for each resource before it runs out (Infinity if net income is non-negative).
+   *  - criticalResource: The resource that will run out first.
    */
   getResourceProfile(gameState) {
     const totalUpkeep = {};
     const totalYields = {};
     const netIncome = {};
-    const resourceKeys = new Set();
+    const turnsRemaining = {};    
+    const resourceKeys = new Set(Object.keys(this.resources));    
 
     const myEntities = this.getEntities(gameState);
     for (const entity of myEntities) {
@@ -115,16 +117,25 @@ export class Player {
       }
     }
 
+    let criticalResource = null;
     for (const resKey of resourceKeys) {
       if (totalUpkeep[resKey] == undefined) totalUpkeep[resKey] = 0;
       if (totalYields[resKey] == undefined) totalYields[resKey] = 0;
       netIncome[resKey] = totalYields[resKey] - totalUpkeep[resKey];
+      turnsRemaining[resKey] = netIncome[resKey] < 0 ? Math.floor((this.resources[resKey] || 0) / -netIncome[resKey]) : Infinity;
+      if (turnsRemaining[resKey] < Infinity) {
+        if (!criticalResource || turnsRemaining[resKey] < turnsRemaining[criticalResource]) {
+          criticalResource = resKey;
+        } 
+      }
     }
 
     return {
       totalUpkeep,
       totalYields,
       netIncome,
+      turnsRemaining,
+      criticalResource
     }
   }
 
@@ -192,7 +203,7 @@ export class Player {
    * @returns {boolean}
    */
   isExplored(q, r) {
-    return (!this.isAI && CONFIG.SHOW_ALL) || this.exploredCells.has(`${q},${r}`);
+    return this.exploredCells.has(`${q},${r}`);
   }
 
   /**
@@ -202,7 +213,7 @@ export class Player {
    * @returns {boolean}
    */
   isVisible(q, r) {
-    return (!this.isAI && CONFIG.SHOW_ALL) || this.visibleCells.has(`${q},${r}`);
+    return this.visibleCells.has(`${q},${r}`);
   }
 
   /**
@@ -280,11 +291,27 @@ export class Player {
   refillOrders(gameState) {
     let orderBonus = 0;
     this.getEntities(gameState).forEach(entity => {
-      orderBonus += entity.state?.yields?.orders || 0;
+      orderBonus += entity.state?.ordersPerTurn || 0;
     });
     this.maxOrders = this.ordersConfig.max + orderBonus;
     this.ordersPerTurn = this.ordersConfig.perTurn + orderBonus;
-    this.orders = Math.min(this.maxOrders, this.orders + this.ordersPerTurn);
+    const overflow = this.orders + this.ordersPerTurn - this.maxOrders;
+    if (overflow > 0) {
+      this.orders = this.maxOrders;
+      const resourceProfile = this.getResourceProfile(gameState);
+      console.debug(`Player ${this.name} - overflow of ${overflow} orders, converting to resources. Resource profile:`, resourceProfile);
+      let pickedResource = resourceProfile.criticalResource;
+      if (!pickedResource) {  // if nothing is critical, pick a random resource to convert overflow into
+        const resourceNames = Object.keys(this.resources);
+        pickedResource = resourceNames[Math.floor(Math.random() * resourceNames.length)];
+      }
+      if (pickedResource) {        
+        this.resources[pickedResource] = (this.resources[pickedResource] || 0) + (overflow * orderToResourceConversionRate);
+        console.log(`Player ${this.name} - converting ${overflow} excess orders to ${overflow * orderToResourceConversionRate} ${pickedResource}`);
+      } 
+    } else {
+      this.orders += this.ordersPerTurn;
+    }    
     this.setTimeOfDay(2);
   }
 

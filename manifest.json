@@ -560,9 +560,9 @@
       "yields": {
         "gold": 10,
         "food": 10,
-        "gems": 1,
-        "orders": 1
+        "gems": 1        
       },
+      "ordersPerTurn": 1,
       "rotationOffset": 0,
       "sightRange": 8,
       "buildables": [
