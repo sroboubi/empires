@@ -23,8 +23,8 @@ export class GameState {
    * @returns {Player|null}
    */
   get activePlayer() {
-    if (!this.players || this.players.length === 0) return null;
-    return this.players[this.activePlayerIndex] || this.players[0];
+    if (!this.players || this.players.length === 0 || this.activePlayerIndex < 0) return null;
+    return this.players[this.activePlayerIndex];
   }
 
   /**
@@ -218,9 +218,12 @@ export class GameState {
     if (this.players.length === 0 || this.gameOver) return;
     this.activePlayerIndex = (this.activePlayerIndex + 1) % this.players.length;
     if (this.activePlayerIndex === 0) {
-      await this.onRoundEnd();    
+      // Temporarily set to -1 so there is no active player, so event handlers don't try to execute actions
+      this.activePlayerIndex = -1;
+      await this.onRoundEnd();
+      this.activePlayerIndex = 0;
     }
-    this.startTurn();      
+    this.startTurn();
   }
 
   /**
@@ -255,11 +258,11 @@ export class GameState {
     try {
       const entity = new ControllerClass(meta, owner, this, cell, initialState);
       this.entities.push(entity);
-      
+
       // Add history entry for entity creation
       if (owner) {
         owner.addHistoryEntry(this.currentRound, {
-          category: 'spawn',          
+          category: 'spawn',
           details: `Created ${entity.name} at (${cell.q}, ${cell.r})`,
           extra: {
             entityName: entity.name,
@@ -268,7 +271,7 @@ export class GameState {
           }
         });
       }
-      
+
       return entity;
     } catch (err) {
       console.error(`Failed to instantiate entity controller for "${entityName}":`, err);
@@ -281,15 +284,15 @@ export class GameState {
    * @param {string} entityId
    */
   removeEntity(entityId) {
-    const entity = this.entities.find(e => e.id === entityId);    
-    if (entity && entity.owner) {      
+    const entity = this.entities.find(e => e.id === entityId);
+    if (entity && entity.owner) {
       entity.owner.addHistoryEntry(this.currentRound, {
-        category: 'destroy',        
+        category: 'destroy',
         details: `${entity.name} at (${entity.q}, ${entity.r}) was destroyed`,
         extra: {
           entityName: entity.name,
-          entityId: entity.id,            
-        }        
+          entityId: entity.id,
+        }
       });
     }
     this.entities = this.entities.filter(e => e.id !== entityId);
@@ -311,7 +314,7 @@ export class GameState {
   isVisibleToHuman(cell) {
     for (const p of this.players.filter(p => !p.isAI)) {
       if (p.isVisible(cell.q, cell.r)) return true;
-    }    
+    }
     return false;
   }
 
@@ -321,7 +324,7 @@ export class GameState {
   isExploredByHuman(cell) {
     for (const p of this.players.filter(p => !p.isAI)) {
       if (p.isExplored(cell.q, cell.r)) return true;
-    }    
+    }
     return false;
   }
 

@@ -1,6 +1,7 @@
 import { animateToTimeOfDay } from "./renderer.js";
 import { nextTurn } from "./main.js";
 import { processTurn } from "./ai/standard/smartManager.js";
+import { processTurn as llmTurn } from "./ai/llm/harness.js";
 import { CONFIG } from './config.js';
 
 const turnHours = { start: 7, end: 17 }
@@ -145,6 +146,12 @@ export class Player {
     this.score.total = Math.round(Math.pow(this.score.military * this.score.economic * this.score.exploration, 1 / 3));
 
     if (this.controller) {
+      llmTurn(this, gameState).then(() => {
+        console.log(`LLM turn processed for player ${this.name}`);
+      }).catch(err => {
+        console.error(`Error processing turn for LLM player ${this.name}:`, err);
+      });
+
       processTurn(this, gameState).then(() => {
         nextTurn();
       }).catch(err => {

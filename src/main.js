@@ -1228,28 +1228,31 @@ function openProfileModal(player) {
 
   colorDot.style.backgroundColor = player.color;
   nameSpan.textContent = `${player.name.toUpperCase()} — RESOURCE PROFILE`;
-  content.innerHTML = renderResourceProfileHTML(player, gameState, false);
 
-  // Add event listeners for history pagination (using sessionStorage)
-  const prevBtn = document.getElementById('history-prev-page');
-  const nextBtn = document.getElementById('history-next-page');
+  function updateModalContent() {
+    content.innerHTML = renderResourceProfileHTML(player, gameState, false);
 
-  if (prevBtn) {
-    prevBtn.onclick = () => {
-      const currentPage = parseInt(sessionStorage.getItem('historyCurrentPage') || '0', 10);
-      sessionStorage.setItem('historyCurrentPage', String(currentPage - 1));
-      content.innerHTML = renderResourceProfileHTML(player, gameState, false);
-    };
+    const prevBtn = document.getElementById('history-prev-page');
+    const nextBtn = document.getElementById('history-next-page');
+
+    if (prevBtn) {
+      prevBtn.onclick = () => {
+        const currentPage = parseInt(sessionStorage.getItem('historyCurrentPage') || '0', 10);
+        sessionStorage.setItem('historyCurrentPage', String(currentPage - 1));
+        updateModalContent();
+      };
+    }
+
+    if (nextBtn) {
+      nextBtn.onclick = () => {
+        const currentPage = parseInt(sessionStorage.getItem('historyCurrentPage') || '0', 10);
+        sessionStorage.setItem('historyCurrentPage', String(currentPage + 1));
+        updateModalContent();
+      };
+    }
   }
 
-  if (nextBtn) {
-    nextBtn.onclick = () => {
-      const currentPage = parseInt(sessionStorage.getItem('historyCurrentPage') || '0', 10);
-      sessionStorage.setItem('historyCurrentPage', String(currentPage + 1));
-      content.innerHTML = renderResourceProfileHTML(player, gameState, false);
-    };
-  }
-
+  updateModalContent();
   overlay.classList.add('active');
 }
 

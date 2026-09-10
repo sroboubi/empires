@@ -44,8 +44,9 @@ export async function processTurn(player, gameState) {
             `Adjacent hexes differ by 1 unit in q, r, or both axial co-ordinates`,
             `Players can build new entities or repair existing ones if they have the resources`,
             `Players can initiate chat with other players, which costs 1 order`,
-            `The game ends when a player achieves a score that is double the score of any other player in all attributes (military and economic)`,
+            `The game ends when a player wins by achieving a score that is >= the absolute score defined in the win conditions, or >= the highest score of the next highest score player multiplied by the relative score defined in the win conditions`,
         ],
+        winConditions: gameState.settings?.winCondition || {},
         manifest: summarizeManifest(gameState.manifestData),
         responseFormatInstructions: responseFormatInstructions
     }
@@ -89,10 +90,16 @@ function summarize(player, gameState) {
         opp.entities = opp.entities.map(summarizeEntity);
     });
 
+    const history = {};
+    for (let roundNum = gameState.currentRound; roundNum > Math.max(gameState.currentRound - 3, 1); roundNum--) {
+        history[roundNum] = player.history.get(roundNum);
+    }
+
     return {
         orders: player.orders,
         resources: player.resources,
         score: player.score,
+        history: history,
         cells: {
             visible: Array.from(player.visibleCells).map(cellKey => { return getCellInfo(gameState, cellKey) }),
             explored: Array.from(player.exploredCells.difference(player.visibleCells)).map(cellKey => { return getCellInfo(gameState, cellKey) })

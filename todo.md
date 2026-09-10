@@ -21,5 +21,3 @@
 - smooth move and animations
 
 ## BUGS ##
-
-- can do actions during barbarian move
