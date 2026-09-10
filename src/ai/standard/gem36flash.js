@@ -46,18 +46,18 @@ import { camelToTitle } from '../../utils.js';
 // -----------------------------------------------------------------------------
 
 const LOG_STYLES = {
-    turn:    'color: #3498db; font-weight: bold;',
-    econ:    'color: #f39c12;',
-    build:   'color: #2ecc71;',
+    turn: 'color: #3498db; font-weight: bold;',
+    econ: 'color: #f39c12;',
+    build: 'color: #2ecc71;',
     explore: 'color: #1abc9c;',
-    combat:  'color: #e74c3c; font-weight: bold;',
-    warn:    'color: #e67e22; font-weight: bold;',
-    detail:  'color: #95a5a6;'
+    combat: 'color: #e74c3c; font-weight: bold;',
+    warn: 'color: #e67e22; font-weight: bold;',
+    detail: 'color: #95a5a6;'
 };
 
 function aiLog(player, category, message) {
     const line = `[AI ${player.name}][${category}] ${message}`;
-    console.log(`%c${line}`, LOG_STYLES[category] || '');
+    console.debug(`%c${line}`, LOG_STYLES[category] || '');
 
     if (typeof document !== 'undefined') {
         const buf = window.__AI_LOGS || (window.__AI_LOGS = []);
@@ -390,7 +390,7 @@ function moveAlongPath(player, unit, moveAction, path, gameState, category, reas
     if (!gameState.getEntityAt(lastCell.q, lastCell.r)) {
         const fullCheck = moveAction.canDo(lastCell, null);
         if (fullCheck && fullCheck.possible && moveAction.do(lastCell, null)) {
-            aiLog(player, category, `Move ${unit.name}: advanced to (${lastCell.q},${lastCell.r}) [arrived]. Reason: ${reason}`);            
+            aiLog(player, category, `Move ${unit.name}: advanced to (${lastCell.q},${lastCell.r}) [arrived]. Reason: ${reason}`);
             return 1;
         }
     }
@@ -414,7 +414,7 @@ function moveAlongPath(player, unit, moveAction, path, gameState, category, reas
                 const note = i < path.length - 1
                     ? ` [partial: ${i + 1}/${path.length} cells, more next turn]`
                     : ` [arrived]`;
-                aiLog(player, category, `Move ${unit.name}: advanced to (${stepCell.q},${stepCell.r})${note}. Reason: ${reason}`);                
+                aiLog(player, category, `Move ${unit.name}: advanced to (${stepCell.q},${stepCell.r})${note}. Reason: ${reason}`);
                 return 1;
             }
         }
@@ -469,7 +469,7 @@ function goalHighMilitaryRevenge(player, myEntities, gameState) {
             if (unit.actionPoints !== undefined && unit.actionPoints <= 0) continue;
             const ordersUsed = attack(gameState, unit, target, player.orders);
             if (ordersUsed > 0) {
-                aiLog(player, 'combat', `REVENGE: ${unit.name} attacks ${target.name} (they dealt ${score.toFixed(0)} dmg to us). Orders used: ${ordersUsed}`);                
+                aiLog(player, 'combat', `REVENGE: ${unit.name} attacks ${target.name} (they dealt ${score.toFixed(0)} dmg to us). Orders used: ${ordersUsed}`);
                 return true;
             }
             // If we couldn't reach, try to move closer.
@@ -503,7 +503,7 @@ function goalHighEconomyStabilize(player, myEntities, gameState) {
             }
             const ordersUsed = build(gameState, step.executor, step.actionTarget);
             if (ordersUsed > 0) {
-                aiLog(player, 'build', `STABILIZE: Build ${camelToTitle(step.actionTarget)} via ${step.executor.name} (resolves ${def.res} deficit). Orders used: ${ordersUsed}`);                
+                aiLog(player, 'build', `STABILIZE: Build ${camelToTitle(step.actionTarget)} via ${step.executor.name} (resolves ${def.res} deficit). Orders used: ${ordersUsed}`);
                 return true;
             } else {
                 aiLog(player, 'detail', `Build ${cand.name} via ${step.executor.name} failed (resources/terrain/orders). Trying next candidate.`);
@@ -543,7 +543,7 @@ function goalMediumMilitaryAttack(player, myEntities, enemyEntities, gameState) 
         if (unit.actionPoints !== undefined && unit.actionPoints <= 0) continue;
         const ordersUsed = attack(gameState, unit, weakest, player.orders);
         if (ordersUsed > 0) {
-            aiLog(player, 'combat', `MED MIL: ${unit.name} attacks ${weakest.name} (superiority: ${myStrength} vs ${theirStrength}). Orders used: ${ordersUsed}`);            
+            aiLog(player, 'combat', `MED MIL: ${unit.name} attacks ${weakest.name} (superiority: ${myStrength} vs ${theirStrength}). Orders used: ${ordersUsed}`);
             return true;
         }
         // Couldn't reach: move closer so we can attack next turn.
@@ -577,7 +577,7 @@ function goalMediumEconomySurplus(player, myEntities, gameState) {
         if (step) {
             const ordersUsed = build(gameState, step.executor, step.actionTarget);
             if (ordersUsed > 0) {
-                aiLog(player, 'build', `MED ECON: surplus detected (top: ${evalRes.surplus[0].res}); training ${camelToTitle(step.actionTarget)} via ${step.executor.name}. Orders used: ${ordersUsed}`);                
+                aiLog(player, 'build', `MED ECON: surplus detected (top: ${evalRes.surplus[0].res}); training ${camelToTitle(step.actionTarget)} via ${step.executor.name}. Orders used: ${ordersUsed}`);
                 return true;
             }
         }
@@ -602,7 +602,7 @@ function goalMediumExpansionInfrastructure(player, myEntities, gameState) {
         for (const centerName of settlementCenterNames) {
             const ordersUsed = build(gameState, settler, centerName);
             if (ordersUsed > 0) {
-                aiLog(player, 'build', `MED EXPANSION: settler founds ${camelToTitle(centerName)}. Orders used: ${ordersUsed}`);                
+                aiLog(player, 'build', `MED EXPANSION: settler founds ${camelToTitle(centerName)}. Orders used: ${ordersUsed}`);
                 return true;
             }
         }
@@ -616,7 +616,7 @@ function goalMediumExpansionInfrastructure(player, myEntities, gameState) {
         if (step) {
             const ordersUsed = build(gameState, step.executor, step.actionTarget);
             if (ordersUsed > 0) {
-                aiLog(player, 'build', `MED EXPANSION: build ${camelToTitle(step.actionTarget)} via ${step.executor.name} (expands production). Orders used: ${ordersUsed}`);                
+                aiLog(player, 'build', `MED EXPANSION: build ${camelToTitle(step.actionTarget)} via ${step.executor.name} (expands production). Orders used: ${ordersUsed}`);
                 return true;
             }
         }
@@ -629,7 +629,7 @@ function goalMediumExpansionInfrastructure(player, myEntities, gameState) {
             if (step) {
                 const ordersUsed = build(gameState, step.executor, step.actionTarget);
                 if (ordersUsed > 0) {
-                    aiLog(player, 'build', `MED EXPANSION: train ${camelToTitle(step.actionTarget)} via ${step.executor.name} to enable new settlements. Orders used: ${ordersUsed}`);                    
+                    aiLog(player, 'build', `MED EXPANSION: train ${camelToTitle(step.actionTarget)} via ${step.executor.name} to enable new settlements. Orders used: ${ordersUsed}`);
                     return true;
                 }
             }
@@ -788,14 +788,14 @@ export async function processTurn(player, gameState) {
 
         // Build the goal sequence: HIGH first, then MEDIUM.
         const highGoals = [
-            { name: 'HIGH_REVENGE',      fn: () => goalHighMilitaryRevenge(player, allMyEntities, gameState) },
-            { name: 'HIGH_STABILIZE',    fn: () => goalHighEconomyStabilize(player, allMyEntities, gameState) }
+            { name: 'HIGH_REVENGE', fn: () => goalHighMilitaryRevenge(player, allMyEntities, gameState) },
+            { name: 'HIGH_STABILIZE', fn: () => goalHighEconomyStabilize(player, allMyEntities, gameState) }
         ];
         const medGoals = [
-            { name: 'MED_ATTACK',        fn: () => goalMediumMilitaryAttack(player, allMyEntities, enemyEntities, gameState) },
-            { name: 'MED_SURPLUS',       fn: () => goalMediumEconomySurplus(player, allMyEntities, gameState) },
-            { name: 'MED_EXPANSION',     fn: () => goalMediumExpansionInfrastructure(player, allMyEntities, gameState) },
-            { name: 'MED_EXPLORE',       fn: () => goalMediumExploration(player, allMyEntities, gameState) }
+            { name: 'MED_ATTACK', fn: () => goalMediumMilitaryAttack(player, allMyEntities, enemyEntities, gameState) },
+            { name: 'MED_SURPLUS', fn: () => goalMediumEconomySurplus(player, allMyEntities, gameState) },
+            { name: 'MED_EXPANSION', fn: () => goalMediumExpansionInfrastructure(player, allMyEntities, gameState) },
+            { name: 'MED_EXPLORE', fn: () => goalMediumExploration(player, allMyEntities, gameState) }
         ];
 
         // Try every goal in turn; the first one that both succeeds AND consumes an
@@ -838,8 +838,8 @@ export async function processTurn(player, gameState) {
         }
 
         aiLog(player, 'turn', `Order used (${chosenGoal.name}). Orders left: ${player.orders} (was ${actionStartOrders})`);
-        await onActionDone(gameState);        
+        await onActionDone(gameState);
     }
 
-    aiLog(player, 'turn', `=== Turn Completed. Remaining orders: ${player.orders} | Resources: ${fmtRes(player.resources)} ===`);    
+    aiLog(player, 'turn', `=== Turn Completed. Remaining orders: ${player.orders} | Resources: ${fmtRes(player.resources)} ===`);
 }

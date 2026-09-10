@@ -97,7 +97,7 @@ export async function manageBarbarians(gameState, config) {
       }
 
       if (toSpawn.length > 0) {
-        console.log(`[Barbarians] Round ${gameState.currentRound}: Spawning horde (${toSpawn.join(', ')})`);
+        console.debug(`[Barbarians] Round ${gameState.currentRound}: Spawning horde (${toSpawn.join(', ')})`);
 
         // Shuffle spawn queue
         toSpawn.sort(() => Math.random() - 0.5);
@@ -109,7 +109,7 @@ export async function manageBarbarians(gameState, config) {
 
         for (const unitName of toSpawn) {
           if (availableSlots <= 0) {
-            console.log(`[Barbarians] Max barbarian population cap (${maxNumber}) reached.`);
+            console.debug(`[Barbarians] Max barbarian population cap (${maxNumber}) reached.`);
             break;
           }
 
@@ -138,7 +138,7 @@ export async function manageBarbarians(gameState, config) {
                 entity.targetCell = target;
                 entity.state.targetCell = { q: target.q, r: target.r };
               }
-              console.log(`[Barbarians] Spawned ${entity.name} at (${spawnCell.q}, ${spawnCell.r}), marching to (${target?.q}, ${target?.r})`);
+              console.debug(`[Barbarians] Spawned ${entity.name} at (${spawnCell.q}, ${spawnCell.r}), marching to (${target?.q}, ${target?.r})`);
             }
           } else {
             console.warn(`[Barbarians] Could not find suitable border hex to spawn ${unitName}`);
@@ -161,7 +161,7 @@ export async function manageBarbarians(gameState, config) {
 
     // Age removal check
     if (entity.age > maxAge) {
-      console.log(`[Barbarians] ${entity.name} at (${entity.q}, ${entity.r}) died of old age (age ${entity.age} > ${maxAge})`);
+      console.debug(`[Barbarians] ${entity.name} at (${entity.q}, ${entity.r}) died of old age (age ${entity.age} > ${maxAge})`);
       entity.destroy();
       continue;
     }
@@ -183,7 +183,7 @@ export async function manageBarbarians(gameState, config) {
         return a.health - b.health;
       });
       const targetEnemy = visibleEnemies[0];
-      console.log(`[Barbarians] ${entity.name} at (${entity.q}, ${entity.r}) attacking ${targetEnemy.name} (Owner: ${targetEnemy.owner?.name || 'neutral'}) at (${targetEnemy.q}, ${targetEnemy.r})`);
+      console.debug(`[Barbarians] ${entity.name} at (${entity.q}, ${entity.r}) attacking ${targetEnemy.name} (Owner: ${targetEnemy.owner?.name || 'neutral'}) at (${targetEnemy.q}, ${targetEnemy.r})`);
       attack(gameState, entity, targetEnemy, Infinity);
       await onActionDone(gameState, [entity.cell, targetEnemy.cell]);
     } else {
@@ -197,7 +197,7 @@ export async function manageBarbarians(gameState, config) {
         entity.targetCell = findOppositeBorderCell(entity.cell || entity, gameState.hexGrid, entity);
         if (entity.targetCell) {
           entity.state.targetCell = { q: entity.targetCell.q, r: entity.targetCell.r };
-          console.log(`[Barbarians] ${entity.name} at (${entity.q}, ${entity.r}) assigned new target cell at (${entity.targetCell.q}, ${entity.targetCell.r})`);
+          console.debug(`[Barbarians] ${entity.name} at (${entity.q}, ${entity.r}) assigned new target cell at (${entity.targetCell.q}, ${entity.targetCell.r})`);
         }
       }
 
@@ -211,7 +211,7 @@ export async function manageBarbarians(gameState, config) {
               entity.targetCell = findOppositeBorderCell(entity.cell || entity, gameState.hexGrid, entity);
               if (entity.targetCell) {
                 entity.state.targetCell = { q: entity.targetCell.q, r: entity.targetCell.r };
-                console.log(`[Barbarians] ${entity.name} reached proximity of target. New target assigned at (${entity.targetCell.q}, ${entity.targetCell.r})`);
+                console.debug(`[Barbarians] ${entity.name} reached proximity of target. New target assigned at (${entity.targetCell.q}, ${entity.targetCell.r})`);
               }
             }
 
@@ -232,7 +232,7 @@ export async function manageBarbarians(gameState, config) {
             if (!moved) break;
             await onActionDone(gameState, [entity.cell]);
 
-            console.log(`[Barbarians] ${entity.name} moved to (${bestNeighbor.q}, ${bestNeighbor.r}) (Target: (${entity.targetCell.q}, ${entity.targetCell.r}), Remaining AP: ${entity.actionPoints})`);
+            console.debug(`[Barbarians] ${entity.name} moved to (${bestNeighbor.q}, ${bestNeighbor.r}) (Target: (${entity.targetCell.q}, ${entity.targetCell.r}), Remaining AP: ${entity.actionPoints})`);
           }
         }
       }

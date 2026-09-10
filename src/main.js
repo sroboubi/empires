@@ -124,7 +124,7 @@ async function init() {
     // Open Setup Modal automatically on initial load
     openSetupModal(false);
 
-    console.log('Empire game initialized successfully.');
+    console.log('Game initialized successfully.');
   } catch (err) {
     console.error('Fatal initialization error:', err);
     alert('Failed to load game config: ' + err.message);
@@ -1233,7 +1233,7 @@ function openProfileModal(player) {
   // Add event listeners for history pagination (using sessionStorage)
   const prevBtn = document.getElementById('history-prev-page');
   const nextBtn = document.getElementById('history-next-page');
-  
+
   if (prevBtn) {
     prevBtn.onclick = () => {
       const currentPage = parseInt(sessionStorage.getItem('historyCurrentPage') || '0', 10);
@@ -1241,7 +1241,7 @@ function openProfileModal(player) {
       content.innerHTML = renderResourceProfileHTML(player, gameState, false);
     };
   }
-  
+
   if (nextBtn) {
     nextBtn.onclick = () => {
       const currentPage = parseInt(sessionStorage.getItem('historyCurrentPage') || '0', 10);
@@ -1428,23 +1428,23 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
   if (!isCompact) {
     // Get all rounds that have history (newest first)
     const allRounds = Array.from(player.history.keys()).sort((a, b) => b - a);
-    
+
     // Pagination settings - fixed 5 rounds per page
     const roundsPerPage = 5;
     const currentPage = parseInt(sessionStorage.getItem('historyCurrentPage') || '0', 10);
     const totalPages = Math.ceil(allRounds.length / roundsPerPage);
     const validPage = Math.max(0, Math.min(currentPage, totalPages - 1));
-    
+
     const startIdx = validPage * roundsPerPage;
     const endIdx = Math.min(startIdx + roundsPerPage, allRounds.length);
     const pageRounds = allRounds.slice(startIdx, endIdx);
-    
+
     let historyEntriesHTML = '';
     if (pageRounds.length > 0) {
       for (const round of pageRounds) {
         const entries = player.history.get(round) || [];
         if (entries.length === 0) continue;
-        
+
         historyEntriesHTML += `
           <div class="history-round-group" style="margin-bottom: 12px;">
             <div class="history-round-header" style="font-weight: 600; color: var(--accent-color); margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid var(--border-color);">
@@ -1452,7 +1452,7 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
             </div>
             <div class="history-entries" style="display: flex; flex-direction: column; gap: 4px;">
         `;
-        
+
         for (const entry of entries) {
           const time = new Date(entry.timestamp).toLocaleTimeString();
           const categoryColors = {
@@ -1463,7 +1463,7 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
             'orders': '#f1c40f'
           };
           const categoryColor = categoryColors[entry.category] || 'var(--text-main)';
-          
+
           historyEntriesHTML += `
             <div class="history-entry" style="font-size: 11px; padding: 6px 8px; background: rgba(255,255,255,0.03); border-radius: 4px; border-left: 3px solid ${categoryColor};">
               <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -1476,7 +1476,7 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
             </div>
           `;
         }
-        
+
         historyEntriesHTML += `
             </div>
           </div>
@@ -1485,7 +1485,7 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
     } else {
       historyEntriesHTML = '<div style="color: var(--text-muted); font-size: 12px; text-align: center; padding: 20px;">No history entries yet.</div>';
     }
-    
+
     // Simple pagination controls (fixed 5 rounds per page)
     const paginationHTML = totalPages > 1 ? `
       <div class="history-pagination" style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border-color);">
@@ -1494,7 +1494,7 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
         <button id="history-next-page" class="btn btn-small" ${validPage >= totalPages - 1 ? 'disabled' : ''} style="width: auto;">Next →</button>
       </div>
     ` : '';
-    
+
     historyHTML = `
       <div class="divider" style="margin: 16px 0 12px 0;"></div>
       <div class="section-title" style="display: flex; justify-content: space-between; align-items: center;">

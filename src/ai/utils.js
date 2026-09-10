@@ -371,11 +371,11 @@ export function repair(gameState, sourceEntity, targetEntity, maxOrders = 1) {
 export async function onActionDone(gameState, involvedCells = null) {
     if (!CONFIG.SHOW_ALL && Array.isArray(involvedCells) && involvedCells.length > 0) {
         if (!involvedCells.some(cell => gameState.isVisibleToHuman(cell))) {
-            console.debug("AI action done (no visible cells)"); 
+            console.debug("AI action done (no visible cells)");
             return;
         }
     }
-    console.log("AI action done (visible)");
+    console.debug("AI action done (visible)");
     reconcileEntities(gameState);
     updatePlayersUI();
     await sleep(CONFIG.AI_ACTION_SLEEP);
@@ -393,7 +393,7 @@ const LOG_STYLES = {
 
 export function aiLog(player, category, message) {
     const pName = (typeof player === 'string' ? player : player?.name) || 'AI';
-    console.log(`%c[AI ${pName}][${category}] ${message}`, LOG_STYLES[category] || '');
+    console.debug(`%c[AI ${pName}][${category}] ${message}`, LOG_STYLES[category] || '');
 }
 
 // --- Capability Helpers ---

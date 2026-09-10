@@ -217,8 +217,18 @@ export class BaseEntity {
         this.owner.consumeResources(cost);
         this.active = true;
       } else {
-        console.log(this.owner.name, this.id, "Insufficient resources to maintain entity.", this.owner.resources, cost);
+        console.debug(this.owner.name, this.id, "Insufficient resources to maintain entity.", this.owner.resources, cost);
         this.active = false;
+        this.owner.addHistoryEntry(this.gameState.currentRound, {
+          category: 'inactivated',
+          details: `${this.name} at (${this.q}, ${this.r}) inactivated due to lack of resources to maintain`,
+          extra: {
+            entityName: this.name,
+            entityId: this.id,
+            resources: { ...this.owner.resources },
+            cost: cost
+          }
+        });
       }
     } else {
       this.active = true;
@@ -277,9 +287,9 @@ export class BaseEntity {
     // Add history entry for damage received
     if (this.owner && this.gameState) {
       const attackerName = attacker ? attacker.name : 'Unknown';
-      const attackerId = attacker ? attacker.id : null;      
+      const attackerId = attacker ? attacker.id : null;
       this.owner.addHistoryEntry(this.gameState.currentRound, {
-        category: 'damaged',        
+        category: 'damaged',
         details: `${this.name} at (${this.q}, ${this.r}) received ${effectiveDamage} ${damageType} damage from ${attackerName}${wasDestroyed ? ' (DESTROYED)' : ''}`,
         extra: {
           entityName: this.name,
@@ -346,11 +356,11 @@ export class BaseEntity {
           const oldHealth = target.health;
           target.health = Math.min(target.maxHealth, target.health + check.healAmount);
           const actualHeal = target.health - oldHealth;
-          
+
           // Add history entry for repair action
           if (this.owner && this.gameState) {
             this.owner.addHistoryEntry(this.gameState.currentRound, {
-              category: 'action',              
+              category: 'action',
               details: `${this.name} at (${this.q}, ${this.r}) repaired ${target.name} for +${actualHeal} HP at (${target.q}, ${target.r})`,
               extra: {
                 entityName: this.name,
@@ -364,7 +374,7 @@ export class BaseEntity {
               }
             });
           }
-          
+
           return true;
         }
       });
@@ -460,11 +470,11 @@ export class BaseEntity {
                 this.destroy();
               }
             }
-            
+
             // Add history entry for build action
             if (this.owner && newEntity) {
               this.owner.addHistoryEntry(this.gameState.currentRound, {
-                category: 'action',                
+                category: 'action',
                 details: `${this.name} at (${this.q}, ${this.r}) built ${newEntity.name} at (${cell.q}, ${cell.r})`,
                 extra: {
                   entityName: this.name,

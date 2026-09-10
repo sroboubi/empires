@@ -19,8 +19,11 @@ let groundBaseMesh = null;
 let exclusionZoneGroup = null; // Group of meshes showing entity minSeparation exclusion zone
 let exclusionZoneGeometry = null;
 
+// Module-level reference to track the running time-of-day animation
+let activeTimeEffect = null;
+
 // State tracking for time of day (0 to 24)
-let currentHour = 12; // Starts at Noon
+let currentHour = 0; // Starts at Midnight
 
 const sunDirection = new THREE.Vector3();
 
@@ -245,7 +248,7 @@ export function updateGroundBase(radius) {
   scene.add(groundBaseMesh);
 }
 
-export function setTimeOfDay(hour) {
+function setTimeOfDay(hour) {
   currentHour = hour % 24;
   if (currentHour < 0) currentHour += 24;
 
@@ -304,22 +307,36 @@ export function setTimeOfDay(hour) {
 
 /**
  * Smoothly animates the time of day from the current hour to a target hour.
+ * Cancels any existing in-flight time animation to prevent stacking/jitter.
  * @param {number} targetHour - Destination time of day (0 to 24)
  * @param {number} duration - Animation speed in seconds (default 1.5s)
  * @param {Function} onComplete - Optional callback when animation finishes
  */
 export function animateToTimeOfDay(targetHour, duration = 1.5, onComplete = null) {
+  // 1. If a time animation is already running, cancel and remove it immediately
+  if (activeTimeEffect) {
+    const index = activeEffects.indexOf(activeTimeEffect);
+    if (index !== -1) {
+      activeEffects.splice(index, 1);
+    }
+    activeTimeEffect = null;
+  }
+
+  // 2. Start from current hour (where the sun currently is mid-animation)
   const startHour = currentHour;
   let endHour = targetHour;
 
-  // Handle forward progression across midnight (e.g. moving from 18 to 6 next morning)
+  console.debug("Animating time of day from " + startHour + " to " + endHour);
+
+  // Handle forward progression across midnight (e.g., moving from 23 to 2)
   if (endHour <= startHour) {
     endHour += 24;
   }
 
   let elapsed = 0;
 
-  activeEffects.push({
+  // 3. Define and register the new animation effect
+  const timeEffect = {
     update: (dt) => {
       elapsed += dt;
       const progress = Math.min(elapsed / duration, 1.0);
@@ -330,12 +347,16 @@ export function animateToTimeOfDay(targetHour, duration = 1.5, onComplete = null
 
       if (progress >= 1.0) {
         currentHour = targetHour % 24;
+        activeTimeEffect = null; // Clear reference upon completion
         if (onComplete) onComplete();
-        return false;
+        return false; // Remove from activeEffects array
       }
       return true;
     }
-  });
+  };
+
+  activeTimeEffect = timeEffect;
+  activeEffects.push(timeEffect);
 }
 
 /**
@@ -564,7 +585,7 @@ function getDesaturatedTerrainMaterial(terrain) {
   return material;
 }
 
-export function drawGrid(gameState) {  
+export function drawGrid(gameState) {
   while (hexGroup.children.length > 0) {
     hexGroup.remove(hexGroup.children[0]);
   }
@@ -573,10 +594,10 @@ export function drawGrid(gameState) {
 
   let maxDistanceSq = 0;
 
-  Object.values(gameState.cells).forEach(cell => {    
+  Object.values(gameState.cells).forEach(cell => {
     const isExplored = gameState.isExploredByHuman(cell);
     const isVisible = gameState.isVisibleToHuman(cell);
-    
+
     let height;
     let material;
     let shadows;
@@ -661,8 +682,8 @@ const FACING_ROTATIONS = {
 
 export function reconcileEntities(gameState) {
   const activeIds = new Set();
-  
-  gameState.entities.forEach(entity => {    
+
+  gameState.entities.forEach(entity => {
     const isEntityVisibleInScene = gameState.isVisibleToHuman(entity.cell);
 
     if (isEntityVisibleInScene || CONFIG.SHOW_ALL) {

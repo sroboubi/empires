@@ -70,7 +70,7 @@ export class Player {
    */
   addHistoryEntry(round, entry) {
     const timestamp = new Date().toISOString();
-    
+
     const historyEntry = {
       timestamp,
       category: entry.category,
@@ -83,7 +83,7 @@ export class Player {
     if (!this.history.has(round)) {
       this.history.set(round, []);
     }
-    
+
     // Insert at beginning for reverse chronological order (newest first)
     this.history.get(round).unshift(historyEntry);
   }
@@ -97,7 +97,7 @@ export class Player {
     if (round !== null) {
       return this.history.get(round) || [];
     }
-    
+
     // Return all entries in reverse round order (newest round first), then reverse chronological within each round
     const allEntries = [];
     const sortedRounds = Array.from(this.history.keys()).sort((a, b) => b - a); // Descending round order
@@ -137,7 +137,7 @@ export class Player {
     for (const entity of ownedEntities) {
       this.score.military += entity.state.score.military;
       this.score.economic += entity.state.score.economic;
-      entity.step(gameState);      
+      entity.step(gameState);
     }
 
     this.updateVisibility(gameState);
@@ -167,8 +167,8 @@ export class Player {
     const totalUpkeep = {};
     const totalYields = {};
     const netIncome = {};
-    const turnsRemaining = {};    
-    const resourceKeys = new Set(Object.keys(this.resources));    
+    const turnsRemaining = {};
+    const resourceKeys = new Set(Object.keys(this.resources));
 
     const myEntities = this.getEntities(gameState);
     for (const entity of myEntities) {
@@ -196,7 +196,7 @@ export class Player {
       if (turnsRemaining[resKey] < Infinity) {
         if (!criticalResource || turnsRemaining[resKey] < turnsRemaining[criticalResource]) {
           criticalResource = resKey;
-        } 
+        }
       }
     }
 
@@ -351,7 +351,7 @@ export class Player {
   consumeOrders(count = 1) {
     if (!this.hasOrders(count)) return false;
     this.orders -= count;
-    this.setTimeOfDay(1);
+    this.setOrdersTimeOfDay(1);
     return true;
   }
 
@@ -379,11 +379,11 @@ export class Player {
       if (pickedResource) {
         const amount = overflow * orderToResourceConversionRate;
         this.resources[pickedResource] = (this.resources[pickedResource] || 0) + amount;
-        console.log(`Player ${this.name} - converting ${overflow} excess orders to ${amount} ${pickedResource}`);
-        
+        console.debug(`Player ${this.name} - converting ${overflow} excess orders to ${amount} ${pickedResource}`);
+
         // Add history entry for orders conversion
         this.addHistoryEntry(gameState.currentRound, {
-          category: 'orders',          
+          category: 'orders',
           details: `Converted ${overflow} excess orders to ${amount} ${pickedResource}`,
           extra: {
             overflowOrders: overflow,
@@ -395,14 +395,14 @@ export class Player {
     } else {
       this.orders += this.ordersPerTurn;
     }
-    this.setTimeOfDay(2);
+    this.setOrdersTimeOfDay(2);
   }
 
   /**
    * Changes the time of day based on the number of orders remaining.
    * @param {number} [duration=1] - Duration of the animation in seconds
    */
-  setTimeOfDay(duration = 1) {
+  setOrdersTimeOfDay(duration = 1) {
     const orderFraction = this.orders / this.maxOrders;
     const timeOfDay = turnHours.end - (turnHours.end - turnHours.start) * orderFraction;
     animateToTimeOfDay(timeOfDay, duration);
@@ -414,7 +414,7 @@ export class Player {
   toJSON() {
     // Serialize history map to array of [round, entries] pairs
     const historyArray = Array.from(this.history.entries()).map(([round, entries]) => [round, entries]);
-    
+
     return {
       id: this.id,
       name: this.name,

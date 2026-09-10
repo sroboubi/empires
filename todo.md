@@ -22,4 +22,4 @@
 
 ## BUGS ##
 
-- extra day/night cycle on player action?
+- can do actions during barbarian move
