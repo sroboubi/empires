@@ -59,8 +59,8 @@ export class UnitEntity extends BaseEntity {
     this.state.battleExhaustion = 1;
     if (this.active) {
       const unusedAP = Math.max(0, this.state.actionPoints);
-      if (unusedAP > 0) {
-        this.health = Math.min(this.maxHealth, this.health + unusedAP);
+      if (unusedAP > 0 && this.state.healthRegenScale > 0) {
+        this.health = Math.min(this.maxHealth, this.health + this.state.healthRegenScale * unusedAP);
       }
       this.state.actionPoints = this.maxActionPoints;
     }
@@ -123,7 +123,7 @@ export class UnitEntity extends BaseEntity {
         // Add history entry for move action
         if (this.owner && this.gameState) {
           this.owner.addHistoryEntry(this.gameState.currentRound, {
-            category: 'action',            
+            category: 'action',
             details: `${this.name} moved from (${oldQ}, ${oldR}) to (${cell.q}, ${cell.r})`,
             extra: {
               entityName: this.name,
@@ -222,7 +222,7 @@ export class UnitEntity extends BaseEntity {
           // Add history entry for attack action
           if (this.owner && this.gameState) {
             this.owner.addHistoryEntry(this.gameState.currentRound, {
-              category: 'action',              
+              category: 'action',
               details: `${this.name} at (${this.q}, ${this.r}) attacked ${entity.name} for ${actualDamage.toFixed(1)} ${this.damage.type} damage`,
               extra: {
                 entityName: this.name,
@@ -284,7 +284,7 @@ export class UnitEntity extends BaseEntity {
         // Add history entry for face action
         if (this.owner && this.gameState) {
           this.owner.addHistoryEntry(this.gameState.currentRound, {
-            category: 'action',            
+            category: 'action',
             details: `${this.name} at (${this.q}, ${this.r}) faced direction ${check.facingDir} (was ${oldFacing})`,
             extra: {
               entityName: this.name,

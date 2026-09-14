@@ -339,7 +339,7 @@ export class BaseEntity {
           const cost = this.actionPoints;
           const affordability = this.checkActionAffordability(cost);
           if (!affordability.possible) return affordability;
-          const healAmount = 2 * cost;
+          const healAmount = (this.state.repairAmountPerAp || 1) * cost;
           return {
             possible: true,
             reason: `Repair ${target.name.toUpperCase()} for +${healAmount} HP consuming all ${cost} AP and 1 order.`,

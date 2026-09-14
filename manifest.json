@@ -59,7 +59,7 @@
     {
       "name": "Tundra",
       "height": 1.2,
-      "movementCost": 1.2,
+      "movementCost": 1.1,
       "material": {
         "color": "#e0d3bf",
         "roughness": 0.5,
@@ -80,7 +80,7 @@
     {
       "name": "Swamp",
       "height": 1.1,
-      "movementCost": 1.8,
+      "movementCost": 1.4,
       "material": {
         "color": "#163b12",
         "roughness": 0.8,
@@ -151,7 +151,7 @@
     {
       "name": "FootHills",
       "height": 1.4,
-      "movementCost": 1.5,
+      "movementCost": 1.3,
       "material": {
         "color": "#768749",
         "roughness": 0.8,
@@ -172,7 +172,7 @@
     {
       "name": "Hills",
       "height": 1.6,
-      "movementCost": 1.8,
+      "movementCost": 1.4,
       "material": {
         "color": "#ab771d",
         "roughness": 0.8,
@@ -193,7 +193,7 @@
     {
       "name": "Mountains",
       "height": 2.0,
-      "movementCost": 3,
+      "movementCost": 2,
       "material": {
         "color": "#797d6f",
         "roughness": 0.7,
@@ -212,9 +212,9 @@
       }
     },
     {
-      "name": "Snowy Hills",
+      "name": "SnowyHills",
       "height": 1.5,
-      "movementCost": 2,
+      "movementCost": 1.7,
       "material": {
         "color": "#ffffff",
         "roughness": 0.8,
@@ -233,9 +233,9 @@
       }
     },
     {
-      "name": "Snowy Mountains",
+      "name": "SnowyMountains",
       "height": 2.0,
-      "movementCost": 4,
+      "movementCost": 2.5,
       "material": {
         "color": "#ffffff",
         "roughness": 0.7,
@@ -265,6 +265,7 @@
       "actionPoints": 6,
       "maxActionPoints": 6,
       "attackCostScale": 1.2,
+      "healthRegenScale": 10,
       "damage": {
         "value": 60,
         "type": "slashing",
@@ -302,6 +303,7 @@
       "actionPoints": 6,
       "maxActionPoints": 6,
       "attackCostScale": 1.4,
+      "healthRegenScale": 10,
       "damage": {
         "value": 100,
         "type": "slashing",
@@ -339,6 +341,7 @@
       "actionPoints": 5,
       "maxActionPoints": 5,
       "attackCostScale": 1.5,
+      "healthRegenScale": 5,
       "damage": {
         "value": 50,
         "type": "slashing",
@@ -376,6 +379,8 @@
       "actionPoints": 5,
       "maxActionPoints": 5,
       "attackCostScale": 2.0,
+      "healthRegenScale": 5,
+      "repairAmountPerAp": 20,
       "damage": {
         "value": 10,
         "type": "blunt",
@@ -426,6 +431,7 @@
       "actionPoints": 5,
       "maxActionPoints": 5,
       "attackCostScale": 2.0,
+      "healthRegenScale": 5,
       "damage": {
         "value": 10,
         "type": "blunt",
@@ -467,6 +473,7 @@
       "actionPoints": 6,
       "maxActionPoints": 6,
       "attackCostScale": 1.0,
+      "healthRegenScale": 5,
       "damage": {
         "value": 30,
         "type": "piercing",
@@ -504,11 +511,12 @@
       "modelUrl": "./assets/units/horseman-optimized.glb",
       "size": 1.5,
       "controllerUrl": "./src/controllers/horseman.js",
-      "health": 250,
-      "maxHealth": 250,
+      "health": 200,
+      "maxHealth": 200,
       "actionPoints": 8,
       "maxActionPoints": 8,
       "attackCostScale": 1.2,
+      "healthRegenScale": 5,
       "damage": {
         "value": 60,
         "type": "piercing",
@@ -560,7 +568,7 @@
       "yields": {
         "gold": 10,
         "food": 10,
-        "gems": 1        
+        "gems": 1
       },
       "ordersPerTurn": 1,
       "rotationOffset": 0,

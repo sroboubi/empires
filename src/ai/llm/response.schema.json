@@ -1,35 +1,41 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "LLMTurnResponse",
   "type": "object",
-  "required": [
-    "type",
-    "thoughtProcess"
-  ],
-  "properties": {
-    "thoughtProcess": {
-      "type": "string",
-      "description": "Brief strategic reasoning."
-    }
-  },
-  "oneOf": [
+  "anyOf": [
     {
+      "type": "object",
+      "description": "Execute a game action (Move, Attack, Repair, Build).",
+      "required": [
+        "type",
+        "thoughtProcess",
+        "entityId",
+        "actionName",
+        "target"
+      ],
       "properties": {
         "type": {
-          "const": "COMMAND"
+          "type": "string",
+          "enum": [
+            "COMMAND"
+          ]
+        },
+        "thoughtProcess": {
+          "type": "string",
+          "description": "Brief strategic reasoning behind this turn's decision."
         },
         "entityId": {
           "type": "string",
-          "description": "ID of owned entity executing the order."
+          "description": "ID of your owned entity executing the order."
         },
         "actionName": {
           "type": "string",
-          "description": "Action name from entity catalog."
+          "description": "Action name from catalog (e.g. Move, Attack, Repair, Build)."
         },
         "target": {
           "type": "object",
-          "oneOf": [
+          "description": "Target payload. Must specify exactly ONE target field.",
+          "anyOf": [
             {
+              "type": "object",
               "required": [
                 "cell"
               ],
@@ -49,75 +55,84 @@
                     }
                   }
                 }
-              },
-              "additionalProperties": false
+              }
             },
             {
+              "type": "object",
               "required": [
                 "entityId"
               ],
               "properties": {
                 "entityId": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Target enemy or friendly entity ID (for Attack/Repair)."
                 }
-              },
-              "additionalProperties": false
+              }
             },
             {
+              "type": "object",
               "required": [
                 "entityName"
               ],
               "properties": {
                 "entityName": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Target construct or unit type name (for Build)."
                 }
-              },
-              "additionalProperties": false
+              }
             }
           ]
         }
-      },
-      "required": [
-        "type",
-        "thoughtProcess",
-        "entityId",
-        "actionName",
-        "target"
-      ],
-      "additionalProperties": false
+      }
     },
     {
-      "properties": {
-        "type": {
-          "const": "CHAT"
-        },
-        "targetPlayerId": {
-          "type": "string",
-          "description": "ID of opponent player to open chat with."
-        }
-      },
+      "type": "object",
+      "description": "Initiate diplomacy with an opponent.",
       "required": [
         "type",
         "thoughtProcess",
         "targetPlayerId"
       ],
-      "additionalProperties": false
-    },
-    {
       "properties": {
         "type": {
-          "const": "END_TURN"
-        },
-        "note": {
           "type": "string",
-          "description": "Note or reminder to yourself for your next turn."
+          "enum": [
+            "CHAT"
+          ]
+        },
+        "thoughtProcess": {
+          "type": "string",
+          "description": "Brief strategic reasoning."
+        },
+        "targetPlayerId": {
+          "type": "string",
+          "description": "ID of opponent player to open chat with."
         }
-      },
+      }
+    },
+    {
+      "type": "object",
+      "description": "End turn and save remaining orders.",
       "required": [
         "type",
         "thoughtProcess"
       ],
-      "additionalProperties": false
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "END_TURN"
+          ]
+        },
+        "thoughtProcess": {
+          "type": "string",
+          "description": "Brief strategic reasoning."
+        },
+        "note": {
+          "type": "string",
+          "description": "Strategic reminder to yourself for your next turn."
+        }
+      }
     }
   ]
 }

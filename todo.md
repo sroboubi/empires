@@ -20,4 +20,8 @@
 - frame drop and lagging?
 - smooth move and animations
 
+## AI ##
+
+- remove nulls from JSON inputs to LLM
+
 ## BUGS ##

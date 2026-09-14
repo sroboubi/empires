@@ -164,6 +164,7 @@ export class Player {
    * Calculates resource profile of the player given current upkeep and yields.
    * @param {GameState} gameState
    * @returns {Object} An object with the following properties:
+   *  - stock: An object with the stock of each resource (what player currently has).
    *  - totalUpkeep: An object with the total upkeep for each resource.
    *  - totalYields: An object with the total yields for each resource.
    *  - netIncome: An object with the net income for each resource (yields - upkeep).
@@ -175,7 +176,8 @@ export class Player {
     const totalYields = {};
     const netIncome = {};
     const turnsRemaining = {};
-    const resourceKeys = new Set(Object.keys(this.resources));
+    const stock = this.resources;
+    const resourceKeys = new Set(Object.keys(stock));
 
     const myEntities = this.getEntities(gameState);
     for (const entity of myEntities) {
@@ -199,7 +201,7 @@ export class Player {
       if (totalUpkeep[resKey] == undefined) totalUpkeep[resKey] = 0;
       if (totalYields[resKey] == undefined) totalYields[resKey] = 0;
       netIncome[resKey] = totalYields[resKey] - totalUpkeep[resKey];
-      turnsRemaining[resKey] = netIncome[resKey] < 0 ? Math.floor((this.resources[resKey] || 0) / -netIncome[resKey]) : Infinity;
+      turnsRemaining[resKey] = netIncome[resKey] < 0 ? Math.floor((stock[resKey] || 0) / -netIncome[resKey]) : Infinity;
       if (turnsRemaining[resKey] < Infinity) {
         if (!criticalResource || turnsRemaining[resKey] < turnsRemaining[criticalResource]) {
           criticalResource = resKey;
@@ -208,6 +210,7 @@ export class Player {
     }
 
     return {
+      stock,
       totalUpkeep,
       totalYields,
       netIncome,
