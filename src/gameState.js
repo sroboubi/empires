@@ -309,6 +309,15 @@ export class GameState {
   }
 
   /**
+   * Returns the entity with the given ID.
+   * @param {string} id
+   * @returns {BaseEntity|null}
+   */
+  getEntityById(id) {
+    return this.entities.find(e => e.id === id) || null;
+  }
+
+  /**
    * Returns true if a human can see this cell
    */
   isVisibleToHuman(cell) {

@@ -16,7 +16,9 @@
     {
       "imports": {
         "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+        "@google/genai": "https://esm.sh/@google/genai",
+        "ajv": "https://esm.sh/ajv@8"
       }
     }
   </script>
@@ -828,8 +830,10 @@
       -moz-appearance: textfield;
       -webkit-appearance: textfield;
       appearance: textfield;
-      padding-right: 36px; /* Make room for custom spinner */
+      padding-right: 36px;
+      /* Make room for custom spinner */
     }
+
     /* Hide native spinners */
     .modal-card input[type="number"]::-webkit-outer-spin-button,
     .modal-card input[type="number"]::-webkit-inner-spin-button {
@@ -837,6 +841,7 @@
       appearance: none;
       margin: 0;
     }
+
     /* Firefox: hide native spinner */
     .modal-card input[type="number"] {
       -moz-appearance: textfield;
@@ -848,10 +853,12 @@
       display: inline-flex;
       width: 100%;
     }
+
     .modal-card .number-input-wrapper input[type="number"] {
       width: 100%;
       padding-right: 36px;
     }
+
     .modal-card .number-input-wrapper .spinner-buttons {
       position: absolute;
       right: 0;
@@ -865,6 +872,7 @@
       background: rgba(255, 255, 255, 0.03);
       pointer-events: none;
     }
+
     .modal-card .number-input-wrapper .spinner-btn {
       flex: 1;
       display: flex;
@@ -881,21 +889,26 @@
       padding: 0;
       line-height: 1;
     }
+
     .modal-card .number-input-wrapper .spinner-btn:hover {
       background: rgba(52, 152, 219, 0.2);
       color: var(--accent-color);
     }
+
     .modal-card .number-input-wrapper .spinner-btn:active {
       background: var(--accent-color);
       color: white;
     }
+
     .modal-card .number-input-wrapper .spinner-btn.up {
       border-radius: 0 6px 0 0;
       border-bottom: 1px solid var(--border-color);
     }
+
     .modal-card .number-input-wrapper .spinner-btn.down {
       border-radius: 0 0 6px 0;
     }
+
     .modal-card .number-input-wrapper:focus-within .spinner-buttons {
       background: rgba(52, 152, 219, 0.1);
     }
@@ -1070,7 +1083,8 @@
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="setup-win-relative-enabled"> Relative Score (× next highest)
               <div class="number-input-wrapper" style="width: 100px;">
-                <input type="number" id="setup-win-relative-value" class="form-input" value="2" min="1" step="0.1" disabled>
+                <input type="number" id="setup-win-relative-value" class="form-input" value="2" min="1" step="0.1"
+                  disabled>
                 <div class="spinner-buttons">
                   <button type="button" class="spinner-btn up" data-target="setup-win-relative-value">▲</button>
                   <button type="button" class="spinner-btn down" data-target="setup-win-relative-value">▼</button>
@@ -1172,8 +1186,10 @@
                 <div class="number-input-wrapper">
                   <input type="number" id="setup-barbarian-spawn-frequency" class="form-input" value="5" min="1">
                   <div class="spinner-buttons">
-                    <button type="button" class="spinner-btn up" data-target="setup-barbarian-spawn-frequency">▲</button>
-                    <button type="button" class="spinner-btn down" data-target="setup-barbarian-spawn-frequency">▼</button>
+                    <button type="button" class="spinner-btn up"
+                      data-target="setup-barbarian-spawn-frequency">▲</button>
+                    <button type="button" class="spinner-btn down"
+                      data-target="setup-barbarian-spawn-frequency">▼</button>
                   </div>
                 </div>
               </div>

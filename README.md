@@ -234,3 +234,11 @@ Implement the game configuration loading system using the provided JSON architec
    - events like orders being converted to resources
 5. Update ai/standard/smartManager.js to use this instead of entity.attackHistory by looking at entries from the previous turn where damage was received or units were destroyed.
 6. Enhance the Resource Profile panel. This should become a generic player info panel. In addition to current information (resources, score, units), add a panel to the side or bottom to list the player history. The history panel should be paged by some number of rounds (where rounds per page is a selectable dropdown or numeric selector of 1 to 10 and there is a next/previous page button)
+
+## Task: Phase 20 - LLM Integration ##
+
+1. Add API key input in the game settings panel and a button to fetch all models using the key.
+2. Allow user to select an ordered list from available models to be used in priority order.
+3. Save the key and selected list in session storage and add it to game settings/state inside an "llm" object.
+4. Review the LLM integration in ai/llm and ensure the logic makes sense and will work as expected. Fix any issues you find.
+5. 
