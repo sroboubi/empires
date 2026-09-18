@@ -15,8 +15,6 @@ export class UnitEntity extends BaseEntity {
   getDefaults() {
     return {
       ...super.getDefaults(),
-      maxActionPoints: 10,
-      actionPoints: 10,
       attackCostScale: 1.0,
       damage: { value: 0, type: 'blunt' },
       range: null,
@@ -25,17 +23,7 @@ export class UnitEntity extends BaseEntity {
     };
   }
 
-  get actionPoints() {
-    return this.state.actionPoints;
-  }
 
-  set actionPoints(val) {
-    this.state.actionPoints = val;
-  }
-
-  get maxActionPoints() {
-    return this.state.maxActionPoints || 2;
-  }
 
   get attackCostScale() {
     return this.state.attackCostScale !== undefined ? this.state.attackCostScale : 1.0;
@@ -57,13 +45,6 @@ export class UnitEntity extends BaseEntity {
     super.step(globalContext);
 
     this.state.battleExhaustion = 1;
-    if (this.active) {
-      const unusedAP = Math.max(0, this.state.actionPoints);
-      if (unusedAP > 0 && this.state.healthRegenScale > 0) {
-        this.health = Math.min(this.maxHealth, this.health + this.state.healthRegenScale * unusedAP);
-      }
-      this.state.actionPoints = this.maxActionPoints;
-    }
   }
 
   /**
@@ -305,6 +286,6 @@ export class UnitEntity extends BaseEntity {
 
   info() {
     const rangeStr = this.range ? `Rng:${this.range.minCells}-${this.range.maxCells}` : 'Melee';
-    return super.info() + ` AP: ${this.actionPoints}/${this.maxActionPoints}. Atk: ${this.damage.value} (${this.damage.type}, ${rangeStr}). Facing: ${this.facing}`;
+    return super.info() + ` Atk: ${this.damage.value} (${this.damage.type}, ${rangeStr}). Facing: ${this.facing}`;
   }
 }

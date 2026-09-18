@@ -57,6 +57,8 @@ export class BaseEntity {
       health: 100,
       maxHealth: 100,
       active: true,
+      maxActionPoints: 0,
+      actionPoints: 0,
       facing: 'E',
       sightRange: 2,
       rotationOffset: 0,
@@ -85,6 +87,18 @@ export class BaseEntity {
 
   set active(val) {
     this.state.active = !!val;
+  }
+
+  get actionPoints() {
+    return this.state.actionPoints;
+  }
+
+  set actionPoints(val) {
+    this.state.actionPoints = val;
+  }
+
+  get maxActionPoints() {
+    return this.state.maxActionPoints;
   }
 
   get facing() {
@@ -241,6 +255,14 @@ export class BaseEntity {
     }
 
     this.age++;
+
+    if (this.active) {
+      const unusedAP = Math.max(0, this.state.actionPoints);
+      if (unusedAP > 0 && this.state.healthRegenScale > 0) {
+        this.health = Math.min(this.maxHealth, this.health + this.state.healthRegenScale * unusedAP);
+      }
+      this.state.actionPoints = this.maxActionPoints;
+    }
   }
 
   /**
@@ -506,7 +528,11 @@ export class BaseEntity {
     if (this.state.yields) {
       yieldStr = Object.entries(this.state.yields).map(([k, v]) => `+${v} ${k}`).join(', ');
     }
-    return `${camelToTitle(this.name)}. Owner: ${ownerName}. HP: ${Math.max(0, Math.round(this.state.health))}/${this.maxHealth}. Status: ${activeStr}.${yieldStr ? ` Income/turn: ${yieldStr}` : ''}`;
+    let apStr = '';
+    if (this.maxActionPoints !== undefined && this.maxActionPoints > 0) {
+      apStr = `AP: ${this.actionPoints}/${this.maxActionPoints}. `;
+    }
+    return `${camelToTitle(this.name)}. Owner: ${ownerName}. HP: ${Math.max(0, Math.round(this.state.health))}/${this.maxHealth}. ${apStr}Status: ${activeStr}.${yieldStr ? ` Income/turn: ${yieldStr}` : ''}`;
   }
 
   /**

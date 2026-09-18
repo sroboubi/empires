@@ -19,6 +19,7 @@ import {
 import { loadGameManifest } from './manifestLoader.js';
 import { HexGrid } from './hexGrid.js';
 import { saveGame, loadGame, listSaves, deleteSave, pruneAutoSaves } from './saveManager.js';
+import { GoogleGenAI } from '@google/genai';
 
 let gameState;
 let manifestData;
@@ -33,6 +34,9 @@ let pointerDownTime = 0;
 // Local setup state before starting game
 let setupPlayers = [];
 let setupStartingUnits = {};
+let setupLlmApiKey = '';
+let setupLlmFetchedModels = [];
+let setupLlmOrderedModels = [];
 
 /**
  * Initializes the application.
@@ -120,6 +124,9 @@ async function init() {
 
     // Barbarian setup UI bindings
     setupBarbarianUI();
+
+    // LLM setup UI bindings
+    setupLlmUI();
 
     // Open Setup Modal automatically on initial load
     openSetupModal(false);
@@ -223,6 +230,25 @@ function openSetupModal(canClose = true) {
 
   // Initialize custom spinner buttons
   initNumberInputSpinners();
+
+  // Restore LLM configuration from session storage if available
+  try {
+    const savedLlm = sessionStorage.getItem('empires_llm_config');
+    if (savedLlm) {
+      const parsed = JSON.parse(savedLlm);
+      if (parsed.apiKey) {
+        setupLlmApiKey = parsed.apiKey;
+        const keyInput = document.getElementById('setup-llm-api-key');
+        if (keyInput) keyInput.value = setupLlmApiKey;
+      }
+      if (Array.isArray(parsed.orderedModels)) {
+        setupLlmOrderedModels = [...parsed.orderedModels];
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to load LLM config from session storage:', e);
+  }
+  renderLlmPriorityList();
 
   overlay.classList.add('active');
 }
@@ -436,6 +462,183 @@ function updateAllRangeFills() {
   RANGE_SLIDER_IDS.forEach(updateRangeFill);
 }
 
+/* --------------------------------------------------------------------------
+   LLM SETUP UI: API Key, fetch models, priority selection, session storage
+   -------------------------------------------------------------------------- */
+
+function setupLlmUI() {
+  const keyInput = document.getElementById('setup-llm-api-key');
+  const toggleBtn = document.getElementById('btn-toggle-llm-key');
+  const fetchBtn = document.getElementById('btn-fetch-llm-models');
+  const addModelBtn = document.getElementById('btn-add-llm-model');
+  const statusEl = document.getElementById('setup-llm-status');
+
+  if (!keyInput || !fetchBtn) return;
+
+  // Toggle API key visibility
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', () => {
+      keyInput.type = keyInput.type === 'password' ? 'text' : 'password';
+      toggleBtn.textContent = keyInput.type === 'password' ? '👁' : '🔒';
+    });
+  }
+
+  // Update key on input
+  keyInput.addEventListener('input', (e) => {
+    setupLlmApiKey = e.target.value.trim();
+  });
+
+  // Fetch models
+  fetchBtn.addEventListener('click', async () => {
+    setupLlmApiKey = keyInput.value.trim();
+    if (!setupLlmApiKey) {
+      statusEl.style.color = '#ff4d4d';
+      statusEl.textContent = 'Please enter a valid Gemini API key first.';
+      return;
+    }
+
+    statusEl.style.color = 'var(--text-muted)';
+    statusEl.textContent = 'Fetching models from Gemini API...';
+    fetchBtn.disabled = true;
+
+    try {
+      const ai = new GoogleGenAI({ apiKey: setupLlmApiKey });
+      const response = await ai.models.list();
+      let rawModels = [];
+
+      if (response && response[Symbol.asyncIterator]) {
+        for await (const m of response) {
+          rawModels.push(m);
+        }
+      } else if (Array.isArray(response)) {
+        rawModels = response;
+      } else if (Array.isArray(response?.models)) {
+        rawModels = response.models;
+      } else if (response && response[Symbol.iterator]) {
+        rawModels = Array.from(response);
+      }
+
+      // Filter models that support "generateContent"
+      setupLlmFetchedModels = rawModels.filter(m => {
+        const methods = m.supportedActions || m.supportedGenerationMethods || [];
+        return Array.isArray(methods) && methods.includes('generateContent');
+      }).map(m => {
+        const id = m.name ? m.name.replace(/^models\//, '') : (m.id || '');
+        const displayName = m.displayName || id;
+        return { id, displayName };
+      });
+
+      // Sort models alphabetically by id
+      setupLlmFetchedModels.sort((a, b) => a.id.localeCompare(b.id));
+
+      if (setupLlmFetchedModels.length === 0) {
+        statusEl.style.color = '#f1c40f';
+        statusEl.textContent = 'No models supporting generateContent found for this API key.';
+      } else {
+        statusEl.style.color = '#2ecc71';
+        statusEl.textContent = `Successfully fetched ${setupLlmFetchedModels.length} models supporting generateContent.`;
+
+        // Populate model dropdown
+        const select = document.getElementById('setup-llm-model-select');
+        select.innerHTML = '';
+        setupLlmFetchedModels.forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = m.id;
+          opt.textContent = m.displayName !== m.id ? `${m.displayName} (${m.id})` : m.id;
+          select.appendChild(opt);
+        });
+
+        // Show picker
+        const picker = document.getElementById('setup-llm-model-picker');
+        if (picker) picker.style.display = 'flex';
+      }
+    } catch (err) {
+      console.error('Failed to fetch models:', err);
+      statusEl.style.color = '#ff4d4d';
+      statusEl.textContent = `Fetch error: ${err.message || err}`;
+    } finally {
+      fetchBtn.disabled = false;
+    }
+  });
+
+  // Add model to priority list
+  if (addModelBtn) {
+    addModelBtn.addEventListener('click', () => {
+      const select = document.getElementById('setup-llm-model-select');
+      const selectedModel = select ? select.value : '';
+      if (selectedModel && !setupLlmOrderedModels.includes(selectedModel)) {
+        setupLlmOrderedModels.push(selectedModel);
+        renderLlmPriorityList();
+      }
+    });
+  }
+}
+
+function renderLlmPriorityList() {
+  const container = document.getElementById('setup-llm-priority-list');
+  const picker = document.getElementById('setup-llm-model-picker');
+  if (!container) return;
+
+  if (setupLlmOrderedModels.length > 0 && picker) {
+    picker.style.display = 'flex';
+  }
+
+  container.innerHTML = '';
+
+  if (setupLlmOrderedModels.length === 0) {
+    container.innerHTML = `<div style="font-size: 12px; color: var(--text-muted); padding: 4px 0;">No priority models added yet. Select a model above to add it.</div>`;
+    return;
+  }
+
+  setupLlmOrderedModels.forEach((modelId, idx) => {
+    const row = document.createElement('div');
+    row.className = 'dynamic-row';
+    row.style.alignItems = 'center';
+
+    row.innerHTML = `
+      <span class="priority-badge" style="background: rgba(52, 152, 219, 0.2); color: #3498db; border: 1px solid rgba(52, 152, 219, 0.4); padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700;">#${idx + 1}</span>
+      <span style="flex: 1; font-size: 13px; font-family: monospace; overflow: hidden; text-overflow: ellipsis;">${modelId}</span>
+      <div style="display: flex; gap: 4px;">
+        <button type="button" class="btn btn-secondary btn-small btn-model-up" style="width: 26px; padding: 4px 0;" ${idx === 0 ? 'disabled style="opacity:0.3;cursor:not-allowed;"' : ''}>▲</button>
+        <button type="button" class="btn btn-secondary btn-small btn-model-down" style="width: 26px; padding: 4px 0;" ${idx === setupLlmOrderedModels.length - 1 ? 'disabled style="opacity:0.3;cursor:not-allowed;"' : ''}>▼</button>
+        <button type="button" class="btn btn-danger btn-small btn-model-remove" style="width: 26px; padding: 4px 0;">✕</button>
+      </div>
+    `;
+
+    const upBtn = row.querySelector('.btn-model-up');
+    const downBtn = row.querySelector('.btn-model-down');
+    const removeBtn = row.querySelector('.btn-model-remove');
+
+    if (upBtn && idx > 0) {
+      upBtn.addEventListener('click', () => {
+        const temp = setupLlmOrderedModels[idx - 1];
+        setupLlmOrderedModels[idx - 1] = setupLlmOrderedModels[idx];
+        setupLlmOrderedModels[idx] = temp;
+        renderLlmPriorityList();
+      });
+    }
+
+    if (downBtn && idx < setupLlmOrderedModels.length - 1) {
+      downBtn.addEventListener('click', () => {
+        const temp = setupLlmOrderedModels[idx + 1];
+        setupLlmOrderedModels[idx + 1] = setupLlmOrderedModels[idx];
+        setupLlmOrderedModels[idx] = temp;
+        renderLlmPriorityList();
+      });
+    }
+
+    if (removeBtn) {
+      removeBtn.addEventListener('click', () => {
+        setupLlmOrderedModels.splice(idx, 1);
+        renderLlmPriorityList();
+      });
+    }
+
+    container.appendChild(row);
+  });
+}
+
+
 /**
  * Initialize custom spinner buttons for number inputs in the setup modal
  */
@@ -530,14 +733,33 @@ function handleStartGameClicked() {
     winCondition.relativeScore = parseFloat(document.getElementById('setup-win-relative-value').value) || 2;
   }
 
+  // LLM settings & session storage persistence
+  const keyInput = document.getElementById('setup-llm-api-key');
+  if (keyInput) {
+    setupLlmApiKey = keyInput.value.trim();
+  }
+  const hasLlm = !!(setupLlmApiKey && setupLlmOrderedModels.length > 0);
+
+  try {
+    sessionStorage.setItem('empires_llm_config', JSON.stringify({
+      apiKey: setupLlmApiKey,
+      orderedModels: setupLlmOrderedModels
+    }));
+  } catch (e) {
+    console.warn('Failed to save LLM config to session storage:', e);
+  }
+
   const settings = {
     mapSize: parseInt(document.getElementById('setup-map-size').value, 10),
-    players: setupPlayers.map((p, i) => ({
-      id: i + 1,
-      name: p.name.trim() || `Player ${i + 1}`,
-      color: p.color,
-      controller: p.controller
-    })),
+    players: setupPlayers.map((p, i) => {
+      let controller = p.controller;
+      return {
+        id: i + 1,
+        name: p.name.trim() || `Player ${i + 1}`,
+        color: p.color,
+        controller: controller
+      };
+    }),
     initialization: {
       orders: {
         max: parseInt(document.getElementById('setup-orders-max').value, 10) || 8,
@@ -569,8 +791,13 @@ function handleStartGameClicked() {
         maxAge: parseInt(document.getElementById('setup-barbarian-max-age').value, 10) || 30
       }
       : null,
-    winCondition: Object.keys(winCondition).length > 0 ? winCondition : null
+    winCondition: Object.keys(winCondition).length > 0 ? winCondition : null,
+    llm: {
+      apiKey: setupLlmApiKey,
+      orderedModels: [...setupLlmOrderedModels]
+    }
   };
+
 
   startNewGame({ ...defaultSettings, ...settings });
   closeSetupModal();

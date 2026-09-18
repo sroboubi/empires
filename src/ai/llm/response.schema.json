@@ -1,5 +1,4 @@
 {
-  "type": "object",
   "anyOf": [
     {
       "type": "object",
@@ -31,7 +30,6 @@
           "description": "Action name from catalog (e.g. Move, Attack, Repair, Build)."
         },
         "target": {
-          "type": "object",
           "description": "Target payload. Must specify exactly ONE target field.",
           "anyOf": [
             {

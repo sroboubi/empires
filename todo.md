@@ -23,3 +23,7 @@
 ## AI ##
 
 ## BUGS ##
+
+- entity controllers are dependent on game code, so they can't be dynamically provided (if they are moved our sourced from somewhere else, the imports won't work)
+
+- players need to be able to dynamically provide their ai controller class and options

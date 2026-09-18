@@ -75,7 +75,7 @@ export class GeminiClient {
                         config
                     });
 
-                    const rawText = response.text;
+                    const rawText = typeof response.text === 'function' ? response.text() : response.text;
 
                     if (!this.responseSchema) {
                         return rawText;
@@ -99,11 +99,25 @@ export class GeminiClient {
                     });
 
                 } catch (error) {
-                    console.error(`[${model}] API call error (Attempt ${attempts}/${this.maxRetries}):`, error.message || error);
+                    const errMsg = error.message || String(error);
+                    console.error(`[${model}] API call error (Attempt ${attempts}/${this.maxRetries}):`, errMsg);
+
+                    // If thinkingConfig is unsupported on this model, strip it and retry
+                    if (config.thinkingConfig && (errMsg.includes('thinking') || errMsg.includes('thinkingConfig'))) {
+                        console.warn(`[${model}] Removing thinkingConfig for retry on this model.`);
+                        delete config.thinkingConfig;
+                        continue;
+                    }
+
+                    // If client-level fatal error (model not found, bad request, auth error), fail fast to next model
+                    if (errMsg.includes('404') || errMsg.includes('not found') || errMsg.includes('400') || errMsg.includes('403') || errMsg.includes('401')) {
+                        console.warn(`[${model}] Non-recoverable error encountered; advancing to next model in priority order.`);
+                        break;
+                    }
                 }
             }
 
-            console.warn(`[${model}] Exhausted all ${this.maxRetries} retry attempts. Trying next fallback model...`);
+            console.warn(`[${model}] Finished attempts. Trying next fallback model if available...`);
         }
 
         console.error('All models and retries failed to produce a valid response.');

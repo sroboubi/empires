@@ -238,7 +238,7 @@ Implement the game configuration loading system using the provided JSON architec
 ## Task: Phase 20 - LLM Integration ##
 
 1. Add API key input in the game settings panel and a button to fetch all models using the key.
-2. Allow user to select an ordered list from available models to be used in priority order.
-3. Save the key and selected list in session storage and add it to game settings/state inside an "llm" object.
-4. Review the LLM integration in ai/llm and ensure the logic makes sense and will work as expected. Fix any issues you find.
-5. 
+2. use google/genai to get list of available models and filter to those that support "generateContent".
+3. Allow user to select an ordered list from these models to be used in priority order.
+4. Save the key and selected list in session storage and add it to game settings/state inside an "llm" object.
+5. Review the LLM integration in ai/llm and ensure the logic makes sense and will work as expected. Fix any issues you find. 

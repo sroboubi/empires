@@ -50,10 +50,7 @@ export class GameState {
     this.currentRound = 1;
 
     // Default placeholder players if manifest not initialized yet
-    this.players = [
-      new Player(1, 'Red Empire', '#ff4d4d'),
-      new Player(2, 'Blue Alliance', '#3399ff')
-    ];
+    this.players = [];
   }
 
   /**
@@ -82,6 +79,7 @@ export class GameState {
       this.players = playersList.map((pDef, idx) => new Player(
         pDef.id || (idx + 1),
         pDef.name,
+        this,
         pDef.color,
         startingResources,
         pDef.description || '',
@@ -89,10 +87,7 @@ export class GameState {
         ordersConfig
       ));
     } else {
-      this.players = [
-        new Player(1, 'Red Empire', '#ff4d4d', startingResources, '', null, ordersConfig),
-        new Player(2, 'Blue Alliance', '#3399ff', startingResources, '', null, ordersConfig)
-      ];
+      this.players = [];
     }
 
     this.activePlayerIndex = 0;
@@ -376,7 +371,7 @@ export class GameState {
 
       // Re-hydrate Players
       if (data.players) {
-        this.players = data.players.map(p => Player.fromJSON(p));
+        this.players = data.players.map(p => Player.fromJSON(p, this));
       }
 
       // Re-hydrate Cells into the HexGrid

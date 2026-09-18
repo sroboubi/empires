@@ -18,6 +18,7 @@ import {
 } from '../utils.js';
 import { HexGrid } from '../../hexGrid.js';
 import { camelToTitle } from '../../utils.js';
+import { BaseManager } from '../baseManager.js';
 
 /**
  * Smart AI Manager
@@ -252,7 +253,7 @@ async function handleCombatAndThreats(player, gameState, manifest, myEntities, i
     const revengeMap = new Map(); // attackerId -> { score, attackerName }
     const currentRound = gameState.currentRound || 1;
     const previousRound = currentRound - 1;
-    
+
     // Get history entries from previous round for damage received
     const historyEntries = player.getHistoryRange(previousRound, previousRound);
     for (const entry of historyEntries) {
@@ -261,7 +262,7 @@ async function handleCombatAndThreats(player, gameState, manifest, myEntities, i
             const extra = entry.extra || {};
             const attackerId = extra.attackerId;
             const damage = extra.damage || 0;
-            
+
             if (attackerId) {
                 const attackerEntity = visibleOpponents.find(en => en.id === attackerId);
                 if (attackerEntity) {
@@ -630,72 +631,79 @@ async function handleExploration(player, gameState, manifest, myEntities, target
 }
 
 /**
- * Main turn processing entrypoint.
+ * SmartManager AI Controller
  * Executes orders sequentially until exhausted or no valid actions remain.
- * 
- * @param {Player} player 
- * @param {GameState} gameState 
  */
-export async function processTurn(player, gameState) {
-    if (!player || player.orders <= 0) return;
-
-    const manifest = gameState?.manifestData;
-    if (!manifest || !manifest.entities) return;
-
-    aiLog(player, 'turn', `=== Turn Start (Round ${gameState.currentRound || 1}) | Orders: ${player.orders}/${player.maxOrders} | Military: ${player.score?.military || 0}, Econ: ${player.score?.economic || 0}, Expl: ${player.score?.exploration || 0} ===`);
-
-    const targetedExplorationCells = new Set();
-    const reservedResources = {}; // Tracks resources needed by pending critical deficit remedies
-    let maxIterations = Math.max(player.orders * 2, 20);
-    let actionExecuted = true;
-
-    while (player.orders > 0 && maxIterations-- > 0 && actionExecuted) {
-        actionExecuted = false;
-
-        const myEntities = player.getEntities ? player.getEntities(gameState).filter(e => e.active) : [];
-        if (myEntities.length === 0) {
-            aiLog(player, 'warn', `No active entities available to perform actions.`);
-            break;
-        }
-
-        const evalRes = evaluateResources(player, gameState);
-        let involvedCells = [];
-
-        // 1. Critical Deficit Recovery (Stabilize negative burn before units starve, reserving scarce resources)
-        if (await handleCriticalDeficits(player, gameState, manifest, myEntities, evalRes, reservedResources, involvedCells)) {
-            actionExecuted = true;
-            await onActionDone(gameState, involvedCells);
-            continue;
-        }
-
-        // 2. Combat & Defense (Retaliate against attackers and eliminate immediate threats)
-        if (await handleCombatAndThreats(player, gameState, manifest, myEntities, involvedCells)) {
-            actionExecuted = true;
-            await onActionDone(gameState, involvedCells);
-            continue;
-        }
-
-        // 3. Heavy Repairs (Restore heavily damaged constructs/units < 50% HP)
-        if (await handleHeavyRepairs(player, gameState, myEntities, involvedCells)) {
-            actionExecuted = true;
-            await onActionDone(gameState, involvedCells);
-            continue;
-        }
-
-        // 4. Proactive Growth (Expand economy, settlements, units using surplus resources; respects reservedResources)
-        if (await handleProactiveGrowth(player, gameState, manifest, myEntities, evalRes, reservedResources, involvedCells)) {
-            actionExecuted = true;
-            await onActionDone(gameState, involvedCells);
-            continue;
-        }
-
-        // 5. Exploration (Scout closest unexplored hexes using BFS and multi-step moves; strictly excludes builders)
-        if (await handleExploration(player, gameState, manifest, myEntities, targetedExplorationCells, involvedCells)) {
-            actionExecuted = true;
-            await onActionDone(gameState, involvedCells);
-            continue;
-        }
+export class SmartManager extends BaseManager {
+    constructor(player, gameState, controller) {
+        super(player, gameState, controller);
     }
 
-    aiLog(player, 'turn', `=== Turn Ended | Remaining Orders: ${player.orders} ===`);
+    async processTurn() {
+        const player = this.player;
+        const gameState = this.gameState;
+
+        if (!player || player.orders <= 0) return;
+
+        const manifest = gameState?.manifestData;
+        if (!manifest || !manifest.entities) return;
+
+        aiLog(player, 'turn', `=== Turn Start (Round ${gameState.currentRound || 1}) | Orders: ${player.orders}/${player.maxOrders} | Military: ${player.score?.military || 0}, Econ: ${player.score?.economic || 0}, Expl: ${player.score?.exploration || 0} ===`);
+
+        const targetedExplorationCells = new Set();
+        const reservedResources = {}; // Tracks resources needed by pending critical deficit remedies
+        let maxIterations = Math.max(player.orders * 2, 20);
+        let actionExecuted = true;
+
+        while (player.orders > 0 && maxIterations-- > 0 && actionExecuted) {
+            actionExecuted = false;
+
+            const myEntities = player.getEntities ? player.getEntities(gameState).filter(e => e.active) : [];
+            if (myEntities.length === 0) {
+                aiLog(player, 'warn', `No active entities available to perform actions.`);
+                break;
+            }
+
+            const evalRes = evaluateResources(player, gameState);
+            let involvedCells = [];
+
+            // 1. Critical Deficit Recovery (Stabilize negative burn before units starve, reserving scarce resources)
+            if (await handleCriticalDeficits(player, gameState, manifest, myEntities, evalRes, reservedResources, involvedCells)) {
+                actionExecuted = true;
+                await onActionDone(gameState, involvedCells);
+                continue;
+            }
+
+            // 2. Combat & Defense (Retaliate against attackers and eliminate immediate threats)
+            if (await handleCombatAndThreats(player, gameState, manifest, myEntities, involvedCells)) {
+                actionExecuted = true;
+                await onActionDone(gameState, involvedCells);
+                continue;
+            }
+
+            // 3. Heavy Repairs (Restore heavily damaged constructs/units < 50% HP)
+            if (await handleHeavyRepairs(player, gameState, myEntities, involvedCells)) {
+                actionExecuted = true;
+                await onActionDone(gameState, involvedCells);
+                continue;
+            }
+
+            // 4. Proactive Growth (Expand economy, settlements, units using surplus resources; respects reservedResources)
+            if (await handleProactiveGrowth(player, gameState, manifest, myEntities, evalRes, reservedResources, involvedCells)) {
+                actionExecuted = true;
+                await onActionDone(gameState, involvedCells);
+                continue;
+            }
+
+            // 5. Exploration (Scout closest unexplored hexes using BFS and multi-step moves; strictly excludes builders)
+            if (await handleExploration(player, gameState, manifest, myEntities, targetedExplorationCells, involvedCells)) {
+                actionExecuted = true;
+                await onActionDone(gameState, involvedCells);
+                continue;
+            }
+        }
+
+        aiLog(player, 'turn', `=== Turn Ended | Remaining Orders: ${player.orders} ===`);
+    }
 }
+

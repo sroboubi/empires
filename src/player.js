@@ -1,7 +1,7 @@
 import { animateToTimeOfDay } from "./renderer.js";
 import { nextTurn } from "./main.js";
-import { processTurn } from "./ai/standard/smartManager.js";
-import { processTurn as llmTurn } from "./ai/llm/harness.js";
+import { SmartManager } from "./ai/standard/smartManager.js";
+import { Harness } from "./ai/llm/harness.js";
 import { CONFIG } from './config.js';
 
 const turnHours = { start: 7, end: 17 }
@@ -16,15 +16,17 @@ export class Player {
    * @param {number|string} id
    * @param {string} name
    * @param {string} color
+   * @param {GameState} gameState
    * @param {Object} [startingResources]
    * @param {string} [description]
    * @param {Object|string|null} [controller]
    * @param {Object} [ordersConfig] - { max, initial, perTurn }
    */
-  constructor(id, name, color, startingResources = {}, description = '', controller = null, ordersConfig = null) {
+  constructor(id, name, gameState, color, startingResources = {}, description = '', controller = null, ordersConfig = null) {
     this.id = id;
     this.name = name;
     this.color = color;
+    this.gameState = gameState;
     this.description = description || '';
     this.controller = controller || null;
     this.resources = { ...startingResources };
@@ -48,6 +50,17 @@ export class Player {
     // Player history: Map<roundNumber, Array<historyEntry>>
     // Each entry: { round, timestamp, category, entityName, entityId, details }
     this.history = new Map();
+
+    // Persistent AI controller manager instance
+    this.aiManager = null;
+    if (this.controller) {
+      const llmConfig = gameState?.settings?.llm;
+      if (llmConfig?.apiKey && llmConfig?.orderedModels?.length > 0) {
+        this.aiManager = new Harness(this, gameState, this.controller);
+      } else {
+        this.aiManager = new SmartManager(this, gameState, this.controller);
+      }
+    }
   }
 
   /**
@@ -55,7 +68,7 @@ export class Player {
    * @returns {boolean}
    */
   get isAI() {
-    return this.controller !== null && this.controller !== undefined;
+    return this.aiManager !== null && this.aiManager !== undefined;
   }
 
   /**
@@ -127,42 +140,34 @@ export class Player {
   /**
    * Turn lifecycle step called at the start of this player's turn.
    * Steps all entities owned by this player.
-   * @param {GameState} gameState
    */
-  step(gameState) {
-    if (!gameState || !gameState.entities) return;
-
-    this.refillOrders(gameState);
+  step() {
+    this.refillOrders();
     this.score = { military: 0, economic: 0 };
-    const ownedEntities = this.getEntities(gameState);
+    const ownedEntities = this.getEntities();
     for (const entity of ownedEntities) {
       this.score.military += entity.state.score.military;
       this.score.economic += entity.state.score.economic;
-      entity.step(gameState);
+      entity.step();
     }
 
-    this.updateVisibility(gameState);
+    this.updateVisibility();
     this.score.exploration = Math.round(Math.pow(this.visibleCells.size * this.exploredCells.size, 1 / 3));
     this.score.total = Math.round(Math.pow(this.score.military * this.score.economic * this.score.exploration, 1 / 3));
 
-    if (this.controller) {
-      llmTurn(this, gameState).then(() => {
-        console.log(`LLM turn processed for player ${this.name}`);
-      }).catch(err => {
-        console.error(`Error processing turn for LLM player ${this.name}:`, err);
-      });
-
-      processTurn(this, gameState).then(() => {
-        nextTurn();
-      }).catch(err => {
-        console.error(`Error processing turn for AI player ${this.name}:`, err);
-      });
+    if (this.aiManager) {
+      this.aiManager.processTurn()
+        .catch(err => {
+          console.error(`Error during AI turn for player ${this.name}:`, err);
+        })
+        .finally(() => {
+          nextTurn();
+        });
     }
   }
 
   /**
    * Calculates resource profile of the player given current upkeep and yields.
-   * @param {GameState} gameState
    * @returns {Object} An object with the following properties:
    *  - stock: An object with the stock of each resource (what player currently has).
    *  - totalUpkeep: An object with the total upkeep for each resource.
@@ -171,7 +176,7 @@ export class Player {
    *  - turnsRemaining: An object with the number of turns remaining for each resource before it runs out (Infinity if net income is non-negative).
    *  - criticalResource: The resource that will run out first.
    */
-  getResourceProfile(gameState) {
+  getResourceProfile() {
     const totalUpkeep = {};
     const totalYields = {};
     const netIncome = {};
@@ -179,7 +184,7 @@ export class Player {
     const stock = this.resources;
     const resourceKeys = new Set(Object.keys(stock));
 
-    const myEntities = this.getEntities(gameState);
+    const myEntities = this.getEntities();
     for (const entity of myEntities) {
       const maintenance = entity.getCostToMaintain ? entity.getCostToMaintain() : {};
       for (const [res, amt] of Object.entries(maintenance)) {
@@ -221,22 +226,20 @@ export class Player {
 
   /**
    * Returns all entities owned by this player in the given game state.
-   * @param {GameState} gameState
    * @returns {Array<Entity>}
    */
-  getEntities(gameState) {
-    if (!gameState || !gameState.entities) return [];
-    return gameState.entities.filter(e => e.owner && e.owner.id === this.id);
+  getEntities() {
+    if (!this.gameState || !this.gameState.entities) return [];
+    return this.gameState.entities.filter(e => e.owner && e.owner.id === this.id);
   }
 
   /**
    * Returns all visible opponents and their owned entities in the given game state. Any entity without an owner is grouped under the null owner.
-   * @param {GameState} gameState
    * @returns {Object} Mapping opponent player IDs to { name, score, description, entities }
    */
-  getOpponents(gameState) {
-    if (!gameState || !gameState.entities) return [];
-    const opponentEntities = gameState.entities.filter(e => (!e.owner || e.owner.id !== this.id) && this.visibleCells.has(`${e.q},${e.r}`));
+  getOpponents() {
+    if (!this.gameState || !this.gameState.entities) return [];
+    const opponentEntities = this.gameState.entities.filter(e => (!e.owner || e.owner.id !== this.id) && this.visibleCells.has(`${e.q},${e.r}`));
     const opponent = {};
     for (const entity of opponentEntities) {
       const ownerId = entity.owner ? entity.owner.id : null;
@@ -257,14 +260,10 @@ export class Player {
    * Updates player's visible and explored sets by taking the union of all
    * owned active entities' visible cells. Cells added to visibleCells are also added
    * to exploredCells (which are never removed).
-   * @param {GameState} gameState
    */
-  updateVisibility(gameState) {
+  updateVisibility() {
     this.visibleCells.clear();
-
-    if (!gameState || !gameState.entities) return;
-
-    const ownedEntities = this.getEntities(gameState);
+    const ownedEntities = this.getEntities();
     ownedEntities.forEach(entity => {
       // Ensure entity has updated visible cells
       if (entity.visibleCells) {
@@ -368,9 +367,9 @@ export class Player {
   /**
    * Adds per-turn orders up to the maximum.
    */
-  refillOrders(gameState) {
+  refillOrders() {
     let orderBonus = 0;
-    this.getEntities(gameState).forEach(entity => {
+    this.getEntities().forEach(entity => {
       orderBonus += entity.state?.ordersPerTurn || 0;
     });
     this.maxOrders = this.ordersConfig.max + orderBonus;
@@ -379,7 +378,7 @@ export class Player {
     console.debug(`Player ${this.name} - orders before refill: ${this.orders}, ordersPerTurn: ${this.ordersPerTurn}, maxOrders: ${this.maxOrders}, overflow: ${overflow}`);
     if (overflow > 0) {
       this.orders = this.maxOrders;
-      const resourceProfile = this.getResourceProfile(gameState);
+      const resourceProfile = this.getResourceProfile();
       console.debug(`Player ${this.name} - overflow of ${overflow} orders, converting to resources. Resource profile:`, resourceProfile);
       let pickedResource = resourceProfile.criticalResource;
       if (!pickedResource) {  // if nothing is critical, pick a random resource to convert overflow into
@@ -392,7 +391,7 @@ export class Player {
         console.debug(`Player ${this.name} - converting ${overflow} excess orders to ${amount} ${pickedResource}`);
 
         // Add history entry for orders conversion
-        this.addHistoryEntry(gameState.currentRound, {
+        this.addHistoryEntry(this.gameState.currentRound, {
           category: 'orders',
           details: `Converted ${overflow} excess orders to ${amount} ${pickedResource}`,
           extra: {
@@ -447,8 +446,8 @@ export class Player {
   /**
    * Re-hydrates a Player instance from serialized JSON object.
    */
-  static fromJSON(data) {
-    const player = new Player(data.id, data.name, data.color, data.resources, data.description, data.controller, data.ordersConfig);
+  static fromJSON(data, gameState) {
+    const player = new Player(data.id, data.name, gameState, data.color, data.resources, data.description, data.controller, data.ordersConfig);
     player.maxOrders = data.maxOrders ?? 0;
     player.ordersPerTurn = data.ordersPerTurn ?? 0;
     player.orders = data.orders ?? 0;
