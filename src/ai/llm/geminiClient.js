@@ -1,3 +1,5 @@
+/** DEPRECATED: REPLACE WITH LLMClient.js **/
+
 import { GoogleGenAI, Type } from '@google/genai';
 import Ajv from 'ajv';
 

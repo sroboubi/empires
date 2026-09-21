@@ -1,4 +1,4 @@
-/** DEPRECATED **/
+/** DEPRECATED: USE smartManager **/
 
 import { attack, build, repair, onActionDone } from '../utils.js';
 import { HexGrid } from '../../hexGrid.js';

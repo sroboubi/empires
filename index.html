@@ -669,6 +669,43 @@
       border: 1px solid var(--border-color);
     }
 
+    .draggable-row {
+      cursor: grab;
+      user-select: none;
+      transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+    }
+
+    .draggable-row:active {
+      cursor: grabbing;
+    }
+
+    .draggable-row.dragging {
+      opacity: 0.4;
+      background: rgba(52, 152, 219, 0.15);
+      border: 1px dashed var(--accent-color);
+    }
+
+    .draggable-row.drag-over {
+      border-top: 2px solid var(--accent-color);
+      background: rgba(52, 152, 219, 0.08);
+    }
+
+    .drag-handle {
+      cursor: grab;
+      color: var(--text-muted);
+      font-size: 14px;
+      letter-spacing: -2px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 4px;
+      user-select: none;
+    }
+
+    .drag-handle:hover {
+      color: #fff;
+    }
+
     .dynamic-row input[type="color"] {
       border: none;
       width: 32px;
@@ -1217,16 +1254,19 @@
           </div>
         </div>
 
-        <!-- Gemini LLM Settings -->
+        <!-- OpenRouter AI Settings -->
         <div class="form-group full-width">
-          <label class="form-label">Gemini LLM Settings</label>
+          <label class="form-label">OpenRouter AI Configuration (LLM)</label>
           <div style="display: flex; flex-direction: column; gap: 10px;">
             <!-- API Key Input and Fetch Button -->
             <div style="display: flex; gap: 8px; align-items: center;">
               <div style="position: relative; flex: 1;">
-                <input type="password" id="setup-llm-api-key" class="form-input" placeholder="Enter Gemini API Key (e.g. AIzaSy...)" style="width: 100%; padding-right: 32px;">
+                <input type="password" id="setup-llm-api-key" class="form-input" placeholder="Enter OpenRouter API Key (sk-or-v1-...)" style="width: 100%; padding-right: 32px;">
                 <button type="button" id="btn-toggle-llm-key" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 14px;" title="Toggle Key Visibility">👁</button>
               </div>
+              <label style="display: flex; align-items: center; gap: 5px; font-size: 12px; white-space: nowrap; cursor: pointer; color: var(--text-muted);">
+                <input type="checkbox" id="setup-llm-free-only" checked> Free Only
+              </label>
               <button id="btn-fetch-llm-models" class="btn btn-secondary btn-small" type="button" style="width: 130px; white-space: nowrap;">Fetch Models</button>
             </div>
             
@@ -1235,13 +1275,15 @@
             <!-- Model Selection & Priority Ordering Section -->
             <div id="setup-llm-model-picker" style="display: none; flex-direction: column; gap: 8px;">
               <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span style="font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Ordered Model Priority</span>
-                <div style="display: flex; gap: 6px; align-items: center;">
-                  <select id="setup-llm-model-select" class="form-select" style="max-width: 220px; padding: 4px 8px; font-size: 11px;"></select>
-                  <button id="btn-add-llm-model" class="btn btn-secondary btn-small" type="button">+ Add Model</button>
-                </div>
+                <span id="setup-llm-picker-title" style="font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Models (Sorted by Intelligence)</span>
+                <span id="setup-llm-selection-count" style="font-size: 11px; font-weight: 600; color: var(--accent-color);">0 / 3 selected</span>
               </div>
-              <div id="setup-llm-priority-list" class="dynamic-list"></div>
+              <!-- Search input -->
+              <input type="text" id="setup-llm-search" class="form-input" placeholder="Search models..." style="width: 100%; font-size: 12px; padding: 6px 10px;">
+              <div style="font-size: 11px; color: var(--text-muted);">
+                Select up to 3 models. Drag or use ▲/▼ to set priority order among selected models.
+              </div>
+              <div id="setup-llm-priority-list" class="dynamic-list" style="max-height: 280px; overflow-y: auto; padding-right: 4px;"></div>
             </div>
           </div>
         </div>

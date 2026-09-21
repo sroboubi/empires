@@ -19,7 +19,6 @@ import {
 import { loadGameManifest } from './manifestLoader.js';
 import { HexGrid } from './hexGrid.js';
 import { saveGame, loadGame, listSaves, deleteSave, pruneAutoSaves } from './saveManager.js';
-import { GoogleGenAI } from '@google/genai';
 
 let gameState;
 let manifestData;
@@ -35,8 +34,7 @@ let pointerDownTime = 0;
 let setupPlayers = [];
 let setupStartingUnits = {};
 let setupLlmApiKey = '';
-let setupLlmFetchedModels = [];
-let setupLlmOrderedModels = [];
+let setupLlmModels = []; // Array<{ id: string, name: string, enabled: boolean }>
 
 /**
  * Initializes the application.
@@ -233,7 +231,7 @@ function openSetupModal(canClose = true) {
 
   // Restore LLM configuration from session storage if available
   try {
-    const savedLlm = sessionStorage.getItem('empires_llm_config');
+    const savedLlm = sessionStorage.getItem('empires_openrouter_config') || sessionStorage.getItem('empires_llm_config');
     if (savedLlm) {
       const parsed = JSON.parse(savedLlm);
       if (parsed.apiKey) {
@@ -241,14 +239,16 @@ function openSetupModal(canClose = true) {
         const keyInput = document.getElementById('setup-llm-api-key');
         if (keyInput) keyInput.value = setupLlmApiKey;
       }
-      if (Array.isArray(parsed.orderedModels)) {
-        setupLlmOrderedModels = [...parsed.orderedModels];
+      if (Array.isArray(parsed.models)) {
+        setupLlmModels = parsed.models;
+      } else if (Array.isArray(parsed.orderedModels)) {
+        setupLlmModels = parsed.orderedModels.map(id => ({ id, name: id, enabled: true }));
       }
     }
   } catch (e) {
     console.warn('Failed to load LLM config from session storage:', e);
   }
-  renderLlmPriorityList();
+  renderLlmModelList();
 
   overlay.classList.add('active');
 }
@@ -463,15 +463,19 @@ function updateAllRangeFills() {
 }
 
 /* --------------------------------------------------------------------------
-   LLM SETUP UI: API Key, fetch models, priority selection, session storage
+   LLM SETUP UI: OpenRouter API Key, fetch models, priority selection & drag-and-drop
    -------------------------------------------------------------------------- */
+
+const LLM_MAX_SELECTED = 3;
+let draggedModelIndex = null;
+let llmSearchQuery = '';
 
 function setupLlmUI() {
   const keyInput = document.getElementById('setup-llm-api-key');
   const toggleBtn = document.getElementById('btn-toggle-llm-key');
   const fetchBtn = document.getElementById('btn-fetch-llm-models');
-  const addModelBtn = document.getElementById('btn-add-llm-model');
   const statusEl = document.getElementById('setup-llm-status');
+  const searchInput = document.getElementById('setup-llm-search');
 
   if (!keyInput || !fetchBtn) return;
 
@@ -488,149 +492,289 @@ function setupLlmUI() {
     setupLlmApiKey = e.target.value.trim();
   });
 
-  // Fetch models
+  // Search input — filter the rendered list on the frontend
+  if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+      llmSearchQuery = e.target.value.trim().toLowerCase();
+      renderLlmModelList();
+    });
+  }
+
+  // Fetch models sorted by intelligence (conditionally free-only)
   fetchBtn.addEventListener('click', async () => {
     setupLlmApiKey = keyInput.value.trim();
-    if (!setupLlmApiKey) {
-      statusEl.style.color = '#ff4d4d';
-      statusEl.textContent = 'Please enter a valid Gemini API key first.';
-      return;
-    }
+    const freeOnly = document.getElementById('setup-llm-free-only')?.checked ?? true;
 
     statusEl.style.color = 'var(--text-muted)';
-    statusEl.textContent = 'Fetching models from Gemini API...';
+    statusEl.textContent = freeOnly
+      ? 'Fetching free models from OpenRouter...'
+      : 'Fetching models from OpenRouter...';
     fetchBtn.disabled = true;
 
     try {
-      const ai = new GoogleGenAI({ apiKey: setupLlmApiKey });
-      const response = await ai.models.list();
-      let rawModels = [];
-
-      if (response && response[Symbol.asyncIterator]) {
-        for await (const m of response) {
-          rawModels.push(m);
-        }
-      } else if (Array.isArray(response)) {
-        rawModels = response;
-      } else if (Array.isArray(response?.models)) {
-        rawModels = response.models;
-      } else if (response && response[Symbol.iterator]) {
-        rawModels = Array.from(response);
+      const headers = {
+        'HTTP-Referer': window.location.origin || 'http://localhost:3000',
+        'X-Title': '4X Strategy Game'
+      };
+      if (setupLlmApiKey) {
+        headers['Authorization'] = `Bearer ${setupLlmApiKey}`;
       }
 
-      // Filter models that support "generateContent"
-      setupLlmFetchedModels = rawModels.filter(m => {
-        const methods = m.supportedActions || m.supportedGenerationMethods || [];
-        return Array.isArray(methods) && methods.includes('generateContent');
-      }).map(m => {
-        const id = m.name ? m.name.replace(/^models\//, '') : (m.id || '');
-        const displayName = m.displayName || id;
-        return { id, displayName };
-      });
+      let url = 'https://openrouter.ai/api/v1/models?sort=intelligence-high-to-low';
+      if (freeOnly) {
+        url += '&max_price=0&min_price=0';
+      }
 
-      // Sort models alphabetically by id
-      setupLlmFetchedModels.sort((a, b) => a.id.localeCompare(b.id));
+      const response = await fetch(url, { headers });
 
-      if (setupLlmFetchedModels.length === 0) {
+      if (!response.ok) {
+        throw new Error(`OpenRouter HTTP ${response.status}`);
+      }
+
+      const json = await response.json();
+      const rawModels = Array.isArray(json.data) ? json.data : [];
+
+      if (rawModels.length === 0) {
         statusEl.style.color = '#f1c40f';
-        statusEl.textContent = 'No models supporting generateContent found for this API key.';
+        statusEl.textContent = freeOnly
+          ? 'No free models returned by OpenRouter.'
+          : 'No models returned by OpenRouter.';
       } else {
+        // Preserve prior enabled flags and selection order when re-fetching
+        const existingEnabled = new Map(setupLlmModels.map(m => [m.id, m.enabled]));
+        setupLlmModels = rawModels.map(m => ({
+          id: m.id,
+          name: m.name || m.id,
+          enabled: existingEnabled.has(m.id) ? existingEnabled.get(m.id) : false
+        }));
+
         statusEl.style.color = '#2ecc71';
-        statusEl.textContent = `Successfully fetched ${setupLlmFetchedModels.length} models supporting generateContent.`;
+        const label = freeOnly ? 'free models' : 'models';
+        statusEl.textContent = `Successfully fetched ${setupLlmModels.length} ${label} (sorted by intelligence).`;
 
-        // Populate model dropdown
-        const select = document.getElementById('setup-llm-model-select');
-        select.innerHTML = '';
-        setupLlmFetchedModels.forEach(m => {
-          const opt = document.createElement('option');
-          opt.value = m.id;
-          opt.textContent = m.displayName !== m.id ? `${m.displayName} (${m.id})` : m.id;
-          select.appendChild(opt);
-        });
-
-        // Show picker
         const picker = document.getElementById('setup-llm-model-picker');
         if (picker) picker.style.display = 'flex';
+
+        // Clear search
+        llmSearchQuery = '';
+        if (searchInput) searchInput.value = '';
+
+        renderLlmModelList();
       }
     } catch (err) {
-      console.error('Failed to fetch models:', err);
+      console.error('Failed to fetch OpenRouter models:', err);
       statusEl.style.color = '#ff4d4d';
       statusEl.textContent = `Fetch error: ${err.message || err}`;
     } finally {
       fetchBtn.disabled = false;
     }
   });
-
-  // Add model to priority list
-  if (addModelBtn) {
-    addModelBtn.addEventListener('click', () => {
-      const select = document.getElementById('setup-llm-model-select');
-      const selectedModel = select ? select.value : '';
-      if (selectedModel && !setupLlmOrderedModels.includes(selectedModel)) {
-        setupLlmOrderedModels.push(selectedModel);
-        renderLlmPriorityList();
-      }
-    });
-  }
 }
 
-function renderLlmPriorityList() {
+/**
+ * Returns a sorted view of setupLlmModels with selected (enabled) models first,
+ * preserving relative order within each group. Maps each entry to its original
+ * index in setupLlmModels so mutations target the canonical array.
+ */
+function getSortedModelView() {
+  const indexed = setupLlmModels.map((m, i) => ({ model: m, originalIndex: i }));
+  const selected = indexed.filter(e => e.model.enabled);
+  const unselected = indexed.filter(e => !e.model.enabled);
+  return [...selected, ...unselected];
+}
+
+function renderLlmModelList() {
   const container = document.getElementById('setup-llm-priority-list');
   const picker = document.getElementById('setup-llm-model-picker');
+  const countEl = document.getElementById('setup-llm-selection-count');
   if (!container) return;
 
-  if (setupLlmOrderedModels.length > 0 && picker) {
+  if (setupLlmModels.length > 0 && picker) {
     picker.style.display = 'flex';
   }
 
   container.innerHTML = '';
 
-  if (setupLlmOrderedModels.length === 0) {
-    container.innerHTML = `<div style="font-size: 12px; color: var(--text-muted); padding: 4px 0;">No priority models added yet. Select a model above to add it.</div>`;
+  // Update selection counter
+  const selectedCount = setupLlmModels.filter(m => m.enabled).length;
+  if (countEl) {
+    countEl.textContent = `${selectedCount} / ${LLM_MAX_SELECTED} selected`;
+    countEl.style.color = selectedCount >= LLM_MAX_SELECTED ? '#2ecc71' : 'var(--accent-color)';
+  }
+
+  if (setupLlmModels.length === 0) {
+    container.innerHTML = `<div style="font-size: 12px; color: var(--text-muted); padding: 4px 0;">No models fetched yet. Click "Fetch Models" above.</div>`;
     return;
   }
 
-  setupLlmOrderedModels.forEach((modelId, idx) => {
+  // Get sorted view: selected first, then unselected
+  const sortedView = getSortedModelView();
+
+  // Apply search filter
+  const filteredView = llmSearchQuery
+    ? sortedView.filter(entry => {
+        const q = llmSearchQuery;
+        return entry.model.name.toLowerCase().includes(q) || entry.model.id.toLowerCase().includes(q);
+      })
+    : sortedView;
+
+  if (filteredView.length === 0) {
+    container.innerHTML = `<div style="font-size: 12px; color: var(--text-muted); padding: 4px 0;">No models match your search.</div>`;
+    return;
+  }
+
+  // Track selected items for priority badge numbering
+  let selectedRank = 0;
+
+  filteredView.forEach((entry, displayIdx) => {
+    const { model, originalIndex } = entry;
+    const isEnabled = !!model.enabled;
+
+    if (isEnabled) selectedRank++;
+
     const row = document.createElement('div');
-    row.className = 'dynamic-row';
+    row.className = 'dynamic-row draggable-row';
+    row.dataset.originalIndex = String(originalIndex);
     row.style.alignItems = 'center';
+    row.style.padding = '6px 10px';
+    row.style.gap = '8px';
+
+    // Only selected models are draggable
+    if (isEnabled) {
+      row.draggable = true;
+      row.style.cursor = 'grab';
+    } else {
+      row.draggable = false;
+      row.style.cursor = 'default';
+      row.style.opacity = '0.7';
+    }
+
+    // Priority badge only for selected models
+    const badgeHtml = isEnabled
+      ? `<span class="priority-badge" style="background: rgba(52, 152, 219, 0.2); color: #3498db; border: 1px solid rgba(52, 152, 219, 0.4); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 700; min-width: 24px; text-align: center;">#${selectedRank}</span>`
+      : `<span style="min-width: 24px;"></span>`;
+
+    // Drag handle only for selected models
+    const dragHandleHtml = isEnabled
+      ? `<span class="drag-handle" title="Drag to reorder">⋮⋮</span>`
+      : `<span style="width: 18px;"></span>`;
+
+    // Up/Down buttons only for selected models — operate within the selected group
+    const selectedOriginalIndices = setupLlmModels
+      .map((m, i) => m.enabled ? i : -1)
+      .filter(i => i >= 0);
+    const posInSelected = selectedOriginalIndices.indexOf(originalIndex);
+    const isFirstSelected = posInSelected === 0;
+    const isLastSelected = posInSelected === selectedOriginalIndices.length - 1;
+
+    const upDownHtml = isEnabled
+      ? `<div style="display: flex; gap: 4px;">
+          <button type="button" class="btn btn-secondary btn-small btn-model-up" style="width: 24px; padding: 2px 0;" ${isFirstSelected ? 'disabled style="opacity:0.3;cursor:not-allowed;"' : ''} title="Move up">▲</button>
+          <button type="button" class="btn btn-secondary btn-small btn-model-down" style="width: 24px; padding: 2px 0;" ${isLastSelected ? 'disabled style="opacity:0.3;cursor:not-allowed;"' : ''} title="Move down">▼</button>
+        </div>`
+      : '';
 
     row.innerHTML = `
-      <span class="priority-badge" style="background: rgba(52, 152, 219, 0.2); color: #3498db; border: 1px solid rgba(52, 152, 219, 0.4); padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700;">#${idx + 1}</span>
-      <span style="flex: 1; font-size: 13px; font-family: monospace; overflow: hidden; text-overflow: ellipsis;">${modelId}</span>
-      <div style="display: flex; gap: 4px;">
-        <button type="button" class="btn btn-secondary btn-small btn-model-up" style="width: 26px; padding: 4px 0;" ${idx === 0 ? 'disabled style="opacity:0.3;cursor:not-allowed;"' : ''}>▲</button>
-        <button type="button" class="btn btn-secondary btn-small btn-model-down" style="width: 26px; padding: 4px 0;" ${idx === setupLlmOrderedModels.length - 1 ? 'disabled style="opacity:0.3;cursor:not-allowed;"' : ''}>▼</button>
-        <button type="button" class="btn btn-danger btn-small btn-model-remove" style="width: 26px; padding: 4px 0;">✕</button>
+      ${dragHandleHtml}
+      ${badgeHtml}
+      <input type="checkbox" class="llm-model-check" style="cursor: pointer;" ${isEnabled ? 'checked' : ''} title="${isEnabled ? 'Deselect model' : (selectedCount >= LLM_MAX_SELECTED ? 'Max ' + LLM_MAX_SELECTED + ' models selected' : 'Select model')}">
+      <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
+        <span style="font-size: 12px; font-weight: 600; color: ${isEnabled ? '#fff' : 'var(--text-muted)'}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${model.name}</span>
+        <span style="font-size: 10px; font-family: monospace; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${model.id}</span>
       </div>
+      ${upDownHtml}
     `;
 
-    const upBtn = row.querySelector('.btn-model-up');
-    const downBtn = row.querySelector('.btn-model-down');
-    const removeBtn = row.querySelector('.btn-model-remove');
-
-    if (upBtn && idx > 0) {
-      upBtn.addEventListener('click', () => {
-        const temp = setupLlmOrderedModels[idx - 1];
-        setupLlmOrderedModels[idx - 1] = setupLlmOrderedModels[idx];
-        setupLlmOrderedModels[idx] = temp;
-        renderLlmPriorityList();
+    // Checkbox toggle with max-3 enforcement
+    const checkbox = row.querySelector('.llm-model-check');
+    if (checkbox) {
+      checkbox.addEventListener('change', (e) => {
+        if (e.target.checked) {
+          // Enforce max selection: auto-evict the lowest priority selected model
+          const currentlySelected = setupLlmModels.filter(m => m.enabled);
+          if (currentlySelected.length >= LLM_MAX_SELECTED) {
+            // The last enabled model in the array is the lowest priority
+            const selectedInOrder = setupLlmModels.filter(m => m.enabled);
+            const evictTarget = selectedInOrder[selectedInOrder.length - 1];
+            evictTarget.enabled = false;
+          }
+          model.enabled = true;
+        } else {
+          model.enabled = false;
+        }
+        renderLlmModelList();
       });
     }
 
-    if (downBtn && idx < setupLlmOrderedModels.length - 1) {
-      downBtn.addEventListener('click', () => {
-        const temp = setupLlmOrderedModels[idx + 1];
-        setupLlmOrderedModels[idx + 1] = setupLlmOrderedModels[idx];
-        setupLlmOrderedModels[idx] = temp;
-        renderLlmPriorityList();
-      });
-    }
+    // Up / Down buttons — swap within the canonical setupLlmModels array
+    if (isEnabled) {
+      const upBtn = row.querySelector('.btn-model-up');
+      const downBtn = row.querySelector('.btn-model-down');
 
-    if (removeBtn) {
-      removeBtn.addEventListener('click', () => {
-        setupLlmOrderedModels.splice(idx, 1);
-        renderLlmPriorityList();
+      if (upBtn && !isFirstSelected) {
+        upBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const prevOrigIdx = selectedOriginalIndices[posInSelected - 1];
+          // Swap in the canonical array
+          const temp = setupLlmModels[prevOrigIdx];
+          setupLlmModels[prevOrigIdx] = setupLlmModels[originalIndex];
+          setupLlmModels[originalIndex] = temp;
+          renderLlmModelList();
+        });
+      }
+
+      if (downBtn && !isLastSelected) {
+        downBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const nextOrigIdx = selectedOriginalIndices[posInSelected + 1];
+          // Swap in the canonical array
+          const temp = setupLlmModels[nextOrigIdx];
+          setupLlmModels[nextOrigIdx] = setupLlmModels[originalIndex];
+          setupLlmModels[originalIndex] = temp;
+          renderLlmModelList();
+        });
+      }
+
+      // Drag and drop — only among selected models
+      row.addEventListener('dragstart', (e) => {
+        draggedModelIndex = originalIndex;
+        row.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(originalIndex));
+      });
+
+      row.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        row.classList.add('drag-over');
+      });
+
+      row.addEventListener('dragleave', () => {
+        row.classList.remove('drag-over');
+      });
+
+      row.addEventListener('drop', (e) => {
+        e.preventDefault();
+        row.classList.remove('drag-over');
+        if (draggedModelIndex !== null && draggedModelIndex !== originalIndex) {
+          // Only allow dropping onto other selected models
+          if (model.enabled) {
+            const [movedItem] = setupLlmModels.splice(draggedModelIndex, 1);
+            // Recalculate target index since splice shifted indices
+            const targetIdx = setupLlmModels.indexOf(model);
+            setupLlmModels.splice(targetIdx >= 0 ? targetIdx : originalIndex, 0, movedItem);
+            draggedModelIndex = null;
+            renderLlmModelList();
+          }
+        }
+      });
+
+      row.addEventListener('dragend', () => {
+        draggedModelIndex = null;
+        container.querySelectorAll('.draggable-row').forEach(r => {
+          r.classList.remove('dragging');
+          r.classList.remove('drag-over');
+        });
       });
     }
 
@@ -738,12 +882,12 @@ function handleStartGameClicked() {
   if (keyInput) {
     setupLlmApiKey = keyInput.value.trim();
   }
-  const hasLlm = !!(setupLlmApiKey && setupLlmOrderedModels.length > 0);
+  const orderedModels = setupLlmModels.filter(m => m.enabled).map(m => m.id);
 
   try {
-    sessionStorage.setItem('empires_llm_config', JSON.stringify({
+    sessionStorage.setItem('empires_openrouter_config', JSON.stringify({
       apiKey: setupLlmApiKey,
-      orderedModels: setupLlmOrderedModels
+      models: setupLlmModels
     }));
   } catch (e) {
     console.warn('Failed to save LLM config to session storage:', e);
@@ -794,7 +938,7 @@ function handleStartGameClicked() {
     winCondition: Object.keys(winCondition).length > 0 ? winCondition : null,
     llm: {
       apiKey: setupLlmApiKey,
-      orderedModels: [...setupLlmOrderedModels]
+      orderedModels: orderedModels
     }
   };
 

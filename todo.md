@@ -15,6 +15,8 @@
 
 ## Later ##
 
+- entity controllers are dependent on game code, so they can't be dynamically provided (if they are moved our sourced from somewhere else, the imports won't work)
+- players need to be able to dynamically provide their ai controller class and options
 - entities add/remove themselves from gamestate?
 - unit vision considers center of cell, some cells that are partly visible are hidden - fix?
 - frame drop and lagging?
@@ -22,8 +24,7 @@
 
 ## AI ##
 
+- *** simplify system message and prompt based on thinking output from local model
+
 ## BUGS ##
 
-- entity controllers are dependent on game code, so they can't be dynamically provided (if they are moved our sourced from somewhere else, the imports won't work)
-
-- players need to be able to dynamically provide their ai controller class and options

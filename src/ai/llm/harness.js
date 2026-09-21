@@ -1,20 +1,21 @@
 import { BaseManager } from "../baseManager.js";
-import { GeminiClient } from "./geminiClient.js";
+import { LLMClient } from "./client.js";
 import responseSchema from './response.schema.json' with { type: 'json' };
 import { attack, repair, build, onActionDone } from "../utils.js";
 
 export class Harness extends BaseManager {
     constructor(player, gameState, controller) {
         super(player, gameState, controller);
-        this.llmClient = new GeminiClient({
+        this.llmClient = new LLMClient({
             systemPrompt: this.buildSystemPrompt(),
             responseSchema: responseSchema,
             apiKey: this.gameState.settings?.llm?.apiKey || '',
-            orderedModels: this.gameState.settings?.llm?.orderedModels || ['gemini-2.5-flash', 'gemini-2.0-flash'],
-            maxRetries: 8,
+            orderedModels: this.gameState.settings?.llm?.orderedModels,
+            timeoutMs: 40000,
             generationConfig: {
                 temperature: 0.2,
-                thinkingBudget: 0
+                maxOutputTokens: 8000,
+                thinkingBudget: 8000
             }
         });
     }
