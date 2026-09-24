@@ -8,7 +8,7 @@ import { spawnParticleBurst } from '../renderer.js';
  * BaseEntity - Standard Base Class for all dynamic entity instances in the game.
  * Controller instances ARE the entity objects.
  */
-export class BaseEntity {
+export default class BaseEntity {
   /**
    * @param {Object} entityData - Static metadata from manifest
    * @param {Player|null} ownerPlayer - Owning Player instance
@@ -220,9 +220,8 @@ export class BaseEntity {
   /**
    * Lifecycle Hook called at turn start / game loop step.
    * Deducts maintenance costs. Set active to false if maintenance resources not met.
-   * @param {Object} gameState - GameState reference
    */
-  step(gameState) {
+  step() {
     const cost = this.getCostToMaintain();
     const hasCost = Object.keys(cost).length > 0;
 
@@ -294,6 +293,11 @@ export class BaseEntity {
     } else if (damage && typeof damage === 'object') {
       rawValue = damage.value || 0;
       damageType = damage.type || 'blunt';
+    }
+
+    // if lifeFraction is set, apply additional damage as a fraction of current health
+    if (damage.lifeFraction) {
+      rawValue += this.health * damage.lifeFraction;
     }
 
     const armor = this.armor[damageType] || 1;

@@ -297,7 +297,7 @@
       "name": "barbarianChief",
       "modelUrl": "./assets/units/barbarianChief-optimized.glb",
       "size": 1.8,
-      "controllerUrl": "./src/controllers/barbarianChief.js",
+      "controllerUrl": "./src/controllers/barbarian.js",
       "health": 500,
       "maxHealth": 500,
       "actionPoints": 6,
@@ -335,7 +335,7 @@
       "name": "swordsman",
       "modelUrl": "./assets/units/swordsman-optimized.glb",
       "size": 1.4,
-      "controllerUrl": "./src/controllers/swordsman.js",
+      "controllerUrl": "./src/controllers/unitEntity.js",
       "health": 200,
       "maxHealth": 200,
       "actionPoints": 5,
@@ -373,7 +373,7 @@
       "name": "worker",
       "modelUrl": "./assets/units/worker-optimized.glb",
       "size": 1.2,
-      "controllerUrl": "./src/controllers/worker.js",
+      "controllerUrl": "./src/controllers/unitEntity.js",
       "health": 100,
       "maxHealth": 100,
       "actionPoints": 5,
@@ -425,7 +425,7 @@
       "name": "settler",
       "modelUrl": "./assets/units/settler-optimized.glb",
       "size": 1.5,
-      "controllerUrl": "./src/controllers/settler.js",
+      "controllerUrl": "./src/controllers/unitEntity.js",
       "health": 150,
       "maxHealth": 150,
       "actionPoints": 5,
@@ -467,7 +467,7 @@
       "name": "bowman",
       "modelUrl": "./assets/units/bowman-optimized.glb",
       "size": 1.3,
-      "controllerUrl": "./src/controllers/bowman.js",
+      "controllerUrl": "./src/controllers/unitEntity.js",
       "health": 150,
       "maxHealth": 150,
       "actionPoints": 6,
@@ -510,7 +510,7 @@
       "name": "horseman",
       "modelUrl": "./assets/units/horseman-optimized.glb",
       "size": 1.5,
-      "controllerUrl": "./src/controllers/horseman.js",
+      "controllerUrl": "./src/controllers/unitEntity.js",
       "health": 200,
       "maxHealth": 200,
       "actionPoints": 8,
@@ -544,9 +544,47 @@
       }
     },
     {
+      "name": "assassin",
+      "modelUrl": "./assets/units/assassin-optimized.glb",
+      "size": 1.5,
+      "controllerUrl": "./src/controllers/unitEntity.js",
+      "health": 100,
+      "maxHealth": 100,
+      "actionPoints": 7,
+      "maxActionPoints": 7,
+      "attackCostScale": 1.5,
+      "healthRegenScale": 5,
+      "damage": {
+        "value": 20,
+        "lifeFraction": 0.25,
+        "type": "poison",
+        "elevationAdjustment": 1
+      },
+      "range": null,
+      "armor": {
+        "slashing": 1,
+        "piercing": 1,
+        "blunt": 0.75
+      },
+      "maintenance": {
+        "food": 5,
+        "gold": 5
+      },
+      "spawnCost": {
+        "food": 60,
+        "gold": 100
+      },
+      "rotationOffset": 90,
+      "sightRange": 4,
+      "score": {
+        "military": 10,
+        "economic": 0
+      }
+    },
+    {
       "name": "village",
       "modelUrl": "./assets/constructs/village-optimized.glb",
-      "controllerUrl": "./src/controllers/village.js",
+      "controllerUrl": "./src/controllers/constructEntity.js",
       "health": 500,
       "maxHealth": 500,
       "actionPoints": 1,
@@ -580,7 +618,8 @@
         "bowman",
         "worker",
         "settler",
-        "horseman"
+        "horseman",
+        "assassin"
       ],
       "score": {
         "military": 2,
@@ -590,7 +629,7 @@
     {
       "name": "forge",
       "modelUrl": "./assets/constructs/forge-optimized.glb",
-      "controllerUrl": "./src/controllers/forge.js",
+      "controllerUrl": "./src/controllers/constructEntity.js",
       "health": 300,
       "maxHealth": 300,
       "maintenance": {},
@@ -621,7 +660,7 @@
     {
       "name": "lumberMill",
       "modelUrl": "./assets/constructs/lumberMill-optimized.glb",
-      "controllerUrl": "./src/controllers/lumberMill.js",
+      "controllerUrl": "./src/controllers/constructEntity.js",
       "health": 300,
       "maxHealth": 300,
       "maintenance": {},
@@ -651,7 +690,7 @@
     {
       "name": "mine",
       "modelUrl": "./assets/constructs/mine-optimized.glb",
-      "controllerUrl": "./src/controllers/mine.js",
+      "controllerUrl": "./src/controllers/constructEntity.js",
       "health": 400,
       "maxHealth": 400,
       "maintenance": {},
@@ -683,7 +722,7 @@
     {
       "name": "farm",
       "modelUrl": "./assets/constructs/farm-optimized.glb",
-      "controllerUrl": "./src/controllers/farm.js",
+      "controllerUrl": "./src/controllers/constructEntity.js",
       "health": 200,
       "maxHealth": 200,
       "maintenance": {},

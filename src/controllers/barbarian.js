@@ -1,4 +1,4 @@
-import { UnitEntity } from './unitEntity.js';
+import UnitEntity from './unitEntity.js';
 
 export default class BarbarianController extends UnitEntity {
   constructor(entityData, ownerPlayer, gridProxy, cell, initialState = null) {

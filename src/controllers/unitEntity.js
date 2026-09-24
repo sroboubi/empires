@@ -1,4 +1,4 @@
-import { BaseEntity } from './baseEntity.js';
+import BaseEntity from './baseEntity.js';
 import { HexGrid } from '../hexGrid.js';
 import { CONFIG } from '../config.js';
 import { calculateAttackMultiplier } from '../utils.js';
@@ -7,7 +7,7 @@ import { calculateAttackMultiplier } from '../utils.js';
  * UnitEntity - Base Class for all mobile, combat-capable units.
  * Extends BaseEntity with action points, range, attack, facing attributes.
  */
-export class UnitEntity extends BaseEntity {
+export default class UnitEntity extends BaseEntity {
   constructor(entityData, ownerPlayer, gameState, cell, initialState = null) {
     super(entityData, ownerPlayer, gameState, cell, initialState);
   }
@@ -41,9 +41,8 @@ export class UnitEntity extends BaseEntity {
    * Resets action points at the start of a turn step.
    * Any action points not used in the previous turn are added to health.
    */
-  step(globalContext) {
-    super.step(globalContext);
-
+  step() {
+    super.step();
     this.state.battleExhaustion = 1;
   }
 
@@ -172,10 +171,11 @@ export class UnitEntity extends BaseEntity {
 
           const multiplier = calculateAttackMultiplier(this.gameState, this.cell, this.damage.elevationAdjustment, entity);
           const rawDamage = this.damage.value * multiplier.total;
+          const lifeFractionStr = this.damage.lifeFraction ? ` + ${this.damage.lifeFraction} of current health` : '';
 
           return {
             possible: true,
-            reason: `Attack ${entity.name.toUpperCase()} for ~${rawDamage.toFixed(2)} dmg (${multiplier.direction.toFixed(2)}x dir, ${multiplier.elevation.toFixed(2)}x elev) costing ${cost} AP and 1 order.`,
+            reason: `Attack ${entity.name.toUpperCase()} for ~${rawDamage.toFixed(2)} dmg (${multiplier.direction.toFixed(2)}x dir, ${multiplier.elevation.toFixed(2)}x elev)${lifeFractionStr} costing ${cost} AP and 1 order.`,
             cost: cost,
             ordersRequired: affordability.ordersRequired,
             multiplier: multiplier.direction,
@@ -196,7 +196,7 @@ export class UnitEntity extends BaseEntity {
 
           this.spendActionCost(check.cost, check.ordersRequired);
           const targetHealthBefore = entity.health;
-          entity.receiveDamage({ value: check.rawDamage, type: this.damage.type }, this);
+          entity.receiveDamage({ value: check.rawDamage, ...this.damage }, this);
           const actualDamage = targetHealthBefore - entity.health;
           this.state.battleExhaustion++;
 
