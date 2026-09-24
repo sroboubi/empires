@@ -242,3 +242,4 @@ Implement the game configuration loading system using the provided JSON architec
 3. Allow user to select an ordered list from these models to be used in priority order.
 4. Save the key and selected list in session storage and add it to game settings/state inside an "llm" object.
 5. Review the LLM integration in ai/llm and ensure the logic makes sense and will work as expected. Fix any issues you find. 
+<!-- SIMBA-TEST: connection test 2026-09-24, safe to revert -->
