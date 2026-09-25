@@ -18,6 +18,7 @@ import {
 } from './renderer.js';
 import { loadGameManifest } from './manifestLoader.js';
 import { HexGrid } from './hexGrid.js';
+import { audio } from './audio.js';
 import { saveGame, loadGame, listSaves, deleteSave, pruneAutoSaves } from './saveManager.js';
 
 let gameState;
@@ -52,6 +53,11 @@ async function init() {
 
     manifestData = manifestResult;
     defaultSettings = settingsResult;
+
+    // Audio: hand the manifest to the SFX manager (file names are config-driven)
+    // and initialize the Web Audio context (unlocked on first user gesture).
+    audio.setManifest(manifestData);
+    audio.init();
 
     // 2. Initialize 3D Renderer and preload models
     const canvas = document.getElementById('game-canvas');
@@ -92,6 +98,13 @@ async function init() {
       }
     });
 
+    // UI click sound for every button press (config-driven file, manifest sfx.ui.click).
+    window.addEventListener('click', (e) => {
+      if (e.target.closest('button')) {
+        audio.playUi('click');
+      }
+    });
+
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         hideContextMenu();
@@ -108,6 +121,16 @@ async function init() {
     // Control buttons
     document.getElementById('btn-save-game').addEventListener('click', () => openSaveLoadModal('save'));
     document.getElementById('btn-load-game').addEventListener('click', () => openSaveLoadModal('load'));
+
+    // Audio mute toggle
+    const muteBtn = document.getElementById('btn-mute');
+    const renderMuteIcon = () => { muteBtn.textContent = audio.muted ? '🔇' : '🔊'; };
+    muteBtn.addEventListener('click', () => {
+      audio.toggleMute();
+      renderMuteIcon();
+      showToast(audio.muted ? 'Audio muted' : 'Audio unmuted');
+    });
+    renderMuteIcon();
     document.getElementById('btn-next-turn').addEventListener('click', nextTurn);
 
     // Modal UI buttons
@@ -1221,6 +1244,11 @@ export async function nextTurn() {
 
   showToast(`Turn passed to ${gameState.activePlayer ? gameState.activePlayer.name : ''} (Round ${gameState.currentRound})`);
 
+  // Chime when the turn comes back to a human player.
+  if (gameState.activePlayer && !gameState.activePlayer.isAI) {
+    audio.playUi('turn');
+  }
+
   // Check auto-save condition
   checkAutoSave();
 
@@ -1380,6 +1408,7 @@ function handleRightClick(event) {
 
 function selectEntity(entity) {
   selectedEntity = entity;
+  audio.playEntitySfx(entity, 'select');
   const cell = entity.cell || gameState.cells[`${entity.q},${entity.r}`];
 
   if (cell) {
@@ -1482,6 +1511,7 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
         const success = action.do ? action.do(targetCell, targetEntity) : false;
 
         if (success) {
+          audio.playEntitySfx(selectedEntity, 'action', action.name);
           showToast(check.reason || `Executed ${action.name}`);
         } else {
           showToast(`Failed to execute ${action.name}`, true);
