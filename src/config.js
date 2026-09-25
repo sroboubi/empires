@@ -10,6 +10,8 @@ export var CONFIG = {
   PAN_CAMERA_ON_HUMAN_TURN: true,
   PAN_CAMERA_ON_AI_TURN: false,
   MIN_GAME_ROUNDS: 5,
+  AUDIO_ENABLED: true,   // master switch for all game audio (query-param overridable)
+  AUDIO_VOLUME: 0.8,     // master volume 0..1 (query-param overridable)
 };
 
 // Parse the current URL parameters
