@@ -174,38 +174,19 @@ function openSetupModal(canClose = true) {
   document.getElementById('setup-autosave-interval').value = autoSave.intervalTurns;
   document.getElementById('setup-autosave-max').value = autoSave.maxAutoSaves;
 
-  // Barbarian Settings
-  const barbarians = defaultSettings.barbarians || {
-    horde: { barbarian: { min: 3, max: 5 }, barbarianChief: { min: 1, max: 2 } },
-    spawnFrequencyTurns: 5,
-    maxNumber: 20,
-    maxAge: 30
-  };
+  // Barbarian Settings — dynamically render horde sliders from defaultSettings.barbarians.horde
+  const barbarians = defaultSettings.barbarians || null;
   const enabledCheckbox = document.getElementById('setup-barbarians-enabled');
   const collapsible = document.getElementById('setup-barbarian-collapsible');
   enabledCheckbox.checked = barbarians !== null && barbarians !== undefined;
   collapsible.classList.toggle('expanded', enabledCheckbox.checked);
 
-  const setRange = (minId, maxId, minVal, maxVal) => {
-    const minEl = document.getElementById(minId);
-    const maxEl = document.getElementById(maxId);
-    const minLabel = document.getElementById(`${minId}-val`);
-    const maxLabel = document.getElementById(`${maxId}-val`);
-    const lo = Math.min(minVal, maxVal);
-    const hi = Math.max(minVal, maxVal);
-    minEl.value = lo;
-    maxEl.value = hi;
-    if (minLabel) minLabel.textContent = lo;
-    if (maxLabel) maxLabel.textContent = hi;
-  };
-  setRange('setup-barbarian-barbarian-min', 'setup-barbarian-barbarian-max',
-    barbarians.horde?.barbarian?.min ?? 3, barbarians.horde?.barbarian?.max ?? 5);
-  setRange('setup-barbarian-chief-min', 'setup-barbarian-chief-max',
-    barbarians.horde?.barbarianChief?.min ?? 1, barbarians.horde?.barbarianChief?.max ?? 2);
+  // Render one range-slider widget per horde unit key found in settings
+  renderBarbarianHordeSliders(barbarians?.horde || {});
   updateAllRangeFills();
-  document.getElementById('setup-barbarian-spawn-frequency').value = barbarians.spawnFrequencyTurns || 5;
-  document.getElementById('setup-barbarian-max-number').value = barbarians.maxNumber || 20;
-  document.getElementById('setup-barbarian-max-age').value = barbarians.maxAge || 30;
+  document.getElementById('setup-barbarian-spawn-frequency').value = barbarians?.spawnFrequencyTurns || 5;
+  document.getElementById('setup-barbarian-max-number').value = barbarians?.maxNumber || 20;
+  document.getElementById('setup-barbarian-max-age').value = barbarians?.maxAge || 30;
 
   // Win Conditions
   const winCondition = defaultSettings.winCondition || { absoluteScore: 1000, relativeScore: 2 };
@@ -404,13 +385,89 @@ function addSetupUnitRow() {
 }
 
 /* --------------------------------------------------------------------------
-   BARBARIAN SETUP UI: enable toggle, range slider, collapsible section
+   BARBARIAN SETUP UI: enable toggle, dynamic horde sliders, collapsible section
+   --------------------------------------------------------------------------
+   All horde unit sliders are generated dynamically from whatever keys exist
+   in defaultSettings.barbarians.horde — no unit names are hardcoded here.
    -------------------------------------------------------------------------- */
 
-const RANGE_SLIDER_IDS = [
-  { id: 'barbarian', minId: 'setup-barbarian-barbarian-min', maxId: 'setup-barbarian-barbarian-max', fillId: 'setup-barbarian-barbarian-range-fill' },
-  { id: 'chief', minId: 'setup-barbarian-chief-min', maxId: 'setup-barbarian-chief-max', fillId: 'setup-barbarian-chief-range-fill' }
-];
+/**
+ * Derive a human-readable label from a camelCase unit name.
+ * e.g. "barbarianChief" -> "Barbarian Chief", "barbarianPrincess" -> "Barbarian Princess"
+ */
+function hordeUnitLabel(unitName) {
+  return unitName
+    .replace(/([A-Z])/g, ' $1')
+    .replace(/^./, s => s.toUpperCase())
+    .trim();
+}
+
+/**
+ * Returns the DOM id prefix used for a given horde unit key.
+ * e.g. "barbarianChief" -> "setup-barbarian-barbarianChief"
+ */
+function hordeUnitIdPrefix(unitName) {
+  return `setup-barbarian-${unitName}`;
+}
+
+/**
+ * Renders one range-slider widget per horde unit in the horde container.
+ * Called each time the setup modal is opened so sliders always reflect the
+ * current defaultSettings. Event listeners are attached inline.
+ * @param {Object} horde - e.g. { barbarian: {min,max}, barbarianChief: {min,max}, ... }
+ */
+function renderBarbarianHordeSliders(horde) {
+  const container = document.getElementById('setup-barbarian-horde-container');
+  if (!container) return;
+  container.innerHTML = '';
+
+  Object.entries(horde).forEach(([unitName, { min: defaultMin, max: defaultMax }]) => {
+    const prefix = hordeUnitIdPrefix(unitName);
+    const minId  = `${prefix}-min`;
+    const maxId  = `${prefix}-max`;
+    const fillId = `${prefix}-range-fill`;
+    const minValId = `${minId}-val`;
+    const maxValId = `${maxId}-val`;
+
+    // Infer a sensible slider upper bound from the default max (at least 10)
+    const sliderMax = Math.max(defaultMax * 3, 10);
+
+    const group = document.createElement('div');
+    group.className = 'form-group';
+    group.innerHTML = `
+      <label class="form-label">${hordeUnitLabel(unitName)} Horde (Min — Max)</label>
+      <div class="range-slider" data-range-id="${unitName}">
+        <div class="rs-track"></div>
+        <div class="rs-range" id="${fillId}"></div>
+        <input type="range" id="${minId}" min="0" max="${sliderMax}" value="${defaultMin}" step="1">
+        <input type="range" id="${maxId}" min="0" max="${sliderMax}" value="${defaultMax}" step="1">
+        <div class="rs-labels">
+          <span>Min: <strong id="${minValId}">${defaultMin}</strong></span>
+          <span>Max: <strong id="${maxValId}">${defaultMax}</strong></span>
+        </div>
+      </div>
+    `;
+    container.appendChild(group);
+
+    // Attach live update handlers
+    const minEl = document.getElementById(minId);
+    const maxEl = document.getElementById(maxId);
+    const cfg = { minId, maxId, fillId };
+    const handler = (e) => {
+      let lo = parseInt(minEl.value, 10);
+      let hi = parseInt(maxEl.value, 10);
+      if (lo > hi) {
+        if (e.target === minEl) { minEl.value = hi; lo = hi; }
+        else { maxEl.value = lo; hi = lo; }
+      }
+      document.getElementById(minValId).textContent = lo;
+      document.getElementById(maxValId).textContent = hi;
+      updateRangeFill(cfg);
+    };
+    minEl.addEventListener('input', handler);
+    maxEl.addEventListener('input', handler);
+  });
+}
 
 function setupBarbarianUI() {
   const enabledCheckbox = document.getElementById('setup-barbarians-enabled');
@@ -420,46 +477,34 @@ function setupBarbarianUI() {
   enabledCheckbox.addEventListener('change', () => {
     collapsible.classList.toggle('expanded', enabledCheckbox.checked);
   });
-
-  RANGE_SLIDER_IDS.forEach(cfg => {
-    const minEl = document.getElementById(cfg.minId);
-    const maxEl = document.getElementById(cfg.maxId);
-    if (!minEl || !maxEl) return;
-    const handler = (e) => {
-      let lo = parseInt(minEl.value, 10);
-      let hi = parseInt(maxEl.value, 10);
-      if (lo > hi) {
-        // Enforce min <= max: clamp the moved handle so it does not cross the other
-        if (e.target === minEl) { minEl.value = hi; lo = hi; }
-        else { maxEl.value = lo; hi = lo; }
-      }
-      document.getElementById(`${cfg.minId}-val`).textContent = lo;
-      document.getElementById(`${cfg.maxId}-val`).textContent = hi;
-      updateRangeFill(cfg);
-    };
-    minEl.addEventListener('input', handler);
-    maxEl.addEventListener('input', handler);
-  });
+  // Individual slider listeners are attached in renderBarbarianHordeSliders()
 }
 
 function updateRangeFill(cfg) {
   const minEl = document.getElementById(cfg.minId);
   const maxEl = document.getElementById(cfg.maxId);
-  const fill = document.getElementById(cfg.fillId);
+  const fill  = document.getElementById(cfg.fillId);
   if (!minEl || !maxEl || !fill) return;
-  const min = parseInt(minEl.min, 10);
-  const max = parseInt(minEl.max, 10);
+  const min   = parseInt(minEl.min, 10);
+  const max   = parseInt(minEl.max, 10);
   const range = max - min;
-  const lo = parseInt(minEl.value, 10);
-  const hi = parseInt(maxEl.value, 10);
-  const leftPct = ((lo - min) / range) * 100;
-  const widthPct = ((hi - lo) / range) * 100;
-  fill.style.left = `${leftPct}%`;
-  fill.style.width = `${widthPct}%`;
+  const lo    = parseInt(minEl.value, 10);
+  const hi    = parseInt(maxEl.value, 10);
+  fill.style.left  = `${((lo - min) / range) * 100}%`;
+  fill.style.width = `${((hi - lo) / range) * 100}%`;
 }
 
 function updateAllRangeFills() {
-  RANGE_SLIDER_IDS.forEach(updateRangeFill);
+  // Enumerate all range-slider widgets currently in the DOM
+  document.querySelectorAll('.range-slider[data-range-id]').forEach(slider => {
+    const unitName = slider.dataset.rangeId;
+    const prefix   = hordeUnitIdPrefix(unitName);
+    updateRangeFill({
+      minId:  `${prefix}-min`,
+      maxId:  `${prefix}-max`,
+      fillId: `${prefix}-range-fill`
+    });
+  });
 }
 
 /* --------------------------------------------------------------------------
@@ -919,21 +964,24 @@ function handleStartGameClicked() {
       maxAutoSaves: parseInt(document.getElementById('setup-autosave-max').value, 10) || 10
     },
     barbarians: document.getElementById('setup-barbarians-enabled').checked
-      ? {
-        horde: {
-          barbarian: {
-            min: parseInt(document.getElementById('setup-barbarian-barbarian-min').value, 10) || 0,
-            max: parseInt(document.getElementById('setup-barbarian-barbarian-max').value, 10) || 0
-          },
-          barbarianChief: {
-            min: parseInt(document.getElementById('setup-barbarian-chief-min').value, 10) || 0,
-            max: parseInt(document.getElementById('setup-barbarian-chief-max').value, 10) || 0
-          }
-        },
-        spawnFrequencyTurns: parseInt(document.getElementById('setup-barbarian-spawn-frequency').value, 10) || 5,
-        maxNumber: parseInt(document.getElementById('setup-barbarian-max-number').value, 10) || 20,
-        maxAge: parseInt(document.getElementById('setup-barbarian-max-age').value, 10) || 30
-      }
+      ? (() => {
+        // Collect horde values dynamically — one entry per slider widget rendered
+        const horde = {};
+        document.querySelectorAll('#setup-barbarian-horde-container .range-slider[data-range-id]').forEach(slider => {
+          const unitName = slider.dataset.rangeId;
+          const prefix   = hordeUnitIdPrefix(unitName);
+          horde[unitName] = {
+            min: parseInt(document.getElementById(`${prefix}-min`).value, 10) || 0,
+            max: parseInt(document.getElementById(`${prefix}-max`).value, 10) || 0
+          };
+        });
+        return {
+          horde,
+          spawnFrequencyTurns: parseInt(document.getElementById('setup-barbarian-spawn-frequency').value, 10) || 5,
+          maxNumber: parseInt(document.getElementById('setup-barbarian-max-number').value, 10) || 20,
+          maxAge: parseInt(document.getElementById('setup-barbarian-max-age').value, 10) || 30
+        };
+      })()
       : null,
     winCondition: Object.keys(winCondition).length > 0 ? winCondition : null,
     llm: {

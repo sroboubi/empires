@@ -1189,34 +1189,8 @@
             <input type="checkbox" id="setup-barbarians-enabled"> Enable Barbarians
           </label>
           <div id="setup-barbarian-collapsible" class="collapsible-section">
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-              <div class="form-group">
-                <label class="form-label">Barbarian Horde (Min — Max)</label>
-                <div class="range-slider" data-range-id="barbarian">
-                  <div class="rs-track"></div>
-                  <div class="rs-range" id="setup-barbarian-barbarian-range-fill"></div>
-                  <input type="range" id="setup-barbarian-barbarian-min" min="0" max="20" value="3" step="1">
-                  <input type="range" id="setup-barbarian-barbarian-max" min="0" max="20" value="5" step="1">
-                  <div class="rs-labels">
-                    <span>Min: <strong id="setup-barbarian-barbarian-min-val">3</strong></span>
-                    <span>Max: <strong id="setup-barbarian-barbarian-max-val">5</strong></span>
-                  </div>
-                </div>
-              </div>
-              <div class="form-group">
-                <label class="form-label">Chief Horde (Min — Max)</label>
-                <div class="range-slider" data-range-id="chief">
-                  <div class="rs-track"></div>
-                  <div class="rs-range" id="setup-barbarian-chief-range-fill"></div>
-                  <input type="range" id="setup-barbarian-chief-min" min="0" max="10" value="1" step="1">
-                  <input type="range" id="setup-barbarian-chief-max" min="0" max="10" value="2" step="1">
-                  <div class="rs-labels">
-                    <span>Min: <strong id="setup-barbarian-chief-min-val">1</strong></span>
-                    <span>Max: <strong id="setup-barbarian-chief-max-val">2</strong></span>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <!-- Horde unit range sliders are generated dynamically from defaultSettings.barbarians.horde -->
+            <div id="setup-barbarian-horde-container" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;"></div>
             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-top: 16px;">
               <div class="form-group">
                 <label class="form-label">Spawn Frequency (Turns)</label>

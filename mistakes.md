@@ -51,4 +51,9 @@ This file documents mistakes made during development, reasons why they occurred,
 - **Why it was made**: Attempted to catch arbitrary entities without respecting the designated `player.getOpponents(gameState)` API.
 - **What to avoid in the future**: Always use `player.getOpponents(gameState)` to retrieve visible opponent entities, strictly following Guideline 19.
 
+---
 
+### Mistake 8: Hardcoding barbarian horde unit names in the setup UI
+- **Description**: In `index.html`, range-slider widgets were hardcoded for `barbarian` and `barbarianChief` units. In `src/main.js`, `RANGE_SLIDER_IDS`, the `setRange` calls in `openSetupModal`, and the `horde` object construction in `handleStartGameClicked` all referenced those two names explicitly. Adding a new unit (e.g. `barbarianPrincess`) to `defaultSettings.json` had no effect on the UI.
+- **Why it was made**: The initial implementation assumed only the two predefined horde unit types would ever exist.
+- **What to avoid in the future**: Never hardcode entity/unit names when the authoritative source is a config file. Always iterate over `Object.keys(config)` / `Object.entries(config)` to generate UI widgets dynamically, so the UI automatically reflects any additions or removals in the config.
