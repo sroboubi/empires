@@ -27,6 +27,20 @@ const OPPOSITE_DIRECTION = {
 };
 
 /**
+ * The eight compass directions in clockwise order starting from East (0 rad).
+ */
+const DIRECTIONS_8 = ['E', 'NE', 'N', 'NW', 'W', 'SW', 'S', 'SE'];
+
+/**
+ * Reverse mapping for 8-way compass directions.
+ */
+const OPPOSITE_DIRECTION_8 = {
+  ...OPPOSITE_DIRECTION,
+  N: 'S',
+  S: 'N'
+};
+
+/**
  * HexGrid — encapsulates the hex grid, all hex math, cell storage,
  * pathfinding, direction, movement cost, and line-of-sight calculations.
  *
@@ -281,17 +295,20 @@ export class HexGrid {
   /**
    * Determines the compass direction from source to target hex.
    * Returns an object with:
-   *   - fromSource: direction name to look from source toward target (E, NE, NW, W, SW, SE)
+   *   - fromSource: direction name to look from source toward target (E, NE, NW, W, SW, SE; or 8-way if unsnapped)
    *   - fromTarget: direction name to look from target toward source (the opposite)
    *
-   * For non-adjacent hexes, this returns the closest matching direction
-   * based on the angle between the two hex centers.
+   * For adjacent hexes, returns the exact axial neighbor direction.
+   * For non-adjacent hexes:
+   *   - if unsnapped is true: returns one of the 8 compass directions (E, NE, N, NW, W, SW, S, SE)
+   *   - if unsnapped is false: returns the closest matching 6-axial direction
    *
    * @param {{q: number, r: number}} source
    * @param {{q: number, r: number}} target
+   * @param {boolean} [unsnapped=false]
    * @returns {{fromSource: string, fromTarget: string}}
    */
-  directionTo(source, target) {
+  directionTo(source, target, unsnapped = false) {
     const dq = target.q - source.q;
     const dr = target.r - source.r;
 
@@ -312,6 +329,14 @@ export class HexGrid {
     // atan2 gives angle from positive x-axis; we use (dx, -dz) so that
     // "up" on screen (negative z) corresponds to a positive angle.
     const angle = Math.atan2(-dz, dx);
+
+    if (unsnapped) {
+      let deg = (angle * 180) / Math.PI;
+      if (deg < 0) deg += 360;
+      const index = Math.round(deg / 45) % 8;
+      const bestName = DIRECTIONS_8[index];
+      return { fromSource: bestName, fromTarget: OPPOSITE_DIRECTION_8[bestName] };
+    }
 
     // Map each direction to its angular position
     let bestName = 'E';
@@ -388,7 +413,7 @@ export class HexGrid {
       if (heap.length > 0) {
         heap[0] = last;
         let i = 0;
-        for (;;) {
+        for (; ;) {
           const l = 2 * i + 1, r = l + 1;
           let m = i;
           if (l < heap.length && heap[l].cost < heap[m].cost) m = l;

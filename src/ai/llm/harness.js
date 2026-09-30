@@ -2,28 +2,32 @@ import { BaseManager } from "../baseManager.js";
 import { LLMClient } from "./client.js";
 import responseSchema from './response.schema.json' with { type: 'json' };
 import { attack, repair, build, onActionDone } from "../utils.js";
+import { HexGrid } from '../../hexGrid.js';
 
 export class Harness extends BaseManager {
     constructor(player, gameState, controller) {
         super(player, gameState, controller);
-        this.llmClient = new LLMClient({
-            systemPrompt: this.buildSystemPrompt(),
-            responseSchema: responseSchema,
-            apiKey: this.gameState.settings?.llm?.apiKey || '',
-            orderedModels: this.gameState.settings?.llm?.orderedModels,
-            timeoutMs: 40000,
-            generationConfig: {
-                temperature: 0.2,
-                maxOutputTokens: 8000,
-                thinkingBudget: 8000
-            }
-        });
     }
 
     /**
      * Processes a player's turn by summarizing the game state and interacting with the AI controller.     
      */
     async processTurn() {
+        if (!this.llmClient) {
+            this.llmClient = new LLMClient({
+                systemPrompt: await this.buildSystemPrompt(),
+                responseSchema: responseSchema,
+                apiKey: this.gameState.settings?.llm?.apiKey || '',
+                orderedModels: this.gameState.settings?.llm?.orderedModels,
+                timeoutMs: 40000,
+                generationConfig: {
+                    temperature: 0.2,
+                    maxOutputTokens: 8000,
+                    thinkingBudget: 8000
+                }
+            });
+        }
+
         let attempts = 10; // Safeguard against infinite loops
         let lastResponseError = null;
         let response = null;
@@ -43,7 +47,8 @@ export class Harness extends BaseManager {
             console.debug("system prompt:", this.llmClient.systemPrompt);
             console.debug("user content:", userContent);
 
-            response = await this.llmClient.generate(userContent);
+            //response = await this.llmClient.generate(userContent);
+            response = {};
 
             console.debug("response:", response);
 
@@ -153,60 +158,22 @@ export class Harness extends BaseManager {
      * and stringified JSON manifest data.
      * @returns {string} The formatted system prompt string.
      */
-    buildSystemPrompt() {
+    async buildSystemPrompt() {
         const manifestJson = JSON.stringify(this.summarizeManifest(this.gameState.manifestData || {}), (key, value) => { return value === null ? undefined : value; }, 2);
         const absScoreToWin = this.gameState.settings?.winCondition?.absoluteScore || 1000;
         const relScoreToWin = this.gameState.settings?.winCondition?.relativeScore || 2;
 
-        return `# IDENTITY & OBJECTIVES
-        You are an AI player named "${this.player.name}" in a turn-based hex strategy game. ${this.player.description ? `Here is your description: ${this.player.description}` : ''}
-        Your goal is to maximize your overall score through strategic management of entities, resource economy, map exploration, and tactical positioning.
-
-        # GAME RULES & MECHANICS
-        * On each turn, you will receive a JSON payload representing your current visible game state snapshot, available resources, and active entities.
-        * Analyze the provided game state snapshot, cross-reference entity capabilities in the manifest, and return your chosen actions formatted according to the response schema.
-        * Each action costs 1 Order and 1 or more action points. You have a limited number of orders per turn. 
-        * Each entity has a limited number of action points that are refilled each round. Do not attempt to perform actions with entities that have less than 1 action point available.
-        * "Build" action requires an entityName target (new entity) to build. The builder will attempt to build in an adjacent cell if possible, otherwise will move to build as close as possible.
-        * "Repair" and "Attack" actions require an entityId target. The repairer/attacker will attempt to repair/attack the target, and will move to closer if needed.
-        * "Move" action requires a cell target.
-        * Hex coordinates use axial positioning (q, r). Adjacent hexes differ by 1 unit in q, r, or both.
-        * Each entity provides economic or military score value to your overall empire score. Each visible and explored cell adds to your exploration score. 
-        * Your total score is the geometric mean of your military, economic, and exploration scores. To win, your total score must reach or exceed ${absScoreToWin} or ${relScoreToWin} times the next highest score.
-        * Entities consume maintenance resources each turn. Inactive entities (unpaid upkeep) cannot act or generate yields.
-        * Initiating a diplomatic chat with another player costs 1 Order.
-
-        # GLOBAL MANIFEST & ENTITY DEFINITIONS
-        Use this manifest to inspect resource yields, entity costs, upkeep, terrain properties, and available actions for each entity type:
-        \`\`\`json
-        ${manifestJson}
-        \`\`\`
-
-        # RESPONSE FORMAT INSTRUCTIONS
-        Respond EXCLUSIVELY with a raw JSON object (no markdown code block wrappers).
-
-        1. COMMAND:
-        {
-        "thoughtProcess": "Brief strategic reasoning",
-        "type": "COMMAND",
-        "entityId": "<YOUR_ENTITY_ID>",
-        "actionName": "<ACTION_NAME>",
-        "target": { "cell": { "q": 0, "r": 2 } } // OR { "entityId": "<ID>" } OR { "entityName": "<NAME>" }
+        const response = await fetch('./src/ai/llm/systemPrompt.md');  // TODO configure filepath
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
         }
-
-        2. CHAT (Costs 1 order):
-        {
-        "thoughtProcess": "Brief strategic reasoning",
-        "type": "CHAT",
-        "targetPlayerId": "<OPPONENT_PLAYER_ID>"
-        }
-
-        3. END_TURN (Always use when out of orders or finished):
-        {
-        "thoughtProcess": "Brief strategic reasoning",
-        "type": "END_TURN",
-        "note": "Reminder to myself for next turn"
-        }`;
+        const systemPromptMarkdown = await response.text();
+        return systemPromptMarkdown
+            .replace('${NAME}', this.player.name)
+            .replace('${DESCRIPTION}', this.player.description ? `You are described as: ${this.player.description}` : '')
+            .replace('${ABS_SCORE_TO_WIN}', absScoreToWin)
+            .replace('${REL_SCORE_TO_WIN}', relScoreToWin)
+            .replace('${MANIFEST}', manifestJson);
     }
 
     /**
@@ -241,10 +208,10 @@ export class Harness extends BaseManager {
             resources: this.player.getResourceProfile(this.gameState),
             score: this.player.score,
             history: history,
-            cells: {
-                visible: visibleCellsList.map(cellKey => this.getCellInfo(cellKey)).filter(Boolean),
-                explored: exploredOnly.map(cellKey => this.getCellInfo(cellKey)).filter(Boolean)
-            },
+            // cells: {
+            //     visible: visibleCellsList.map(cellKey => this.getCellInfo(cellKey)).filter(Boolean),
+            //     explored: exploredOnly.map(cellKey => this.getCellInfo(cellKey)).filter(Boolean)
+            // },
             entities: this.player.getEntities(this.gameState).map(e => this.summarizeEntity(e)),
             opponents: opponents
         };
@@ -254,7 +221,9 @@ export class Harness extends BaseManager {
         return {
             id: entity.id,
             name: entity.name,
-            cell: this.cellToString(entity.cell || entity),
+            direction: this.gameState.hexGrid.directionTo(this.player.startCoord, entity.cell, true).fromSource,
+            distance: HexGrid.distance(this.player.startCoord, entity.cell),
+            terrain: entity.cell.terrain?.name,
             health: entity.health,
             maxHealth: entity.maxHealth,
             actionPoints: entity.actionPoints,

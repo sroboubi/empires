@@ -38,9 +38,7 @@
     "startingUnits": {
       "settler": 1,
       "worker": 1,
-      "swordsman": 1,
-      "bowman": 1,
-      "horseman": 1
+      "swordsman": 1
     }
   },
   "autoSave": {

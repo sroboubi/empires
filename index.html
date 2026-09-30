@@ -6,6 +6,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Empires - 3D Hex Grid Visualization</title>
 
+  <!-- Standard Favicon -->
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+
+  <!-- Modern Browsers (PNG alternative) -->
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+
   <!-- Modern Premium Font -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1190,7 +1197,8 @@
           </label>
           <div id="setup-barbarian-collapsible" class="collapsible-section">
             <!-- Horde unit range sliders are generated dynamically from defaultSettings.barbarians.horde -->
-            <div id="setup-barbarian-horde-container" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;"></div>
+            <div id="setup-barbarian-horde-container" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+            </div>
             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-top: 16px;">
               <div class="form-group">
                 <label class="form-label">Spawn Frequency (Turns)</label>
@@ -1235,29 +1243,39 @@
             <!-- API Key Input and Fetch Button -->
             <div style="display: flex; gap: 8px; align-items: center;">
               <div style="position: relative; flex: 1;">
-                <input type="password" id="setup-llm-api-key" class="form-input" placeholder="Enter OpenRouter API Key (sk-or-v1-...)" style="width: 100%; padding-right: 32px;">
-                <button type="button" id="btn-toggle-llm-key" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 14px;" title="Toggle Key Visibility">👁</button>
+                <input type="password" id="setup-llm-api-key" class="form-input"
+                  placeholder="Enter OpenRouter API Key (sk-or-v1-...)" style="width: 100%; padding-right: 32px;">
+                <button type="button" id="btn-toggle-llm-key"
+                  style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 14px;"
+                  title="Toggle Key Visibility">👁</button>
               </div>
-              <label style="display: flex; align-items: center; gap: 5px; font-size: 12px; white-space: nowrap; cursor: pointer; color: var(--text-muted);">
+              <label
+                style="display: flex; align-items: center; gap: 5px; font-size: 12px; white-space: nowrap; cursor: pointer; color: var(--text-muted);">
                 <input type="checkbox" id="setup-llm-free-only" checked> Free Only
               </label>
-              <button id="btn-fetch-llm-models" class="btn btn-secondary btn-small" type="button" style="width: 130px; white-space: nowrap;">Fetch Models</button>
+              <button id="btn-fetch-llm-models" class="btn btn-secondary btn-small" type="button"
+                style="width: 130px; white-space: nowrap;">Fetch Models</button>
             </div>
-            
+
             <div id="setup-llm-status" style="font-size: 12px; color: var(--text-muted); min-height: 16px;"></div>
 
             <!-- Model Selection & Priority Ordering Section -->
             <div id="setup-llm-model-picker" style="display: none; flex-direction: column; gap: 8px;">
               <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span id="setup-llm-picker-title" style="font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Models (Sorted by Intelligence)</span>
-                <span id="setup-llm-selection-count" style="font-size: 11px; font-weight: 600; color: var(--accent-color);">0 / 3 selected</span>
+                <span id="setup-llm-picker-title"
+                  style="font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Models
+                  (Sorted by Intelligence)</span>
+                <span id="setup-llm-selection-count"
+                  style="font-size: 11px; font-weight: 600; color: var(--accent-color);">0 / 3 selected</span>
               </div>
               <!-- Search input -->
-              <input type="text" id="setup-llm-search" class="form-input" placeholder="Search models..." style="width: 100%; font-size: 12px; padding: 6px 10px;">
+              <input type="text" id="setup-llm-search" class="form-input" placeholder="Search models..."
+                style="width: 100%; font-size: 12px; padding: 6px 10px;">
               <div style="font-size: 11px; color: var(--text-muted);">
                 Select up to 3 models. Drag or use ▲/▼ to set priority order among selected models.
               </div>
-              <div id="setup-llm-priority-list" class="dynamic-list" style="max-height: 280px; overflow-y: auto; padding-right: 4px;"></div>
+              <div id="setup-llm-priority-list" class="dynamic-list"
+                style="max-height: 280px; overflow-y: auto; padding-right: 4px;"></div>
             </div>
           </div>
         </div>
