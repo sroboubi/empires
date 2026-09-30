@@ -2,6 +2,7 @@ import BaseEntity from './baseEntity.js';
 import { HexGrid } from '../hexGrid.js';
 import { CONFIG } from '../config.js';
 import { calculateAttackMultiplier } from '../utils.js';
+import { checkTreasurePickup } from '../resources.js';
 
 /**
  * UnitEntity - Base Class for all mobile, combat-capable units.
@@ -99,6 +100,9 @@ export default class UnitEntity extends BaseEntity {
 
         // Update entity vision & player visibility on move
         this.updateVisibility();
+
+        // Collect treasure if the destination cell holds one
+        checkTreasurePickup(this);
 
         // Add history entry for move action
         if (this.owner && this.gameState) {

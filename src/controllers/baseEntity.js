@@ -4,6 +4,7 @@ import { HexGrid } from '../hexGrid.js';
 import { spawnDamageText } from '../renderer.js';
 import { spawnParticleBurst } from '../renderer.js';
 import { audio } from '../audio.js';
+import { applyResourceYieldBonus } from '../resources.js';
 
 /**
  * BaseEntity - Standard Base Class for all dynamic entity instances in the game.
@@ -251,7 +252,7 @@ export default class BaseEntity {
     const yields = this.state.yields;
     // only give yields if not damaged
     if (this.active && this.owner && yields && this.health > this.maxHealth * 0.95) {
-      this.owner.addResources(yields);
+      this.owner.addResources(applyResourceYieldBonus(this, yields, this.gameState));
     }
 
     this.age++;
@@ -421,6 +422,11 @@ export default class BaseEntity {
           if (entity && entity !== this) return { possible: false, reason: "Target cell is occupied." };
 
           if (!this.canStandOn(cell)) return { possible: false, reason: "Cannot build construct on target terrain." };
+
+          if (cell.resource) {
+            const what = cell.resource.kind === 'treasure' ? 'a treasure' : 'natural resources';
+            return { possible: false, reason: `Cannot build ${targetName} on a cell with ${what}.` };
+          }
 
           const meta = this.gameState && this.gameState.manifestData ? this.gameState.manifestData.entities[buildable] : null;
           const spawnConditions = meta ? meta.spawnConditions : null;

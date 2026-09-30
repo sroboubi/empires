@@ -5,6 +5,7 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { HexGrid } from './hexGrid.js';
 import { CONFIG } from './config.js';
+import { findSpawnDef, findTerrainGroup } from './resources.js';
 
 export let scene, camera, renderer, controls;
 export let dirLight, hemiLight, sky, sunMesh;
@@ -938,4 +939,148 @@ export function clearEntitySelectionHighlight() {
   if (entitySelectionMesh) {
     entitySelectionMesh.visible = false;
   }
+}
+// ---------------------------------------------------------------------------
+// Cell resources & treasures — InstancedMesh decorations
+// ---------------------------------------------------------------------------
+// Each distinct (modelUrl, size) bucket gets one THREE.InstancedMesh per mesh
+// part of the GLB, so thousands of trees/ruins render as a handful of draw
+// calls. Per-instance matrices encode the scattered placement; instances on
+// unexplored cells (or consumed treasures) are hidden via a zero-scale matrix.
+
+const resourceModelPartsCache = {}; // "modelUrl|size" -> [{ geometry, material }]
+const resourceInstancedMeshes = []; // THREE.InstancedMesh[]
+const cellResourceSlots = {};       // "q,r" -> [{ mesh, index, matrix }]
+const _zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
+const _tmpMatrix = new THREE.Matrix4();
+const _tmpPos = new THREE.Vector3();
+const _tmpQuat = new THREE.Quaternion();
+const _tmpEuler = new THREE.Euler();
+const _tmpScale = new THREE.Vector3();
+
+/**
+ * Extracts renderable mesh parts from a cached GLTF scene, normalized so the
+ * model's largest dimension equals HEX_SIZE * targetSize with its base at y=0.
+ * Geometry is cloned — the cached template is never mutated.
+ */
+function getResourceModelParts(modelUrl, targetSize) {
+  const key = `${modelUrl}|${targetSize}`;
+  if (resourceModelPartsCache[key]) return resourceModelPartsCache[key];
+  const parts = [];
+  const template = modelCache[modelUrl];
+  if (template) {
+    template.updateMatrixWorld(true);
+    const bbox = new THREE.Box3().setFromObject(template);
+    const size = bbox.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z) || 1;
+    const scale = (CONFIG.HEX_SIZE * targetSize) / maxDim;
+    template.traverse(node => {
+      if (node.isMesh && node.geometry) {
+        const geom = node.geometry.clone();
+        geom.applyMatrix4(node.matrixWorld);
+        geom.scale(scale, scale, scale);
+        geom.translate(0, -bbox.min.y * scale, 0);
+        const material = Array.isArray(node.material) ? node.material[0] : node.material;
+        parts.push({ geometry: geom, material });
+      }
+    });
+  } else {
+    console.warn(`Resource model not preloaded: ${modelUrl}`);
+  }
+  resourceModelPartsCache[key] = parts;
+  return parts;
+}
+
+function setResourceInstanceMatrix(im, index, x, y, z, rotY, scale) {
+  _tmpEuler.set(0, rotY, 0);
+  _tmpQuat.setFromEuler(_tmpEuler);
+  _tmpPos.set(x, y, z);
+  _tmpScale.set(scale, scale, scale);
+  _tmpMatrix.compose(_tmpPos, _tmpQuat, _tmpScale);
+  im.setMatrixAt(index, _tmpMatrix);
+  return _tmpMatrix.clone();
+}
+
+/**
+ * (Re)builds all resource/treasure decoration meshes from gameState cells.
+ * Call after drawGrid on new game / load. Models must be preloaded first.
+ */
+export function buildCellResources(gameState) {
+  clearCellResources();
+  const manifestData = gameState.manifestData;
+  if (!manifestData) return;
+
+  // Bucket items by (modelUrl, size) — one InstancedMesh per bucket per GLB part.
+  const buckets = new Map();
+  for (const cell of Object.values(gameState.cells)) {
+    if (!cell.resource) continue;
+    const def = findSpawnDef(manifestData, cell.resource.kind, cell.resource.name);
+    const group = findTerrainGroup(def, cell.terrain ? cell.terrain.name : null);
+    const size = group && typeof group.size === 'number' ? group.size : 1;
+    const { x, z } = HexGrid.axialToPixel(cell.q, cell.r);
+    const y = cell.terrain && typeof cell.terrain.height === 'number' ? cell.terrain.height : 1;
+    for (const item of cell.resource.items || []) {
+      const key = `${item.modelUrl}|${size}`;
+      if (!buckets.has(key)) buckets.set(key, { url: item.modelUrl, size, items: [] });
+      buckets.get(key).items.push({
+        cell, x: x + item.dx, y, z: z + item.dz, rotY: item.rotY, scale: item.scale,
+      });
+    }
+  }
+
+  for (const { url, size, items } of buckets.values()) {
+    const parts = getResourceModelParts(url, size);
+    for (const part of parts) {
+      const im = new THREE.InstancedMesh(part.geometry, part.material, items.length);
+      im.castShadow = true;
+      im.receiveShadow = true;
+      im.frustumCulled = false; // instances span the whole map
+      items.forEach((it, idx) => {
+        const matrix = setResourceInstanceMatrix(im, idx, it.x, it.y, it.z, it.rotY, it.scale);
+        const key = `${it.cell.q},${it.cell.r}`;
+        if (!cellResourceSlots[key]) cellResourceSlots[key] = [];
+        cellResourceSlots[key].push({ mesh: im, index: idx, matrix });
+      });
+      im.instanceMatrix.needsUpdate = true;
+      scene.add(im);
+      resourceInstancedMeshes.push(im);
+    }
+  }
+
+  reconcileCellResources(gameState);
+}
+
+/**
+ * Lightweight per-frame-safe update: hides instances on unexplored cells and
+ * drops slots for consumed treasures. Call after actions that move units or
+ * change visibility.
+ */
+export function reconcileCellResources(gameState) {
+  for (const key of Object.keys(cellResourceSlots)) {
+    const cell = gameState.cells[key];
+    const slots = cellResourceSlots[key];
+    const visible = cell && cell.resource && (CONFIG.SHOW_ALL || gameState.isExploredByHuman(cell));
+    for (const slot of slots) {
+      slot.mesh.setMatrixAt(slot.index, visible ? slot.matrix : _zeroMatrix);
+      slot.mesh.instanceMatrix.needsUpdate = true;
+    }
+    if (!cell || !cell.resource) delete cellResourceSlots[key];
+  }
+}
+
+/**
+ * Removes all resource/treasure meshes and frees their GPU buffers.
+ * (Materials are shared with the model cache and are not disposed.)
+ */
+export function clearCellResources() {
+  for (const im of resourceInstancedMeshes) {
+    scene.remove(im);
+    im.dispose();
+  }
+  resourceInstancedMeshes.length = 0;
+  for (const key of Object.keys(resourceModelPartsCache)) {
+    for (const part of resourceModelPartsCache[key]) part.geometry.dispose();
+    delete resourceModelPartsCache[key];
+  }
+  for (const key of Object.keys(cellResourceSlots)) delete cellResourceSlots[key];
 }

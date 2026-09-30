@@ -14,10 +14,13 @@ import {
   preloadModels,
   reconcileEntities,
   clearEntityMeshes,
+  buildCellResources,
+  reconcileCellResources,
   focusCameraOnEntities
 } from './renderer.js';
 import { loadGameManifest } from './manifestLoader.js';
 import { HexGrid } from './hexGrid.js';
+import { collectResourceModelEntries } from './resources.js';
 import { audio } from './audio.js';
 import { saveGame, loadGame, listSaves, deleteSave, pruneAutoSaves } from './saveManager.js';
 
@@ -62,7 +65,7 @@ async function init() {
     // 2. Initialize 3D Renderer and preload models
     const canvas = document.getElementById('game-canvas');
     initRenderer(canvas);
-    await preloadModels(manifestData.entities);
+    await preloadModels({ ...manifestData.entities, ...collectResourceModelEntries(manifestData) });
 
     // 3. Setup Event Listeners
     window.addEventListener('mousemove', onMouseMove);
@@ -1029,11 +1032,12 @@ function startNewGame(settings) {
   button.textContent = 'Next Turn';
 
   gameState = new GameState();
-  gameState.generateMap(settings.mapSize, manifestData.terrains);
+  gameState.generateMap(settings.mapSize, manifestData.terrains, manifestData);
   gameState.initializeManifest(manifestData, settings);
 
   drawGrid(gameState);
   reconcileEntities(gameState);
+  buildCellResources(gameState);
   updatePlayersUI();
 
   // Focus camera on center of mass of active player's entities
@@ -1181,6 +1185,7 @@ async function doLoadGame(saveName) {
 
     drawGrid(gameState);
     reconcileEntities(gameState);
+    buildCellResources(gameState);
     updatePlayersUI();
 
     // Focus camera on center of mass of active player's entities
@@ -1230,6 +1235,7 @@ export async function nextTurn() {
 
   drawGrid(gameState);
   reconcileEntities(gameState);
+  reconcileCellResources(gameState);
   updatePlayersUI();
 
   // Focus camera on center of mass of active player's entities
@@ -1519,6 +1525,7 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
 
         drawGrid(gameState);
         reconcileEntities(gameState);
+        reconcileCellResources(gameState);
         updatePlayersUI();
 
         if (selectedEntity && !gameState.entities.includes(selectedEntity)) {

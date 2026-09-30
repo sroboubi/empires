@@ -110,7 +110,7 @@
             "max": 6
           },
           "probability": {
-            "base": 0.8,
+            "base": 0.08,
             "adjacent": 0.12
           }
         }

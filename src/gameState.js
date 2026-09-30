@@ -1,6 +1,8 @@
 import { HexGrid } from './hexGrid.js';
 import { Player } from './player.js';
 import { manageBarbarians } from './ai/barbarians/manager.js';
+import { spawnCellResources } from './resources.js';
+import { CONFIG } from './config.js';
 
 /**
  * GameState tracks players, turn cycle, the hex grid, and active entity instances.
@@ -41,10 +43,14 @@ export class GameState {
    * Generates a hexagonal map of a given radius filled with terrain.
    * @param {number} radius - Grid radius (number of hex rings from the center)
    * @param {Array|Object} [terrainConfig=null] - Optional terrain definitions
+   * @param {Object} [manifestData=null] - Optional manifest (spawns natural resources & treasures)
    */
-  generateMap(radius, terrainConfig = null) {
+  generateMap(radius, terrainConfig = null, manifestData = null) {
     const config = terrainConfig || this.manifestData?.terrains || null;
     this.hexGrid = new HexGrid(radius, config);
+    if (manifestData) {
+      spawnCellResources(this.hexGrid, manifestData, CONFIG.HEX_SIZE);
+    }
     this.entities = [];
     this.activePlayerIndex = 0;
     this.currentRound = 1;
