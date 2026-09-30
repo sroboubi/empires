@@ -1,20 +1,239 @@
 {
+  "treasures": [
+    {
+      "name": "smallRuins",
+      "terrains": [
+        {
+          "types": [
+            "Swamp",
+            "Desert"
+          ],
+          "modelUrls": [
+            "./assets/resources/ruins/columns_ancient_stone_ruins.glb",
+            "./assets/resources/ruins/stone_ruins_with_sanctuary_and_columns.glb"
+          ],
+          "quantity": {
+            "min": 1,
+            "max": 4
+          },
+          "rewards": [
+            {
+              "type": "gold",
+              "quantity": 100
+            },
+            {
+              "type": "iron",
+              "quantity": 200
+            },
+            {
+              "type": "gems",
+              "quantity": 4
+            }
+          ],
+          "probability": {
+            "base": 0.05,
+            "adjacent": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "richRuins",
+      "terrains": [
+        {
+          "types": [
+            "Desert"
+          ],
+          "modelUrls": [
+            "./assets/resources/ruins/pillars_with_vines.glb"
+          ],
+          "quantity": {
+            "min": 1,
+            "max": 2
+          },
+          "rewards": [
+            {
+              "type": "gems",
+              "quantity": 10
+            }
+          ],
+          "probability": {
+            "base": 0.03,
+            "adjacent": 0
+          }
+        }
+      ]
+    }
+  ],
   "naturalResources": [
     {
+      "name": "wood",
+      "iconUrl": "./assets/resources/wood.png",
+      "terrains": [
+        {
+          "types": [
+            "Grasslands",
+            "FootHills"
+          ],
+          "modelUrls": [
+            "./assets/resources/trees/round/tree_01.glb",
+            "./assets/resources/trees/round/tree_02.glb",
+            "./assets/resources/trees/round/tree_03.glb"
+          ],
+          "quantity": {
+            "min": 1,
+            "max": 4
+          },
+          "probability": {
+            "base": 0.1,
+            "adjacent": 0.2
+          }
+        },
+        {
+          "types": [
+            "Tundra"
+          ],
+          "modelUrls": [
+            "./assets/resources/trees/pine/pine_01.glb",
+            "./assets/resources/trees/pine/pine_02.glb",
+            "./assets/resources/trees/pine/pine_03.glb",
+            "./assets/resources/trees/pine/pine_04.glb",
+            "./assets/resources/trees/pine/pine_05.glb",
+            "./assets/resources/trees/pine/pine_06.glb",
+            "./assets/resources/trees/pine/pine_07.glb",
+            "./assets/resources/trees/pine/pine_08.glb",
+            "./assets/resources/trees/pine/pine_09.glb",
+            "./assets/resources/trees/pine/pine_10.glb"
+          ],
+          "quantity": {
+            "min": 2,
+            "max": 6
+          },
+          "probability": {
+            "base": 0.8,
+            "adjacent": 0.12
+          }
+        }
+      ],
+      "improvement": {
+        "lumberMill": {
+          "yieldMultiplier": 1.2
+        }
+      }
+    },
+    {
       "name": "gold",
-      "iconUrl": "./assets/resources/gold.png"
+      "iconUrl": "./assets/resources/gold.png",
+      "terrains": [
+        {
+          "types": [
+            "Hills",
+            "Mountains",
+            "SnowyMountains"
+          ],
+          "modelUrls": [
+            "./assets/resources/gold.glb"
+          ],
+          "quantity": {
+            "min": 1,
+            "max": 3
+          },
+          "probability": {
+            "base": 0.1,
+            "adjacent": 0
+          }
+        }
+      ],
+      "improvement": {
+        "mine": {
+          "yieldMultiplier": 1.5
+        }
+      }
     },
     {
       "name": "iron",
-      "iconUrl": "./assets/resources/iron.png"
+      "iconUrl": "./assets/resources/iron.png",
+      "terrains": [
+        {
+          "types": [
+            "Hills",
+            "Mountains",
+            "SnowyMountains"
+          ],
+          "modelUrls": [
+            "./assets/resources/iron.glb"
+          ],
+          "quantity": {
+            "min": 1,
+            "max": 3
+          },
+          "probability": {
+            "base": 0.1,
+            "adjacent": 0
+          }
+        }
+      ],
+      "improvement": {
+        "forge": {
+          "yieldMultiplier": 1.5
+        }
+      }
     },
     {
-      "name": "food",
-      "iconUrl": "./assets/resources/fish.png"
+      "name": "deer",
+      "iconUrl": "./assets/resources/deer.png",
+      "terrains": [
+        {
+          "types": [
+            "Grasslands",
+            "FootHills"
+          ],
+          "modelUrls": [
+            "./assets/resources/deer.glb"
+          ],
+          "quantity": {
+            "min": 1,
+            "max": 2
+          },
+          "probability": {
+            "base": 0.1,
+            "adjacent": 0
+          }
+        }
+      ],
+      "improvement": {
+        "village": {
+          "yieldMultiplier": 1.5
+        }
+      }
     },
     {
       "name": "gems",
-      "iconUrl": "./assets/resources/gems.png"
+      "iconUrl": "./assets/resources/gems.png",
+      "terrains": [
+        {
+          "types": [
+            "Mountains",
+            "SnowyMountains"
+          ],
+          "modelUrls": [
+            "./assets/resources/gems.glb"
+          ],
+          "quantity": {
+            "min": 1,
+            "max": 1
+          },
+          "probability": {
+            "base": 0.05,
+            "adjacent": 0
+          }
+        }
+      ],
+      "improvement": {
+        "mine": {
+          "yieldMultiplier": 2
+        }
+      }
     }
   ],
   "terrains": [
