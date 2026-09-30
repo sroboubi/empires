@@ -3,6 +3,7 @@ import { camelToTitle } from '../utils.js';
 import { HexGrid } from '../hexGrid.js';
 import { spawnDamageText } from '../renderer.js';
 import { spawnParticleBurst } from '../renderer.js';
+import { audio } from '../audio.js';
 
 /**
  * BaseEntity - Standard Base Class for all dynamic entity instances in the game.
@@ -269,6 +270,7 @@ export default class BaseEntity {
    */
   destroy() {
     this.destroyed = true;
+    audio.playEntitySfx(this, 'destroy');
     this.visibleCells.clear();
     if (this.owner && this.gameState) {
       this.owner.updateVisibility(this.gameState);
@@ -331,6 +333,8 @@ export default class BaseEntity {
 
     if (wasDestroyed) {
       this.destroy();
+    } else if (effectiveDamage > 0) {
+      audio.playEntitySfx(this, 'damage');
     }
 
     const { x, z } = HexGrid.axialToPixel(this.cell.q, this.cell.r);
@@ -488,6 +492,9 @@ export default class BaseEntity {
           this.spendActionCost(check.apCost, check.ordersRequired);
           if (this.gameState) {
             const newEntity = this.gameState.spawnEntity(buildable, cell, this.owner);
+            if (newEntity) {
+              audio.playEntitySfx(newEntity, 'build');
+            }
             const { x, z } = HexGrid.axialToPixel(cell.q, cell.r);
             spawnParticleBurst(x, cell.terrain.height, z, 0xcca055);
             if (this.state.buildCharges !== undefined) {

@@ -113,7 +113,10 @@
                         "description": "Three.js material properties.",
                         "properties": {
                             "color": {
-                                "type": ["string", "integer"],
+                                "type": [
+                                    "string",
+                                    "integer"
+                                ],
                                 "description": "Color hex string or hex integer value."
                             },
                             "roughness": {
@@ -140,22 +143,34 @@
                             "elevation": {
                                 "type": "object",
                                 "properties": {
-                                    "min": { "type": "number" },
-                                    "max": { "type": "number" }
+                                    "min": {
+                                        "type": "number"
+                                    },
+                                    "max": {
+                                        "type": "number"
+                                    }
                                 }
                             },
                             "temperature": {
                                 "type": "object",
                                 "properties": {
-                                    "min": { "type": "number" },
-                                    "max": { "type": "number" }
+                                    "min": {
+                                        "type": "number"
+                                    },
+                                    "max": {
+                                        "type": "number"
+                                    }
                                 }
                             },
                             "humidity": {
                                 "type": "object",
                                 "properties": {
-                                    "min": { "type": "number" },
-                                    "max": { "type": "number" }
+                                    "min": {
+                                        "type": "number"
+                                    },
+                                    "max": {
+                                        "type": "number"
+                                    }
                                 }
                             }
                         }
@@ -229,6 +244,41 @@
                                 "description": "Multiplier/divisor applied based on relative elevation between attacker and target."
                             }
                         }
+                    },
+                    "sfx": {
+                        "type": "object",
+                        "description": "Sound effect file names for entity events, relative to sfx.basePath. 'action' may be a file name or an object keyed by action name.",
+                        "properties": {
+                            "select": {
+                                "type": "string",
+                                "description": "Played when the entity is selected"
+                            },
+                            "action": {
+                                "anyOf": [
+                                    {
+                                        "type": "string"
+                                    },
+                                    {
+                                        "type": "object",
+                                        "description": "Maps lowercased action names (e.g. move, attack) to file names; 'default' is the fallback."
+                                    }
+                                ],
+                                "description": "Played when the entity performs an action"
+                            },
+                            "build": {
+                                "type": "string",
+                                "description": "Played when this construct finishes building"
+                            },
+                            "damage": {
+                                "type": "string",
+                                "description": "Played when the entity takes damage"
+                            },
+                            "destroy": {
+                                "type": "string",
+                                "description": "Played when the entity is destroyed"
+                            }
+                        },
+                        "additionalProperties": false
                     }
                 }
             }
@@ -281,6 +331,28 @@
                     "additionalProperties": {
                         "type": "integer",
                         "minimum": 1
+                    }
+                }
+            }
+        },
+        "sfx": {
+            "type": "object",
+            "description": "Global audio configuration: base path and UI sounds.",
+            "properties": {
+                "basePath": {
+                    "type": "string",
+                    "description": "Base path for all SFX file names"
+                },
+                "ui": {
+                    "type": "object",
+                    "description": "UI event sounds (click, turn, ...)",
+                    "properties": {
+                        "click": {
+                            "type": "string"
+                        },
+                        "turn": {
+                            "type": "string"
+                        }
                     }
                 }
             }

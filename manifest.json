@@ -254,6 +254,13 @@
       }
     }
   ],
+  "sfx": {
+    "basePath": "assets/audio/",
+    "ui": {
+      "click": "ui_click.mp3",
+      "turn": "ui_turn.mp3"
+    }
+  },
   "entities": [
     {
       "name": "barbarian",
@@ -291,6 +298,16 @@
       "score": {
         "military": 0,
         "economic": 0
+      },
+      "sfx": {
+        "select": "select_unit.mp3",
+        "action": {
+          "move": "move.mp3",
+          "attack": "sword_attack.mp3",
+          "default": "move.mp3"
+        },
+        "damage": "damage_unit.mp3",
+        "destroy": "unit_destroy.mp3"
       }
     },
     {
@@ -329,6 +346,16 @@
       "score": {
         "military": 0,
         "economic": 0
+      },
+      "sfx": {
+        "select": "select_unit.mp3",
+        "action": {
+          "move": "move.mp3",
+          "attack": "sword_attack.mp3",
+          "default": "move.mp3"
+        },
+        "damage": "damage_unit.mp3",
+        "destroy": "unit_destroy.mp3"
       }
     },
     {
@@ -367,6 +394,16 @@
       "score": {
         "military": 0,
         "economic": 0
+      },
+      "sfx": {
+        "select": "select_unit.mp3",
+        "action": {
+          "move": "move.mp3",
+          "attack": "sword_attack.mp3",
+          "default": "move.mp3"
+        },
+        "damage": "damage_unit.mp3",
+        "destroy": "unit_destroy.mp3"
       }
     },
     {
@@ -405,6 +442,16 @@
       "score": {
         "military": 10,
         "economic": 0
+      },
+      "sfx": {
+        "select": "select_unit.mp3",
+        "action": {
+          "move": "move.mp3",
+          "attack": "sword_attack.mp3",
+          "default": "move.mp3"
+        },
+        "damage": "damage_unit.mp3",
+        "destroy": "unit_destroy.mp3"
       }
     },
     {
@@ -443,6 +490,16 @@
       "score": {
         "military": 20,
         "economic": 0
+      },
+      "sfx": {
+        "select": "select_unit.mp3",
+        "action": {
+          "move": "move.mp3",
+          "attack": "sword_attack.mp3",
+          "default": "move.mp3"
+        },
+        "damage": "damage_unit.mp3",
+        "destroy": "unit_destroy.mp3"
       }
     },
     {
@@ -495,6 +552,15 @@
       "score": {
         "military": 1,
         "economic": 2
+      },
+      "sfx": {
+        "select": "select_unit.mp3",
+        "action": {
+          "move": "move.mp3",
+          "default": "move.mp3"
+        },
+        "damage": "damage_unit.mp3",
+        "destroy": "unit_destroy.mp3"
       }
     },
     {
@@ -537,6 +603,15 @@
       "score": {
         "military": 1,
         "economic": 4
+      },
+      "sfx": {
+        "select": "select_unit.mp3",
+        "action": {
+          "move": "move.mp3",
+          "default": "move.mp3"
+        },
+        "damage": "damage_unit.mp3",
+        "destroy": "unit_destroy.mp3"
       }
     },
     {
@@ -580,6 +655,16 @@
       "score": {
         "military": 10,
         "economic": 0
+      },
+      "sfx": {
+        "select": "select_unit.mp3",
+        "action": {
+          "move": "move.mp3",
+          "attack": "bow_attack.mp3",
+          "default": "move.mp3"
+        },
+        "damage": "damage_unit.mp3",
+        "destroy": "unit_destroy.mp3"
       }
     },
     {
@@ -617,6 +702,16 @@
       "score": {
         "military": 15,
         "economic": 0
+      },
+      "sfx": {
+        "select": "select_unit.mp3",
+        "action": {
+          "move": "move.mp3",
+          "attack": "sword_attack.mp3",
+          "default": "move.mp3"
+        },
+        "damage": "damage_unit.mp3",
+        "destroy": "unit_destroy.mp3"
       }
     },
     {
@@ -655,6 +750,16 @@
       "score": {
         "military": 10,
         "economic": 0
+      },
+      "sfx": {
+        "select": "select_unit.mp3",
+        "action": {
+          "move": "move.mp3",
+          "attack": "sword_attack.mp3",
+          "default": "move.mp3"
+        },
+        "damage": "damage_unit.mp3",
+        "destroy": "unit_destroy.mp3"
       }
     },
     {
@@ -700,6 +805,12 @@
       "score": {
         "military": 2,
         "economic": 20
+      },
+      "sfx": {
+        "select": "select_unit.mp3",
+        "build": "build.mp3",
+        "damage": "damage_building.mp3",
+        "destroy": "building_destroy.mp3"
       }
     },
     {
@@ -731,6 +842,12 @@
       "score": {
         "military": 4,
         "economic": 4
+      },
+      "sfx": {
+        "select": "select_unit.mp3",
+        "build": "build.mp3",
+        "damage": "damage_building.mp3",
+        "destroy": "building_destroy.mp3"
       }
     },
     {
@@ -761,6 +878,12 @@
       "score": {
         "military": 3,
         "economic": 5
+      },
+      "sfx": {
+        "select": "select_unit.mp3",
+        "build": "build.mp3",
+        "damage": "damage_building.mp3",
+        "destroy": "building_destroy.mp3"
       }
     },
     {
@@ -793,6 +916,12 @@
       "score": {
         "military": 2,
         "economic": 6
+      },
+      "sfx": {
+        "select": "select_unit.mp3",
+        "build": "build.mp3",
+        "damage": "damage_building.mp3",
+        "destroy": "building_destroy.mp3"
       }
     },
     {
@@ -821,6 +950,12 @@
       "score": {
         "military": 2,
         "economic": 4
+      },
+      "sfx": {
+        "select": "select_unit.mp3",
+        "build": "build.mp3",
+        "damage": "damage_building.mp3",
+        "destroy": "building_destroy.mp3"
       }
     }
   ]
