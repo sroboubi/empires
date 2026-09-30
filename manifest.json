@@ -67,8 +67,8 @@
   ],
   "naturalResources": [
     {
-      "name": "wood",
-      "iconUrl": "./assets/resources/wood.png",
+      "name": "tree",
+      "iconUrl": "./assets/resources/tree.jpg",
       "terrains": [
         {
           "types": [
@@ -117,6 +117,7 @@
       ],
       "improvement": {
         "lumberMill": {
+          "type": "wood",
           "yieldMultiplier": 1.2
         }
       }
@@ -146,6 +147,7 @@
       ],
       "improvement": {
         "mine": {
+          "type": "gold",
           "yieldMultiplier": 1.5
         }
       }
@@ -175,6 +177,7 @@
       ],
       "improvement": {
         "forge": {
+          "type": "iron",
           "yieldMultiplier": 1.5
         }
       }
@@ -203,6 +206,7 @@
       ],
       "improvement": {
         "village": {
+          "type": "food",
           "yieldMultiplier": 1.5
         }
       }
@@ -231,6 +235,7 @@
       ],
       "improvement": {
         "mine": {
+          "type": "gems",
           "yieldMultiplier": 2
         }
       }
