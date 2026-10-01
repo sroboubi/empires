@@ -4,12 +4,12 @@
  * Manifest sections consumed here:
  *   naturalResources: [{
  *     name, iconUrl,
- *     terrains: [{ types, modelUrls, quantity: {min,max}, probability: {base,adjacent}, size? }],
+ *     terrains: [{ types, modelUrls, quantity: {min,max}, probability: {base,adjacent}, size?, sizeVariance? }],
  *     improvement: { <improvementName>: { type, yieldMultiplier } }
  *   }]
  *   treasures: [{
  *     name,
- *     terrains: [{ types, modelUrls, quantity: {min,max}, probability: {base,adjacent}, size? }],
+ *     terrains: [{ types, modelUrls, quantity: {min,max}, probability: {base,adjacent}, size?, sizeVariance? }],
  *     rewards: [{ type, quantity }]
  *   }]
  *
@@ -96,7 +96,8 @@ export function findSpawnDef(manifestData, kind, name) {
  * maximum angular separation: N items sit 360/N degrees apart (2 -> 180deg,
  * 3 -> 120deg, ...), each at a random radius within the ring. The angular
  * slots guarantee a minimum distance between item centers so models don't
- * sit on top of each other.
+ * sit on top of each other. Each item's scale is randomized by
+ * `group.sizeVariance` (fraction, e.g. 0.1 = ±10% around the group's size).
  */
 export function scatterItems(group, quantity, hexSize = 1) {
   const items = [];
@@ -104,6 +105,7 @@ export function scatterItems(group, quantity, hexSize = 1) {
   if (!urls.length || quantity <= 0) return items;
   const inner = hexSize * 0.2;
   const outer = hexSize * 0.6;
+  const variance = typeof group.sizeVariance === 'number' ? group.sizeVariance : 0.1;
   const baseAngle = randRange(0, Math.PI * 2);
   for (let i = 0; i < quantity; i++) {
     const angle = baseAngle + (i / quantity) * Math.PI * 2;
@@ -113,7 +115,7 @@ export function scatterItems(group, quantity, hexSize = 1) {
       dx: Math.cos(angle) * dist,
       dz: Math.sin(angle) * dist,
       rotY: randRange(0, Math.PI * 2),
-      scale: randRange(0.9, 1.1),
+      scale: randRange(1 - variance, 1 + variance),
     });
   }
   return items;
