@@ -950,7 +950,8 @@ export function clearEntitySelectionHighlight() {
 
 const resourceModelPartsCache = {}; // "modelUrl|size" -> [{ geometry, material }]
 const resourceInstancedMeshes = []; // THREE.InstancedMesh[]
-const cellResourceSlots = {};       // "q,r" -> [{ mesh, index, matrix }]
+const resourceFadedMaterials = []; // cloned transparent materials (disposed on clear)
+const cellResourceSlots = {};       // "q,r" -> [{ mesh, fadedMesh, index, fadedIndex, matrix }]
 const _zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
 const _tmpMatrix = new THREE.Matrix4();
 const _tmpPos = new THREE.Vector3();
@@ -1056,15 +1057,28 @@ export function buildCellResources(gameState) {
       im.castShadow = true;
       im.receiveShadow = true;
       im.frustumCulled = false; // instances span the whole map
+      // Faded overlay: same instances, semi-transparent. Used for resource
+      // cells a unit is standing on so the unit stays clearly visible.
+      const fadedMaterial = part.material.clone();
+      fadedMaterial.transparent = true;
+      fadedMaterial.opacity = 0.35;
+      resourceFadedMaterials.push(fadedMaterial);
+      const fim = new THREE.InstancedMesh(part.geometry, fadedMaterial, items.length);
+      fim.castShadow = false;
+      fim.receiveShadow = false;
+      fim.frustumCulled = false;
+      fim.count = 0;
+      fim.userData.fadedSlots = [];
       items.forEach((it, idx) => {
         const matrix = setResourceInstanceMatrix(im, idx, it.x, it.y, it.z, it.rotY, it.scale);
         const key = `${it.cell.q},${it.cell.r}`;
         if (!cellResourceSlots[key]) cellResourceSlots[key] = [];
-        cellResourceSlots[key].push({ mesh: im, index: idx, matrix });
+        cellResourceSlots[key].push({ mesh: im, fadedMesh: fim, index: idx, fadedIndex: -1, matrix });
       });
       im.instanceMatrix.needsUpdate = true;
       scene.add(im);
-      resourceInstancedMeshes.push(im);
+      scene.add(fim);
+      resourceInstancedMeshes.push(im, fim);
     }
   }
 
@@ -1072,20 +1086,70 @@ export function buildCellResources(gameState) {
 }
 
 /**
- * Lightweight per-frame-safe update: hides instances on unexplored cells and
- * drops slots for consumed treasures. Call after actions that move units or
- * change visibility.
+ * Moves a resource instance into its faded (semi-transparent) overlay mesh.
+ * No-op when already faded.
+ */
+function fadeResourceSlot(slot) {
+  if (slot.fadedIndex >= 0) return;
+  slot.mesh.setMatrixAt(slot.index, _zeroMatrix);
+  slot.mesh.instanceMatrix.needsUpdate = true;
+  const fim = slot.fadedMesh;
+  const list = fim.userData.fadedSlots;
+  slot.fadedIndex = list.length;
+  list.push(slot);
+  fim.count = list.length;
+  fim.setMatrixAt(slot.fadedIndex, slot.matrix);
+  fim.instanceMatrix.needsUpdate = true;
+}
+
+/**
+ * Restores a faded resource instance to its main (opaque) mesh.
+ * No-op when not faded.
+ */
+function unfadeResourceSlot(slot) {
+  if (slot.fadedIndex < 0) return;
+  slot.mesh.setMatrixAt(slot.index, slot.matrix);
+  slot.mesh.instanceMatrix.needsUpdate = true;
+  const fim = slot.fadedMesh;
+  const list = fim.userData.fadedSlots;
+  const lastSlot = list.pop();
+  if (lastSlot !== slot) {
+    list[slot.fadedIndex] = lastSlot;
+    lastSlot.fadedIndex = slot.fadedIndex;
+    fim.setMatrixAt(lastSlot.fadedIndex, lastSlot.matrix);
+  }
+  fim.count = list.length;
+  fim.instanceMatrix.needsUpdate = true;
+  slot.fadedIndex = -1;
+}
+
+/**
+ * Lightweight per-frame-safe update: hides instances on unexplored cells,
+ * fades instances on cells a unit is standing on (so the unit stays clearly
+ * visible), and drops slots for consumed treasures. Call after actions that
+ * move units or change visibility.
  */
 export function reconcileCellResources(gameState) {
+  const occupied = new Set();
+  for (const e of gameState.entities || []) occupied.add(`${e.q},${e.r}`);
   for (const key of Object.keys(cellResourceSlots)) {
     const cell = gameState.cells[key];
     const slots = cellResourceSlots[key];
-    const visible = cell && cell.resource && (CONFIG.SHOW_ALL || gameState.isExploredByHuman(cell));
+    const hasResource = !!(cell && cell.resource);
+    const visible = hasResource && (CONFIG.SHOW_ALL || gameState.isExploredByHuman(cell));
+    const faded = visible && occupied.has(key);
     for (const slot of slots) {
-      slot.mesh.setMatrixAt(slot.index, visible ? slot.matrix : _zeroMatrix);
-      slot.mesh.instanceMatrix.needsUpdate = true;
+      if (!visible) {
+        if (slot.fadedIndex >= 0) unfadeResourceSlot(slot);
+        slot.mesh.setMatrixAt(slot.index, _zeroMatrix);
+        slot.mesh.instanceMatrix.needsUpdate = true;
+      } else if (faded) {
+        fadeResourceSlot(slot);
+      } else if (slot.fadedIndex >= 0) {
+        unfadeResourceSlot(slot);
+      }
     }
-    if (!cell || !cell.resource) delete cellResourceSlots[key];
+    if (!hasResource) delete cellResourceSlots[key];
   }
 }
 
@@ -1099,6 +1163,8 @@ export function clearCellResources() {
     im.dispose();
   }
   resourceInstancedMeshes.length = 0;
+  for (const m of resourceFadedMaterials) m.dispose();
+  resourceFadedMaterials.length = 0;
   for (const key of Object.keys(resourceModelPartsCache)) {
     for (const part of resourceModelPartsCache[key]) part.geometry.dispose();
     delete resourceModelPartsCache[key];

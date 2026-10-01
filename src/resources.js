@@ -13,9 +13,11 @@
  *     rewards: [{ type, quantity }]
  *   }]
  *
- * Placement: spawnCellResources(hexGrid, manifestData, hexSize) — two passes
- * (base probability, then adjacent clustering). One resource OR treasure per
- * cell — no stacking.
+ * Placement: spawnCellResources(hexGrid, manifestData, hexSize) — single pass
+ * over the cells in random order; each cell rolls base probability, or the
+ * adjacent probability when a neighbor already holds the same resource.
+ * Quantity per cell is skewed toward the minimum (rollQuantity). One
+ * resource OR treasure per cell — no stacking.
  *
  * Gameplay hooks:
  *   applyResourceYieldBonus(entity, baseYields, gameState) — improvement step():
@@ -29,18 +31,34 @@
 
 // --- random helpers ---------------------------------------------------------
 
-function randInt(min, max) {
-  min = Math.max(0, Math.floor(min));
-  max = Math.max(min, Math.floor(max));
-  return min + Math.floor(Math.random() * (max - min + 1));
-}
-
 function randRange(min, max) {
   return min + Math.random() * (max - min);
 }
 
 function pickRandom(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function shuffled(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+/**
+ * Rolls an item quantity skewed toward the minimum: 50% chance to stop at the
+ * current count, otherwise increment and roll again (capped at max). So for
+ * min=1,max=4: P(1)=50%, P(2)=25%, P(3)=12.5%, P(4)=12.5%.
+ */
+export function rollQuantity(min, max) {
+  min = Math.max(1, Math.floor(min ?? 1));
+  max = Math.max(min, Math.floor(max ?? 1));
+  let q = min;
+  while (q < max && Math.random() < 0.5) q++;
+  return q;
 }
 
 // --- manifest access --------------------------------------------------------
@@ -74,17 +92,16 @@ export function findSpawnDef(manifestData, kind, name) {
 // --- placement --------------------------------------------------------------
 
 /**
- * Scatters `quantity` item placements in a ring inside the hex cell so the
- * center stays clear for units standing on the cell. Each item gets a random
- * model, offset, Y rotation and slight scale jitter — the item count makes the
- * resource amount visually readable.
+ * Scatters `quantity` item placements clustered near the center of the hex
+ * cell. Each item gets a random model, offset, Y rotation and slight scale
+ * jitter — the item count makes the resource amount visually readable.
  */
 export function scatterItems(group, quantity, hexSize = 1) {
   const items = [];
   const urls = group.modelUrls || [];
   if (!urls.length || quantity <= 0) return items;
-  const inner = hexSize * 0.38;
-  const outer = hexSize * 0.78;
+  const inner = hexSize * 0.05;
+  const outer = hexSize * 0.4;
   for (let i = 0; i < quantity; i++) {
     const angle = randRange(0, Math.PI * 2);
     const dist = randRange(inner, outer);
@@ -106,51 +123,38 @@ function hasAdjacentSameResource(hexGrid, cell, resourceName) {
   return false;
 }
 
-function trySpawnOnCell(hexGrid, cell, defs, hexSize, useAdjacent) {
-  if (cell.resource) return; // one resource/treasure per cell — no stacking
-  const terrainName = cell.terrain ? cell.terrain.name : null;
-  for (const { kind, def } of defs) {
-    const group = findTerrainGroup(def, terrainName);
-    if (!group) continue;
-    const prob = group.probability || {};
-    let p = 0;
-    if (useAdjacent) {
-      if (!hasAdjacentSameResource(hexGrid, cell, def.name)) continue;
-      p = prob.adjacent || 0;
-    } else {
-      // A group with adjacent probability 0 never sits next to the same
-      // resource: skip the base roll when a neighbor already holds it. This
-      // keeps non-clustering resources (e.g. deer, ruins) from landing on
-      // adjacent cells via independent base rolls.
-      if ((prob.adjacent || 0) === 0 && hasAdjacentSameResource(hexGrid, cell, def.name)) continue;
-      p = prob.base || 0;
-    }
-    if (p > 0 && Math.random() < p) {
-      const q = group.quantity || {};
-      const quantity = randInt(q.min ?? 1, q.max ?? 1);
-      cell.resource = {
-        kind,
-        name: def.name,
-        quantity,
-        items: scatterItems(group, quantity, hexSize),
-      };
-      return;
-    }
-  }
-}
-
 /**
  * Places natural resources and treasures on grid cells in-place.
- * Pass 1 rolls the base probability; pass 2 rolls the adjacent probability for
- * still-empty cells touching the same resource type (clustering).
+ * Single pass over the cells in random order — each cell is considered once.
+ * For each cell whose terrain matches a definition, the roll uses the
+ * adjacent probability when a neighbor already holds the same resource,
+ * otherwise the base probability. One resource OR treasure per cell.
  */
 export function spawnCellResources(hexGrid, manifestData, hexSize = 1) {
   const defs = getSpawnDefs(manifestData);
   if (!defs.length || !hexGrid) return;
-  const cells = hexGrid.getCellsArray();
-  for (const cell of cells) trySpawnOnCell(hexGrid, cell, defs, hexSize, false);
-  for (const cell of cells) {
-    if (!cell.resource) trySpawnOnCell(hexGrid, cell, defs, hexSize, true);
+  for (const cell of shuffled(hexGrid.getCellsArray())) {
+    if (cell.resource) continue; // one resource/treasure per cell — no stacking
+    const terrainName = cell.terrain ? cell.terrain.name : null;
+    for (const { kind, def } of defs) {
+      const group = findTerrainGroup(def, terrainName);
+      if (!group) continue;
+      const prob = group.probability || {};
+      const p = hasAdjacentSameResource(hexGrid, cell, def.name)
+        ? (prob.adjacent || 0)
+        : (prob.base || 0);
+      if (p > 0 && Math.random() < p) {
+        const q = group.quantity || {};
+        const quantity = rollQuantity(q.min ?? 1, q.max ?? 1);
+        cell.resource = {
+          kind,
+          name: def.name,
+          quantity,
+          items: scatterItems(group, quantity, hexSize),
+        };
+        break;
+      }
+    }
   }
 }
 

@@ -144,7 +144,8 @@
           "probability": {
             "base": 0.1,
             "adjacent": 0
-          }
+          },
+          "size": 0.6
         }
       ],
       "improvement": {
@@ -174,7 +175,8 @@
           "probability": {
             "base": 0.1,
             "adjacent": 0
-          }
+          },
+          "size": 0.6
         }
       ],
       "improvement": {
