@@ -19,7 +19,8 @@
           "probability": {
             "base": 0.05,
             "adjacent": 0
-          }
+          },
+          "sizeVariance": 0.1
         }
       ],
       "rewards": [
@@ -54,7 +55,8 @@
           "probability": {
             "base": 0.03,
             "adjacent": 0
-          }
+          },
+          "sizeVariance": 0.1
         }
       ],
       "rewards": [
@@ -87,7 +89,9 @@
           "probability": {
             "base": 0.1,
             "adjacent": 0.2
-          }
+          },
+          "size": 1.8,
+          "sizeVariance": 0.1
         },
         {
           "types": [
@@ -110,9 +114,11 @@
             "max": 6
           },
           "probability": {
-            "base": 0.8,
+            "base": 0.08,
             "adjacent": 0.12
-          }
+          },
+          "size": 2.0,
+          "sizeVariance": 0.1
         }
       ],
       "improvement": {
@@ -142,7 +148,9 @@
           "probability": {
             "base": 0.1,
             "adjacent": 0
-          }
+          },
+          "size": 0.6,
+          "sizeVariance": 0.1
         }
       ],
       "improvement": {
@@ -172,7 +180,9 @@
           "probability": {
             "base": 0.1,
             "adjacent": 0
-          }
+          },
+          "size": 0.6,
+          "sizeVariance": 0.1
         }
       ],
       "improvement": {
@@ -199,9 +209,10 @@
             "max": 2
           },
           "probability": {
-            "base": 0.1,
+            "base": 0.05,
             "adjacent": 0
-          }
+          },
+          "sizeVariance": 0.1
         }
       ],
       "improvement": {
@@ -230,7 +241,8 @@
           "probability": {
             "base": 0.05,
             "adjacent": 0
-          }
+          },
+          "sizeVariance": 0.1
         }
       ],
       "improvement": {
