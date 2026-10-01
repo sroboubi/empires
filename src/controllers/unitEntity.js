@@ -104,7 +104,7 @@ export default class UnitEntity extends BaseEntity {
 
         // Collect treasure if the destination cell holds one
         const pickup = checkTreasurePickup(this);
-        if (pickup) {
+        if (pickup && pickup.rewarded && this.owner && !this.owner.isAI) {
           const rewards = Object.entries(pickup.granted || {}).map(([t, q]) => `+${q} ${t}`).join(', ');
           showToast(`${this.name} discovered ${pickup.treasureName} (${rewards})`, false, 5000);
         }
