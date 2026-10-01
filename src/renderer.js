@@ -959,14 +959,32 @@ const _tmpEuler = new THREE.Euler();
 const _tmpScale = new THREE.Vector3();
 
 /**
+ * Expands a position attribute to Float32, de-interleaving if needed.
+ * Baking a node matrix into normalized int16 positions clamps every
+ * transformed vertex back into [-1,1], collapsing the model — the tree GLBs
+ * store normalized int16 positions, so float expansion must come first.
+ */
+function expandPositionsToFloat(geom) {
+  const pos = geom.attributes.position;
+  if (!pos) return;
+  if (pos.array instanceof Float32Array && !pos.isInterleavedBufferAttribute) return;
+  const count = pos.count;
+  const arr = new Float32Array(count * 3);
+  const v = new THREE.Vector3();
+  for (let i = 0; i < count; i++) {
+    v.fromBufferAttribute(pos, i);
+    arr[i * 3] = v.x; arr[i * 3 + 1] = v.y; arr[i * 3 + 2] = v.z;
+  }
+  geom.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+}
+
+/**
  * Extracts renderable mesh parts from a cached GLTF scene, normalized so the
  * model's largest dimension equals HEX_SIZE * targetSize with its base at y=0.
- * yScale applies an additional non-uniform vertical stretch (for squat tree
- * models that would otherwise read as bushes at uniform scale).
  * Geometry is cloned — the cached template is never mutated.
  */
-function getResourceModelParts(modelUrl, targetSize, yScale = 1) {
-  const key = `${modelUrl}|${targetSize}|${yScale}`;
+function getResourceModelParts(modelUrl, targetSize) {
+  const key = `${modelUrl}|${targetSize}`;
   if (resourceModelPartsCache[key]) return resourceModelPartsCache[key];
   const parts = [];
   const template = modelCache[modelUrl];
@@ -979,9 +997,10 @@ function getResourceModelParts(modelUrl, targetSize, yScale = 1) {
     template.traverse(node => {
       if (node.isMesh && node.geometry) {
         const geom = node.geometry.clone();
+        expandPositionsToFloat(geom);
         geom.applyMatrix4(node.matrixWorld);
-        geom.scale(scale, scale * yScale, scale);
-        geom.translate(0, -bbox.min.y * scale * yScale, 0);
+        geom.scale(scale, scale, scale);
+        geom.translate(0, -bbox.min.y * scale, 0);
         const material = Array.isArray(node.material) ? node.material[0] : node.material;
         parts.push({ geometry: geom, material });
       }
@@ -1019,20 +1038,19 @@ export function buildCellResources(gameState) {
     const def = findSpawnDef(manifestData, cell.resource.kind, cell.resource.name);
     const group = findTerrainGroup(def, cell.terrain ? cell.terrain.name : null);
     const size = group && typeof group.size === 'number' ? group.size : 1;
-    const yScale = group && typeof group.yScale === 'number' ? group.yScale : 1;
     const { x, z } = HexGrid.axialToPixel(cell.q, cell.r);
     const y = cell.terrain && typeof cell.terrain.height === 'number' ? cell.terrain.height : 1;
     for (const item of cell.resource.items || []) {
-      const key = `${item.modelUrl}|${size}|${yScale}`;
-      if (!buckets.has(key)) buckets.set(key, { url: item.modelUrl, size, yScale, items: [] });
+      const key = `${item.modelUrl}|${size}`;
+      if (!buckets.has(key)) buckets.set(key, { url: item.modelUrl, size, items: [] });
       buckets.get(key).items.push({
         cell, x: x + item.dx, y, z: z + item.dz, rotY: item.rotY, scale: item.scale,
       });
     }
   }
 
-  for (const { url, size, yScale, items } of buckets.values()) {
-    const parts = getResourceModelParts(url, size, yScale);
+  for (const { url, size, items } of buckets.values()) {
+    const parts = getResourceModelParts(url, size);
     for (const part of parts) {
       const im = new THREE.InstancedMesh(part.geometry, part.material, items.length);
       im.castShadow = true;

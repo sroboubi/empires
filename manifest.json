@@ -88,8 +88,7 @@
             "base": 0.7,
             "adjacent": 0.2
           },
-          "size": 1.8,
-          "yScale": 1.5
+          "size": 1.8
         },
         {
           "types": [
@@ -115,8 +114,7 @@
             "base": 0.7,
             "adjacent": 0.12
           },
-          "size": 2.0,
-          "yScale": 1.7
+          "size": 2.0
         }
       ],
       "improvement": {
