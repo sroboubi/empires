@@ -993,6 +993,7 @@ function getResourceModelParts(modelUrl, targetSize) {
     template.updateMatrixWorld(true);
     const bbox = new THREE.Box3().setFromObject(template);
     const size = bbox.getSize(new THREE.Vector3());
+    const center = bbox.getCenter(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z) || 1;
     const scale = (CONFIG.HEX_SIZE * targetSize) / maxDim;
     template.traverse(node => {
@@ -1001,7 +1002,10 @@ function getResourceModelParts(modelUrl, targetSize) {
         expandPositionsToFloat(geom);
         geom.applyMatrix4(node.matrixWorld);
         geom.scale(scale, scale, scale);
-        geom.translate(0, -bbox.min.y * scale, 0);
+        // Recenter horizontally on the model's bbox center (some Sketchfab
+        // exports offset the mesh from the scene origin) and put its base
+        // at y=0.
+        geom.translate(-center.x * scale, -bbox.min.y * scale, -center.z * scale);
         const material = Array.isArray(node.material) ? node.material[0] : node.material;
         parts.push({ geometry: geom, material });
       }
