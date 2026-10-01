@@ -2189,7 +2189,8 @@ function prettifyName(name) {
  * Shows toasts for transient UI events queued by controllers (e.g. treasure
  * pickups). Only notifies for the active human player; AI/barbarian activity
  * stays in the history log.
- */function drainUiNotifications() {
+ */
+function drainUiNotifications() {
   if (!gameState || !Array.isArray(gameState.uiNotifications) || !gameState.uiNotifications.length) return;
   const activePlayer = gameState.activePlayer;
   for (const n of gameState.uiNotifications) {
