@@ -95,6 +95,9 @@ export function findSpawnDef(manifestData, kind, name) {
  * Scatters `quantity` item placements clustered near the center of the hex
  * cell. Each item gets a random model, offset, Y rotation and slight scale
  * jitter — the item count makes the resource amount visually readable.
+ * Items keep a minimum separation from each other (rejection-sampled) so
+ * models don't sit on top of each other; large models like trees still
+ * interleave, which reads as natural clustering.
  */
 export function scatterItems(group, quantity, hexSize = 1) {
   const items = [];
@@ -102,13 +105,26 @@ export function scatterItems(group, quantity, hexSize = 1) {
   if (!urls.length || quantity <= 0) return items;
   const inner = hexSize * 0.05;
   const outer = hexSize * 0.4;
+  const size = typeof group.size === 'number' ? group.size : 1;
+  const minSep = hexSize * 0.2 * Math.min(size, 1);
+  const placed = [];
   for (let i = 0; i < quantity; i++) {
-    const angle = randRange(0, Math.PI * 2);
-    const dist = randRange(inner, outer);
+    let best = null, bestScore = -1;
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const angle = randRange(0, Math.PI * 2);
+      const dist = randRange(inner, outer);
+      const dx = Math.cos(angle) * dist;
+      const dz = Math.sin(angle) * dist;
+      let score = Infinity;
+      for (const p of placed) score = Math.min(score, Math.hypot(p.dx - dx, p.dz - dz));
+      if (score >= minSep) { best = { dx, dz }; break; }
+      if (score > bestScore) { bestScore = score; best = { dx, dz }; }
+    }
+    placed.push(best);
     items.push({
       modelUrl: pickRandom(urls),
-      dx: Math.cos(angle) * dist,
-      dz: Math.sin(angle) * dist,
+      dx: best.dx,
+      dz: best.dz,
       rotY: randRange(0, Math.PI * 2),
       scale: randRange(0.9, 1.1),
     });
