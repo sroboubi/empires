@@ -87,7 +87,8 @@
           "probability": {
             "base": 0.1,
             "adjacent": 0.2
-          }
+          },
+          "size": 1.8
         },
         {
           "types": [
@@ -112,7 +113,8 @@
           "probability": {
             "base": 0.08,
             "adjacent": 0.12
-          }
+          },
+          "size": 2.0
         }
       ],
       "improvement": {
@@ -199,7 +201,7 @@
             "max": 2
           },
           "probability": {
-            "base": 0.1,
+            "base": 0.05,
             "adjacent": 0
           }
         }

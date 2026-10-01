@@ -18,6 +18,7 @@ export class GameState {
     this.manifestData = null;
     this.settings = null;
     this.gameOver = false;
+    this.uiNotifications = []; // transient UI events (toasts); never serialized
   }
 
   /**

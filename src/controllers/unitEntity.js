@@ -102,7 +102,16 @@ export default class UnitEntity extends BaseEntity {
         this.updateVisibility();
 
         // Collect treasure if the destination cell holds one
-        checkTreasurePickup(this);
+        const pickup = checkTreasurePickup(this);
+        if (pickup && this.gameState) {
+          // Transient UI queue (not serialized); main.js drains it into toasts.
+          (this.gameState.uiNotifications ||= []).push({
+            type: 'treasure-pickup',
+            unitName: this.name,
+            ownerId: this.owner ? this.owner.id : null,
+            ...pickup,
+          });
+        }
 
         // Add history entry for move action
         if (this.owner && this.gameState) {

@@ -118,6 +118,11 @@ function trySpawnOnCell(hexGrid, cell, defs, hexSize, useAdjacent) {
       if (!hasAdjacentSameResource(hexGrid, cell, def.name)) continue;
       p = prob.adjacent || 0;
     } else {
+      // A group with adjacent probability 0 never sits next to the same
+      // resource: skip the base roll when a neighbor already holds it. This
+      // keeps non-clustering resources (e.g. deer, ruins) from landing on
+      // adjacent cells via independent base rolls.
+      if ((prob.adjacent || 0) === 0 && hasAdjacentSameResource(hexGrid, cell, def.name)) continue;
       p = prob.base || 0;
     }
     if (p > 0 && Math.random() < p) {
@@ -188,21 +193,23 @@ function formatRewards(granted) {
 
 /**
  * Checks the unit's current cell for a treasure and collects it.
- * Returns true if a treasure was consumed. A unit without an owner
+ * Returns null when no treasure was present, otherwise
+ * { treasureName, granted, rewarded, q, r }. A unit without an owner
  * (e.g. barbarian) consumes the treasure without granting rewards.
  */
 export function checkTreasurePickup(unit) {
   const gameState = unit.gameState;
-  if (!gameState) return false;
+  if (!gameState) return null;
   const cell = unit.cell || gameState.hexGrid?.getCell(unit.q, unit.r);
-  if (!cell || !cell.resource || cell.resource.kind !== 'treasure') return false;
+  if (!cell || !cell.resource || cell.resource.kind !== 'treasure') return null;
 
-  const def = findSpawnDef(gameState.manifestData, 'treasure', cell.resource.name);
+  const treasureName = cell.resource.name;
+  const def = findSpawnDef(gameState.manifestData, 'treasure', treasureName);
   const picks = cell.resource.quantity;
   const rewards = def?.rewards || [];
+  const granted = {};
 
   if (unit.owner && rewards.length > 0) {
-    const granted = {};
     for (let i = 0; i < picks; i++) {
       const reward = pickRandom(rewards);
       granted[reward.type] = (granted[reward.type] || 0) + reward.quantity;
@@ -222,7 +229,7 @@ export function checkTreasurePickup(unit) {
 
   // The treasure is consumed either way.
   delete cell.resource;
-  return true;
+  return { treasureName, granted, rewarded: Object.keys(granted).length > 0, q: cell.q, r: cell.r };
 }
 
 // --- asset preloading -------------------------------------------------------
