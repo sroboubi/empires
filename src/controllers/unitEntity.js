@@ -3,6 +3,7 @@ import { HexGrid } from '../hexGrid.js';
 import { CONFIG } from '../config.js';
 import { calculateAttackMultiplier } from '../utils.js';
 import { checkTreasurePickup } from '../resources.js';
+import { showToast } from '../utils.js';
 
 /**
  * UnitEntity - Base Class for all mobile, combat-capable units.
@@ -103,14 +104,9 @@ export default class UnitEntity extends BaseEntity {
 
         // Collect treasure if the destination cell holds one
         const pickup = checkTreasurePickup(this);
-        if (pickup && this.gameState) {
-          // Transient UI queue (not serialized); main.js drains it into toasts.
-          (this.gameState.uiNotifications ||= []).push({
-            type: 'treasure-pickup',
-            unitName: this.name,
-            ownerId: this.owner ? this.owner.id : null,
-            ...pickup,
-          });
+        if (pickup) {
+          const rewards = Object.entries(pickup.granted || {}).map(([t, q]) => `+${q} ${t}`).join(', ');
+          showToast(`${this.name} discovered ${pickup.treasureName} (${rewards})`, false, 5000);
         }
 
         // Add history entry for move action

@@ -4,7 +4,6 @@
 
 ## Audio ##
 
-- sound effects
 - music
 
 ## Game ##
@@ -21,6 +20,7 @@
 ## Later ##
 
 - entity controllers are dependent on game code, so they can't be dynamically provided (if they are moved our sourced from somewhere else, the imports won't work)
+  - consider making a single entity controller that is fully data driver (isConstruct if it can't move, add move/attack actions if it has movement/damage)
 - players need to be able to dynamically provide their ai controller class and options
 - entities add/remove themselves from gamestate?
 - unit vision considers center of cell, some cells that are partly visible are hidden - fix?

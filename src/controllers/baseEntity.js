@@ -151,6 +151,14 @@ export default class BaseEntity {
     return 1;
   }
 
+  get baseYields() {
+    return { ...(this.state.yields || {}) };
+  }
+
+  get yields() {
+    return applyResourceYieldBonus(this, this.baseYields, this.gameState);
+  }
+
   /**
    * Checks whether the entity can afford an action, including orders.
    * @param {number} [apCost=0] - Action points required; skipped when entity has no AP.
@@ -249,10 +257,9 @@ export default class BaseEntity {
       this.active = true;
     }
 
-    const yields = this.state.yields;
     // only give yields if not damaged
-    if (this.active && this.owner && yields && this.health > this.maxHealth * 0.95) {
-      this.owner.addResources(applyResourceYieldBonus(this, yields, this.gameState));
+    if (this.active && this.owner && this.baseYields && this.health > this.maxHealth * 0.95) {
+      this.owner.addResources(this.yields);
     }
 
     this.age++;
@@ -542,8 +549,20 @@ export default class BaseEntity {
     const ownerName = this.owner ? this.owner.name : 'Neutral';
     const activeStr = this.active ? 'ACTIVE' : 'INACTIVE (No Maintenance)';
     let yieldStr = '';
-    if (this.state.yields) {
-      yieldStr = Object.entries(this.state.yields).map(([k, v]) => `+${v} ${k}`).join(', ');
+    const baseYields = this.baseYields;
+    const baseKeys = Object.keys(baseYields);
+    if (baseKeys.length > 0) {
+      const adjusted = this.yields;
+      const parts = [];
+      for (const [type, baseVal] of Object.entries(baseYields)) {
+        const adjVal = adjusted[type];
+        if (typeof baseVal === 'number' && typeof adjVal === 'number' && adjVal > baseVal) {
+          parts.push(`+${baseVal} ${type} → <b>+${adjVal.toFixed(1)} ${type}</b>`);
+        } else {
+          parts.push(`+${baseVal} ${type}`);
+        }
+      }
+      yieldStr = parts.join(', ');
     }
     let apStr = '';
     if (this.maxActionPoints !== undefined && this.maxActionPoints > 0) {

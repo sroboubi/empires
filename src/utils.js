@@ -6,6 +6,30 @@ export const camelToTitle = (text) => {
 
 export const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+export function showToast(message, isError = false, timeout = 2500) {
+    const container = document.getElementById('toast-container');
+    if (!container) {
+        if (isError) console.error(`Toast: ${message}`);
+        else console.log(`Toast: ${message}`);
+        return;
+    }
+
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.textContent = message;
+    toast.style.background = isError ? '#e74c3c' : '#2ecc71';
+    container.appendChild(toast);
+
+    // Trigger reflow so the transition plays from the initial state
+    toast.getBoundingClientRect();
+    toast.classList.add('show');
+
+    setTimeout(() => {
+        toast.classList.remove('show');
+        toast.addEventListener('transitionend', () => toast.remove(), { once: true });
+    }, timeout);
+}
+
 /**
  * Calculates the directional and elevation damage multiplier from an attacker against a target entity.
  */

@@ -1,5 +1,6 @@
 import { GameState } from './gameState.js';
 import { CONFIG } from './config.js';
+import { showToast } from './utils.js';
 import {
   initRenderer,
   drawGrid,
@@ -20,7 +21,7 @@ import {
 } from './renderer.js';
 import { loadGameManifest } from './manifestLoader.js';
 import { HexGrid } from './hexGrid.js';
-import { collectResourceModelEntries, applyResourceYieldBonus, findSpawnDef } from './resources.js';
+import { collectResourceModelEntries } from './resources.js';
 import { audio } from './audio.js';
 import { saveGame, loadGame, listSaves, deleteSave, pruneAutoSaves } from './saveManager.js';
 
@@ -449,8 +450,8 @@ function renderBarbarianHordeSliders(horde) {
 
   Object.entries(horde).forEach(([unitName, { min: defaultMin, max: defaultMax }]) => {
     const prefix = hordeUnitIdPrefix(unitName);
-    const minId  = `${prefix}-min`;
-    const maxId  = `${prefix}-max`;
+    const minId = `${prefix}-min`;
+    const maxId = `${prefix}-max`;
     const fillId = `${prefix}-range-fill`;
     const minValId = `${minId}-val`;
     const maxValId = `${maxId}-val`;
@@ -509,14 +510,14 @@ function setupBarbarianUI() {
 function updateRangeFill(cfg) {
   const minEl = document.getElementById(cfg.minId);
   const maxEl = document.getElementById(cfg.maxId);
-  const fill  = document.getElementById(cfg.fillId);
+  const fill = document.getElementById(cfg.fillId);
   if (!minEl || !maxEl || !fill) return;
-  const min   = parseInt(minEl.min, 10);
-  const max   = parseInt(minEl.max, 10);
+  const min = parseInt(minEl.min, 10);
+  const max = parseInt(minEl.max, 10);
   const range = max - min;
-  const lo    = parseInt(minEl.value, 10);
-  const hi    = parseInt(maxEl.value, 10);
-  fill.style.left  = `${((lo - min) / range) * 100}%`;
+  const lo = parseInt(minEl.value, 10);
+  const hi = parseInt(maxEl.value, 10);
+  fill.style.left = `${((lo - min) / range) * 100}%`;
   fill.style.width = `${((hi - lo) / range) * 100}%`;
 }
 
@@ -524,10 +525,10 @@ function updateAllRangeFills() {
   // Enumerate all range-slider widgets currently in the DOM
   document.querySelectorAll('.range-slider[data-range-id]').forEach(slider => {
     const unitName = slider.dataset.rangeId;
-    const prefix   = hordeUnitIdPrefix(unitName);
+    const prefix = hordeUnitIdPrefix(unitName);
     updateRangeFill({
-      minId:  `${prefix}-min`,
-      maxId:  `${prefix}-max`,
+      minId: `${prefix}-min`,
+      maxId: `${prefix}-max`,
       fillId: `${prefix}-range-fill`
     });
   });
@@ -684,9 +685,9 @@ function renderLlmModelList() {
   // Apply search filter
   const filteredView = llmSearchQuery
     ? sortedView.filter(entry => {
-        const q = llmSearchQuery;
-        return entry.model.name.toLowerCase().includes(q) || entry.model.id.toLowerCase().includes(q);
-      })
+      const q = llmSearchQuery;
+      return entry.model.name.toLowerCase().includes(q) || entry.model.id.toLowerCase().includes(q);
+    })
     : sortedView;
 
   if (filteredView.length === 0) {
@@ -995,7 +996,7 @@ function handleStartGameClicked() {
         const horde = {};
         document.querySelectorAll('#setup-barbarian-horde-container .range-slider[data-range-id]').forEach(slider => {
           const unitName = slider.dataset.rangeId;
-          const prefix   = hordeUnitIdPrefix(unitName);
+          const prefix = hordeUnitIdPrefix(unitName);
           horde[unitName] = {
             min: parseInt(document.getElementById(`${prefix}-min`).value, 10) || 0,
             max: parseInt(document.getElementById(`${prefix}-max`).value, 10) || 0
@@ -1527,7 +1528,6 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
         reconcileEntities(gameState);
         reconcileCellResources(gameState);
         updatePlayersUI();
-        drainUiNotifications();
 
         if (selectedEntity && !gameState.entities.includes(selectedEntity)) {
           deselectEntity();
@@ -2116,34 +2116,6 @@ function onMouseMove(event) {
         </div>
       `;
       entitiesDiv.appendChild(entityRow);
-
-      // Natural-resource yield bonus preview for improvements: show the
-      // adjusted yield when adjacent cells hold a matching resource.
-      if (entity.state && entity.state.yields && Object.keys(entity.state.yields).length > 0 && gameState.hexGrid) {
-        const baseYields = entity.state.yields;
-        const adjusted = applyResourceYieldBonus(entity, { ...baseYields }, gameState);
-        const improved = Object.entries(adjusted).filter(
-          ([type, v]) => typeof baseYields[type] === 'number' && v > baseYields[type]
-        );
-        if (improved.length > 0) {
-          const nearby = [];
-          for (const nb of gameState.hexGrid.getNeighbors(entity.q, entity.r)) {
-            if (nb.resource && nb.resource.kind === 'natural') {
-              const def = findSpawnDef(gameState.manifestData, 'natural', nb.resource.name);
-              if (def && def.improvement && def.improvement[entity.name]) {
-                nearby.push(`${prettifyName(nb.resource.name)} ×${nb.resource.quantity}`);
-              }
-            }
-          }
-          const bonusDiv = document.createElement('div');
-          bonusDiv.style.cssText = 'font-size: 11px; color: #2ecc71; margin-left: 16px; margin-top: 2px;';
-          bonusDiv.innerHTML = improved.map(([type, v]) =>
-            `🌲 +${baseYields[type]} ${type} → <b>+${v.toFixed(1)} ${type}</b>` +
-            (nearby.length ? ` <span style="color: var(--text-muted);">(${nearby.join(', ')} nearby)</span>` : '')
-          ).join('<br>');
-          entityRow.appendChild(bonusDiv);
-        }
-      }
     } else {
       entitiesDiv.textContent = isExplored ? 'None' : 'Unknown';
     }
@@ -2166,42 +2138,12 @@ function onMouseMove(event) {
   }
 }
 
-function showToast(message, isError = false) {
-  const toast = document.getElementById('toast');
-  toast.textContent = message;
-  toast.style.background = isError ? '#e74c3c' : '#2ecc71';
-  toast.classList.add('show');
-
-  setTimeout(() => {
-    toast.classList.remove('show');
-  }, 2500);
-}
-
 /**
  * "smallRuins" -> "Small Ruins", "tree" -> "Tree".
  */
 function prettifyName(name) {
   if (!name) return '';
   return name.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, c => c.toUpperCase());
-}
-
-/**
- * Shows toasts for transient UI events queued by controllers (e.g. treasure
- * pickups). Only notifies for the active human player; AI/barbarian activity
- * stays in the history log.
- */
-function drainUiNotifications() {
-  if (!gameState || !Array.isArray(gameState.uiNotifications) || !gameState.uiNotifications.length) return;
-  const activePlayer = gameState.activePlayer;
-  for (const n of gameState.uiNotifications) {
-    if (n.type === 'treasure-pickup' && n.rewarded) {
-      if (activePlayer && !activePlayer.isAI && n.ownerId === activePlayer.id) {
-        const rewards = Object.entries(n.granted || {}).map(([t, q]) => `+${q} ${t}`).join(', ');
-        showToast(`🎉 ${n.unitName} discovered ${n.treasureName} (${rewards})`);
-      }
-    }
-  }
-  gameState.uiNotifications.length = 0;
 }
 
 window.addEventListener('DOMContentLoaded', init);

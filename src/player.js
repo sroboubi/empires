@@ -193,8 +193,7 @@ export class Player {
       }
 
       if (entity.active) {
-        const yields = entity.state?.yields || {};
-        for (const [res, amt] of Object.entries(yields)) {
+        for (const [res, amt] of Object.entries(entity.yields)) {
           resourceKeys.add(res);
           totalYields[res] = (totalYields[res] || 0) + amt;
         }
