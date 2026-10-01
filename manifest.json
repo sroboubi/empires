@@ -17,7 +17,7 @@
             "max": 4
           },
           "probability": {
-            "base": 0.4,
+            "base": 0.05,
             "adjacent": 0
           }
         }
@@ -52,7 +52,7 @@
             "max": 2
           },
           "probability": {
-            "base": 0.4,
+            "base": 0.03,
             "adjacent": 0
           }
         }
@@ -85,7 +85,7 @@
             "max": 4
           },
           "probability": {
-            "base": 0.7,
+            "base": 0.1,
             "adjacent": 0.2
           },
           "size": 1.8
@@ -111,7 +111,7 @@
             "max": 6
           },
           "probability": {
-            "base": 0.7,
+            "base": 0.08,
             "adjacent": 0.12
           },
           "size": 2.0
@@ -201,7 +201,7 @@
             "max": 2
           },
           "probability": {
-            "base": 0.3,
+            "base": 0.05,
             "adjacent": 0
           }
         }
