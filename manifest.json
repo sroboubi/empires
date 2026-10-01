@@ -14,13 +14,14 @@
           ],
           "quantity": {
             "min": 1,
-            "max": 4
+            "max": 2
           },
           "probability": {
             "base": 0.05,
             "adjacent": 0
           },
-          "sizeVariance": 0.1
+          "size": 0.7,
+          "sizeVariance": 0.2
         }
       ],
       "rewards": [
@@ -56,7 +57,8 @@
             "base": 0.03,
             "adjacent": 0
           },
-          "sizeVariance": 0.1
+          "size": 0.7,
+          "sizeVariance": 0.2
         }
       ],
       "rewards": [
@@ -84,14 +86,14 @@
           ],
           "quantity": {
             "min": 1,
-            "max": 4
+            "max": 3
           },
           "probability": {
             "base": 0.1,
             "adjacent": 0.2
           },
-          "size": 1.8,
-          "sizeVariance": 0.1
+          "size": 2,
+          "sizeVariance": 0.25
         },
         {
           "types": [
@@ -111,7 +113,7 @@
           ],
           "quantity": {
             "min": 2,
-            "max": 6
+            "max": 5
           },
           "probability": {
             "base": 0.08,
@@ -124,7 +126,7 @@
       "improvement": {
         "lumberMill": {
           "type": "wood",
-          "yieldMultiplier": 1.2
+          "yieldMultiplier": 1.1
         }
       }
     },
@@ -212,6 +214,7 @@
             "base": 0.05,
             "adjacent": 0
           },
+          "size": 0.8,
           "sizeVariance": 0.1
         }
       ],
@@ -242,6 +245,7 @@
             "base": 0.05,
             "adjacent": 0
           },
+          "size": 0.8,
           "sizeVariance": 0.1
         }
       ],
@@ -1024,7 +1028,7 @@
       },
       "yields": {
         "gold": 10,
-        "food": 10,
+        "food": 6,
         "gems": 1
       },
       "ordersPerTurn": 1,
@@ -1065,13 +1069,13 @@
           "FootHills",
           "Hills",
           "Mountains",
-          "Snowy Hills",
-          "Snowy Mountains"
+          "SnowyHills",
+          "SnowyMountains"
         ],
         "minSeparation": 3
       },
       "yields": {
-        "iron": 15
+        "iron": 12
       },
       "rotationOffset": 0,
       "sightRange": 3,
@@ -1107,7 +1111,7 @@
         "minSeparation": 3
       },
       "yields": {
-        "wood": 15
+        "wood": 8
       },
       "rotationOffset": 0,
       "sightRange": 3,
@@ -1138,13 +1142,13 @@
           "FootHills",
           "Hills",
           "Mountains",
-          "Snowy Hills",
-          "Snowy Mountains"
+          "SnowyHills",
+          "SnowyMountains"
         ],
         "minSeparation": 3
       },
       "yields": {
-        "gold": 15,
+        "gold": 12,
         "gems": 1
       },
       "rotationOffset": 0,
