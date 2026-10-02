@@ -2,6 +2,7 @@ import { HexGrid } from '../hexGrid.js';
 import { camelToTitle } from '../utils.js';
 import { SeaLevel } from '../terrainProvider.js';
 import { sleep, calculateAttackMultiplier } from '../utils.js';
+import { applyResourceYieldBonus } from '../resources.js';
 import { reconcileEntities } from '../renderer.js';
 import { updatePlayersUI } from '../main.js';
 import { CONFIG } from '../config.js';
@@ -11,9 +12,9 @@ import { CONFIG } from '../config.js';
  * while (ordersUsed < maxOrders)
  *   - if attackMultiplier > 1 then try to attack
  *   - otherwise try to move
- *      - choose a cell that you can reach using 1 order that you can attack from that provides the best attackMultiplier
- *      - if no such cell, then move as close to the target as possible
- *   - if you can NOT move at all but can do an attack from current cell then do the attack
+ *      - choose a reachable cell that you can attack from that provides the best attackMultiplier
+ *      - if no better cell exists and you cannot attack from here, move as close to the target as possible
+ *   - if already in range (or you can NOT move at all) but can do an attack from current cell then do the attack
  *   - if all else fails, then break loop and return
  *
  * @param {GameState} gameState
@@ -75,6 +76,7 @@ export function attack(gameState, sourceEntity, targetEntity, maxOrders = 1) {
         }
 
         // Otherwise try to move to a better position
+        let moved = false;
         if (moveAction && sourceEntity.actionPoints > 0) {
             // Find path to target and collect neighbors of path cells + current neighbors
             const pathResult = gameState.hexGrid.movementCostTo(sourceEntity.cell, targetCell);
@@ -131,42 +133,45 @@ export function attack(gameState, sourceEntity, targetEntity, maxOrders = 1) {
             // If found a cell with better multiplier, move there
             if (bestMoveCell && bestMoveMult > currentMult) {
                 const fromCoord = `(${sourceEntity.q},${sourceEntity.r})`;
-                const moved = moveAction.do(bestMoveCell, null);
-                if (moved) {
+                if (moveAction.do(bestMoveCell, null)) {
                     ordersUsed++;
                     aiLog(attackerPlayer, 'combat', `Repositioning: ${sourceEntity.name} moved from ${fromCoord} to (${bestMoveCell.q},${bestMoveCell.r}) for better attack multiplier (${bestMoveMult.toFixed(2)}x vs ${currentMult.toFixed(2)}x). AP left: ${sourceEntity.actionPoints}. Order used: ${ordersUsed}/${availableOrders}.`);
-                    continue; // Continue loop, will try to attack from new position
+                    moved = true;
                 }
             }
 
-            // If no cell with better multiplier, move as close to target as possible
-            let closestCell = null;
-            let closestDist = Infinity;
+            // Only close the distance when we cannot attack from here at all.
+            // If already in range with no better cell, attacking from the
+            // current cell (below) beats wasting an order shuffling around.
+            if (!moved && !isCurrentPossible) {
+                let closestCell = null;
+                let closestDist = Infinity;
 
-            for (const candCell of candidates) {
-                const occupant = gameState.getEntityAt(candCell.q, candCell.r);
-                if (occupant) continue;
+                for (const candCell of candidates) {
+                    const occupant = gameState.getEntityAt(candCell.q, candCell.r);
+                    if (occupant) continue;
 
-                const checkMove = moveAction.canDo(candCell, null);
-                if (!checkMove || !checkMove.possible) continue;
+                    const checkMove = moveAction.canDo(candCell, null);
+                    if (!checkMove || !checkMove.possible) continue;
 
-                const dist = HexGrid.distance(candCell, targetCell);
-                if (dist < closestDist) {
-                    closestDist = dist;
-                    closestCell = candCell;
+                    const dist = HexGrid.distance(candCell, targetCell);
+                    if (dist < closestDist) {
+                        closestDist = dist;
+                        closestCell = candCell;
+                    }
                 }
-            }
 
-            if (closestCell) {
-                const fromCoord = `(${sourceEntity.q},${sourceEntity.r})`;
-                const moved = moveAction.do(closestCell, null);
-                if (moved) {
-                    ordersUsed++;
-                    aiLog(attackerPlayer, 'combat', `Repositioning: ${sourceEntity.name} moved from ${fromCoord} to (${closestCell.q},${closestCell.r}) to close distance on ${targetEntity.name} (dist: ${closestDist}). AP left: ${sourceEntity.actionPoints}. Order used: ${ordersUsed}/${availableOrders}.`);
-                    continue; // Continue loop, will try to attack from new position
+                if (closestCell) {
+                    const fromCoord = `(${sourceEntity.q},${sourceEntity.r})`;
+                    if (moveAction.do(closestCell, null)) {
+                        ordersUsed++;
+                        aiLog(attackerPlayer, 'combat', `Repositioning: ${sourceEntity.name} moved from ${fromCoord} to (${closestCell.q},${closestCell.r}) to close distance on ${targetEntity.name} (dist: ${closestDist}). AP left: ${sourceEntity.actionPoints}. Order used: ${ordersUsed}/${availableOrders}.`);
+                        moved = true;
+                    }
                 }
             }
         }
+        if (moved) continue; // Re-evaluate the attack from the new position
 
         // If we can NOT move at all but can do an attack from current cell then do the attack
         if (isCurrentPossible) {
@@ -204,19 +209,92 @@ export function attack(gameState, sourceEntity, targetEntity, maxOrders = 1) {
 }
 
 /**
+ * BFS from the unit's cell across traversable hexes.
+ * A step is traversable when the unit can stand on the cell, the single-step
+ * movement cost does not exceed the unit's max AP (it could never cross
+ * otherwise, e.g. deep water for a land unit), and no other entity blocks it.
+ * Search depth is bounded by maxDistance.
+ *
+ * @returns {Map<string, {cell: Object, path: Array<Object>}>} key `${q},${r}` -> cell + path from the unit (excluding start)
+ */
+export function findReachableCells(gameState, unit, maxDistance = Infinity) {
+    const grid = gameState.hexGrid;
+    const reachable = new Map();
+    if (!grid || !unit) return reachable;
+    const startCell = unit.cell || grid.getCell(unit.q, unit.r);
+    if (!startCell) return reachable;
+    const maxAP = unit.maxActionPoints ?? unit.actionPoints ?? Infinity;
+    const startKey = `${unit.q},${unit.r}`;
+    reachable.set(startKey, { cell: startCell, path: [] });
+    const queue = [{ q: unit.q, r: unit.r, path: [], dist: 0 }];
+    while (queue.length > 0) {
+        const cur = queue.shift();
+        if (cur.dist >= maxDistance) continue;
+        for (const nb of grid.getNeighbors(cur.q, cur.r)) {
+            const key = `${nb.q},${nb.r}`;
+            if (reachable.has(key)) continue;
+            if (typeof unit.canStandOn === 'function' && !unit.canStandOn(nb)) continue;
+            if ((nb.terrain?.movementCost ?? 1) > maxAP) continue;
+            const occupant = gameState.getEntityAt(nb.q, nb.r);
+            if (occupant && occupant !== unit) continue;
+            const path = [...cur.path, nb];
+            reachable.set(key, { cell: nb, path });
+            queue.push({ q: nb.q, r: nb.r, path, dist: cur.dist + 1 });
+        }
+    }
+    return reachable;
+}
+
+/**
+ * Expected total yield if an improvement named canonicalName were built on
+ * cell. Delegates to applyResourceYieldBonus (resources.js) with a minimal
+ * stand-in entity so the bonus formula lives in exactly one place.
+ * Entities without yields score a constant 1, which makes the closest
+ * candidate win the distance/penalty comparison below.
+ */
+function expectedYieldAt(gameState, cell, canonicalName, baseYields) {
+    if (!baseYields || Object.keys(baseYields).length === 0) return 1;
+    const adjusted = applyResourceYieldBonus(
+        { name: canonicalName, q: cell.q, r: cell.r },
+        { ...baseYields },
+        gameState
+    );
+    return Object.values(adjusted).reduce((sum, v) => sum + (typeof v === 'number' ? v : 0), 0);
+}
+
+/**
  * Builds targetName construct or unit with sourceEntity.
- * Attempts construction on neighboring cells. If none support construction and sourceEntity can move,
- * finds the closest cell in the grid supporting construction, moves adjacent to it, and builds.
- * 
+ *
+ * All cells (adjacent or not) compete uniformly: candidates must be explored
+ * by the owner, within maxDistance, on valid terrain, unoccupied, resourceless,
+ * and have a reachable, unoccupied neighboring cell to build from. Each
+ * candidate is scored by its expected yield (base yields adjusted for adjacent
+ * natural resources via applyResourceYieldBonus). The closest candidate wins
+ * unless a farther, richer site justifies the trip:
+ *   distancePenalty * deltaDistance < richerYield / bestYield
+ * Non-mobile builders (no Move action) can only consider adjacent cells.
+ *
+ * Once the best site is chosen the builder moves toward it and builds. If
+ * orders run out, it returns without re-targeting; the same build command
+ * next turn re-selects the same site deterministically and continues.
+ *
  * @param {GameState} gameState
  * @param {BaseEntity} sourceEntity
  * @param {string} targetName
+ * @param {number} [maxDistance] furthest cell from the builder to consider
+ * @param {number} [distancePenalty] weighting of extra travel vs. yield gain
  * @returns {number} Number of orders used
  */
-export function build(gameState, sourceEntity, targetName) {
+export function build(gameState, sourceEntity, targetName,
+    maxDistance = CONFIG.AI_BUILD_MAX_DISTANCE ?? 10,
+    distancePenalty = CONFIG.AI_BUILD_DISTANCE_PENALTY ?? 0.2) {
     if (!gameState || !sourceEntity || !targetName || !sourceEntity.active) return 0;
 
-    const availableOrders = sourceEntity.owner ? sourceEntity.owner.orders : 1;
+    const grid = gameState.hexGrid;
+    if (!grid) return 0;
+
+    const owner = sourceEntity.owner;
+    const availableOrders = owner ? owner.orders : 1;
     if (availableOrders <= 0) return 0;
 
     const actions = sourceEntity.getActions ? sourceEntity.getActions() : [];
@@ -226,79 +304,119 @@ export function build(gameState, sourceEntity, targetName) {
 
     const moveAction = actions.find(a => a.name === "Move");
 
-    // 1. Try all immediate neighboring cells
-    const neighbors = gameState.hexGrid ? gameState.hexGrid.getNeighbors(sourceEntity.q, sourceEntity.r) : [];
-    for (const neighborCell of neighbors) {
-        const targetOccupant = gameState.getEntityAt(neighborCell.q, neighborCell.r);
-        const check = buildAction.canDo(neighborCell, targetOccupant);
-        if (check && check.possible) {
-            const built = buildAction.do(neighborCell, targetOccupant);
-            if (built) return 1;
-        }
-    }
+    // Canonical manifest key (case-insensitive): drives base yields and the
+    // resource improvement-bonus name matching.
+    const manifestEntities = gameState.manifestData?.entities || {};
+    const canonicalName = Object.keys(manifestEntities).find(k => k.toLowerCase() === String(targetName).toLowerCase()) || targetName;
+    const meta = manifestEntities[canonicalName];
+    const spawnConditions = meta?.spawnConditions;
+    const baseYields = meta?.yields;
 
-    // 2. If no neighbor works and entity can move, find the closest cell that supports construction
-    if (availableOrders > 1 && moveAction && sourceEntity.actionPoints > 0) {
-        const meta = gameState.manifestData?.entities?.[targetName] || gameState.manifestData?.entities?.[targetName.toLowerCase()];
-        const spawnConditions = meta ? meta.spawnConditions : null;
-        const allCells = gameState.hexGrid.getCellsArray();
+    // Cells the builder can stage from. Non-mobile builders stay put, so only
+    // adjacent cells are reachable for them.
+    const startCell = sourceEntity.cell || grid.getCell(sourceEntity.q, sourceEntity.r);
+    const reachable = moveAction
+        ? findReachableCells(gameState, sourceEntity, maxDistance)
+        : new Map([[`${sourceEntity.q},${sourceEntity.r}`, { cell: startCell, path: [] }]]);
+    const canStageFrom = (cell) => {
+        if (!reachable.has(`${cell.q},${cell.r}`)) return false;
+        const occupant = gameState.getEntityAt(cell.q, cell.r);
+        return !occupant || occupant === sourceEntity;
+    };
 
-        const candidateCells = allCells.filter(cell => {
-            if (!cell || !cell.terrain || cell.terrain.elevation <= SeaLevel) return false;
-            if (gameState.getEntityAt(cell.q, cell.r)) return false;
+    const isExplored = owner && typeof owner.isExplored === 'function'
+        ? (q, r) => owner.isExplored(q, r)
+        : () => true;
 
-            if (spawnConditions) {
-                if (Array.isArray(spawnConditions.terrain) && spawnConditions.terrain.length > 0) {
-                    const tName = cell.terrain.name || '';
-                    if (!spawnConditions.terrain.some(t => t.toLowerCase() === tName.toLowerCase())) {
-                        return false;
-                    }
-                }
-                if (typeof spawnConditions.minSeparation === 'number') {
-                    const reqSep = spawnConditions.minSeparation;
-                    const entities = gameState.entities || [];
-                    const manifestEnts = gameState.manifestData?.entities || {};
-                    for (const e of entities) {
-                        const eMeta = manifestEnts[e.name];
-                        const eSep = eMeta?.spawnConditions?.minSeparation;
-                        if (typeof eSep === 'number') {
-                            const needed = Math.max(reqSep, eSep);
-                            if (HexGrid.distance(cell, e) < needed) return false;
-                        }
-                    }
-                }
+    const candidates = [];
+    for (const cell of grid.getCellsArray()) {
+        if (!cell || !cell.terrain || cell.terrain.elevation <= SeaLevel) continue;
+        if (HexGrid.distance(sourceEntity, cell) > maxDistance) continue;
+        if (!isExplored(cell.q, cell.r)) continue;
+        if (gameState.getEntityAt(cell.q, cell.r)) continue;
+        if (cell.resource) continue; // Build.canDo rejects resource cells
+
+        if (spawnConditions) {
+            if (Array.isArray(spawnConditions.terrain) && spawnConditions.terrain.length > 0) {
+                const tName = cell.terrain.name || '';
+                if (!spawnConditions.terrain.some(t => t.toLowerCase() === tName.toLowerCase())) continue;
             }
-            return true;
+            if (typeof spawnConditions.minSeparation === 'number') {
+                const reqSep = spawnConditions.minSeparation;
+                let ok = true;
+                for (const e of gameState.entities || []) {
+                    const eSep = manifestEntities[e.name]?.spawnConditions?.minSeparation;
+                    if (typeof eSep === 'number' && HexGrid.distance(cell, e) < Math.max(reqSep, eSep)) {
+                        ok = false;
+                        break;
+                    }
+                }
+                if (!ok) continue;
+            }
+        }
+
+        // Need a reachable, unoccupied neighbor to build from; prefer the
+        // shortest staging path.
+        let stage = null;
+        for (const nb of grid.getNeighbors(cell.q, cell.r)) {
+            if (!canStageFrom(nb)) continue;
+            const entry = reachable.get(`${nb.q},${nb.r}`);
+            if (!stage || entry.path.length < stage.path.length) stage = entry;
+        }
+        if (!stage) continue;
+
+        candidates.push({
+            cell,
+            stage,
+            dist: HexGrid.distance(sourceEntity, cell),
+            yield: expectedYieldAt(gameState, cell, canonicalName, baseYields),
         });
+    }
 
-        // Sort by distance to sourceEntity
-        candidateCells.sort((a, b) => HexGrid.distance(sourceEntity, a) - HexGrid.distance(sourceEntity, b));
+    if (candidates.length === 0) return 0;
 
-        for (const targetBuildCell of candidateCells.slice(0, 8)) {
-            const adjNeighbors = gameState.hexGrid.getNeighbors(targetBuildCell.q, targetBuildCell.r);
-            adjNeighbors.sort((a, b) => HexGrid.distance(sourceEntity, a) - HexGrid.distance(sourceEntity, b));
-
-            for (const stepCell of adjNeighbors) {
-                if (gameState.getEntityAt(stepCell.q, stepCell.r)) continue;
-
-                const checkMove = moveAction.canDo(stepCell, null);
-                if (checkMove && checkMove.possible) {
-                    const moved = moveAction.do(stepCell, null);
-                    if (moved) {
-                        const checkBuild = buildAction.canDo(targetBuildCell, null);
-                        if (checkBuild && checkBuild.possible) {
-                            const built = buildAction.do(targetBuildCell, null);
-                            return built ? 2 : 1;
-                        }
-                        return 1;
-                    }
-                }
-            }
+    // Closest first; a farther site wins only if its relative yield gain
+    // justifies the extra travel.
+    candidates.sort((a, b) => a.dist - b.dist || b.yield - a.yield);
+    let best = candidates[0];
+    for (let i = 1; i < candidates.length; i++) {
+        const c = candidates[i];
+        if (c.yield > best.yield) {
+            const gain = best.yield > 0 ? c.yield / best.yield : Infinity;
+            if (distancePenalty * (c.dist - best.dist) < gain) best = c;
         }
     }
 
-    return 0;
+    aiLog(owner || 'AI', 'build', `Build ${canonicalName}: ${candidates.length} candidate site(s), chose (${best.cell.q},${best.cell.r}) dist ${best.dist} expected yield ${best.yield.toFixed(1)} (penalty ${distancePenalty}).`);
+
+    let ordersUsed = 0;
+
+    // Move into staging position (adjacent to the build site).
+    if (best.stage.path.length > 0) {
+        if (!moveAction || !(sourceEntity.actionPoints > 0)) return 0;
+        const moved = moveAlongPath(owner, sourceEntity, moveAction, best.stage.path, gameState, 'build',
+            `moving to build ${canonicalName} at (${best.cell.q},${best.cell.r})`);
+        if (!moved) return 0;
+        ordersUsed = 1;
+    }
+
+    // Out of orders: stop here without re-targeting; the same build command
+    // next turn will re-select this site and continue.
+    if (ordersUsed >= availableOrders) return ordersUsed;
+    if (HexGrid.distance(sourceEntity, best.cell) !== 1) return ordersUsed;
+
+    const checkBuild = buildAction.canDo(best.cell, null);
+    if (checkBuild && checkBuild.possible) {
+        if (buildAction.do(best.cell, null)) {
+            aiLog(owner || 'AI', 'build', `Built ${canonicalName} at (${best.cell.q},${best.cell.r}).`);
+            return ordersUsed + 1;
+        }
+    } else {
+        aiLog(owner || 'AI', 'warn', `Build ${canonicalName} at (${best.cell.q},${best.cell.r}) failed check: ${checkBuild ? checkBuild.reason : 'unknown'}`);
+    }
+    return ordersUsed;
 }
+
 
 // TODO change this to support (could be actions like enhance - increases yield, defend - increases defense, etc.) and not just repair
 /**
