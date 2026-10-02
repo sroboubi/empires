@@ -30,6 +30,9 @@
 ## AI ##
 
 - *** simplify system message and prompt based on thinking output from local model
+- instead of direction and distance to player start, give grouped positions (e.g. group of 3 units at distance 10 NE, enemy at distance 5 N of group, etc)
+- when exploring, try to land on treasure
+- when building, consider adjacent resource bonus
 
 ## BUGS ##
 

@@ -47,9 +47,10 @@ export class Harness extends BaseManager {
             console.debug("system prompt:", this.llmClient.systemPrompt);
             console.debug("user content:", userContent);
 
-            //response = await this.llmClient.generate(userContent);
-            response = {};
+            // DEBUG
+            return;
 
+            response = await this.llmClient.generate(userContent);
             console.debug("response:", response);
 
             if (!response) {
@@ -218,11 +219,13 @@ export class Harness extends BaseManager {
     }
 
     summarizeEntity(entity) {
-        return {
+        const summary = {
             id: entity.id,
             name: entity.name,
-            direction: this.gameState.hexGrid.directionTo(this.player.startCoord, entity.cell, true).fromSource,
-            distance: HexGrid.distance(this.player.startCoord, entity.cell),
+            fromStart: {
+                direction: this.gameState.hexGrid.directionTo(this.player.startCoord, entity.cell, true).fromSource,
+                distance: HexGrid.distance(this.player.startCoord, entity.cell)
+            },
             terrain: entity.cell.terrain?.name,
             health: entity.health,
             maxHealth: entity.maxHealth,
@@ -230,6 +233,7 @@ export class Harness extends BaseManager {
             damage: entity.damage,
             armor: entity.armor
         };
+        return summary;
     }
 
     summarizeManifest(manifest) {
