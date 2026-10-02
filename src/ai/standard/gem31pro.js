@@ -1,6 +1,6 @@
 /** DEPRECATED: USE smartManager **/
 
-import { aiLog, onActionDone, attack, build, repair } from '../utils.js';
+import { aiLog, onActionDone, attack, build, support } from '../utils.js';
 import { HexGrid } from '../../hexGrid.js';
 
 // --- Capability Helpers ---
@@ -215,7 +215,7 @@ async function handleRepairs(player, gameState, myEntities) {
 
     for (const repairer of repairers) {
         for (const target of severelyDamaged) {
-            const ordersUsed = repair(gameState, repairer, target, player.orders);
+            const ordersUsed = support(gameState, repairer, target, "Repair", player.orders);
             if (ordersUsed > 0) {
                 aiLog(player, 'build', `Maintenance: ${repairer.name} is repairing heavily damaged ${target.name} at (${target.q}, ${target.r})`);
                 return true;

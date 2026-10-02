@@ -7,6 +7,8 @@ export var CONFIG = {
   FRIENDLY_FIRE: false,
   SHOW_ALL: false,
   AI_ACTION_SLEEP: 500,  // ms
+  AI_BUILD_MAX_DISTANCE: 10,     // furthest cell from a builder considered as a build site
+  AI_BUILD_DISTANCE_PENALTY: 0.2, // weighting of extra travel vs. yield gain when ranking build sites
   PAN_CAMERA_ON_HUMAN_TURN: true,
   PAN_CAMERA_ON_AI_TURN: false,
   MIN_GAME_ROUNDS: 5,

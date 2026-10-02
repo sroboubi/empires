@@ -1,7 +1,8 @@
-import { HexGrid } from '../hexGrid.js';
+import { HexGrid, DIRECTIONS_8 } from '../hexGrid.js';
 import { camelToTitle } from '../utils.js';
 import { SeaLevel } from '../terrainProvider.js';
 import { sleep, calculateAttackMultiplier } from '../utils.js';
+import { applyResourceYieldBonus } from '../resources.js';
 import { reconcileEntities } from '../renderer.js';
 import { updatePlayersUI } from '../main.js';
 import { CONFIG } from '../config.js';
@@ -11,9 +12,9 @@ import { CONFIG } from '../config.js';
  * while (ordersUsed < maxOrders)
  *   - if attackMultiplier > 1 then try to attack
  *   - otherwise try to move
- *      - choose a cell that you can reach using 1 order that you can attack from that provides the best attackMultiplier
- *      - if no such cell, then move as close to the target as possible
- *   - if you can NOT move at all but can do an attack from current cell then do the attack
+ *      - choose a reachable cell that you can attack from that provides the best attackMultiplier
+ *      - if no better cell exists and you cannot attack from here, move as close to the target as possible
+ *   - if already in range (or you can NOT move at all) but can do an attack from current cell then do the attack
  *   - if all else fails, then break loop and return
  *
  * @param {GameState} gameState
@@ -75,6 +76,7 @@ export function attack(gameState, sourceEntity, targetEntity, maxOrders = 1) {
         }
 
         // Otherwise try to move to a better position
+        let moved = false;
         if (moveAction && sourceEntity.actionPoints > 0) {
             // Find path to target and collect neighbors of path cells + current neighbors
             const pathResult = gameState.hexGrid.movementCostTo(sourceEntity.cell, targetCell);
@@ -131,42 +133,45 @@ export function attack(gameState, sourceEntity, targetEntity, maxOrders = 1) {
             // If found a cell with better multiplier, move there
             if (bestMoveCell && bestMoveMult > currentMult) {
                 const fromCoord = `(${sourceEntity.q},${sourceEntity.r})`;
-                const moved = moveAction.do(bestMoveCell, null);
-                if (moved) {
+                if (moveAction.do(bestMoveCell, null)) {
                     ordersUsed++;
                     aiLog(attackerPlayer, 'combat', `Repositioning: ${sourceEntity.name} moved from ${fromCoord} to (${bestMoveCell.q},${bestMoveCell.r}) for better attack multiplier (${bestMoveMult.toFixed(2)}x vs ${currentMult.toFixed(2)}x). AP left: ${sourceEntity.actionPoints}. Order used: ${ordersUsed}/${availableOrders}.`);
-                    continue; // Continue loop, will try to attack from new position
+                    moved = true;
                 }
             }
 
-            // If no cell with better multiplier, move as close to target as possible
-            let closestCell = null;
-            let closestDist = Infinity;
+            // Only close the distance when we cannot attack from here at all.
+            // If already in range with no better cell, attacking from the
+            // current cell (below) beats wasting an order shuffling around.
+            if (!moved && !isCurrentPossible) {
+                let closestCell = null;
+                let closestDist = Infinity;
 
-            for (const candCell of candidates) {
-                const occupant = gameState.getEntityAt(candCell.q, candCell.r);
-                if (occupant) continue;
+                for (const candCell of candidates) {
+                    const occupant = gameState.getEntityAt(candCell.q, candCell.r);
+                    if (occupant) continue;
 
-                const checkMove = moveAction.canDo(candCell, null);
-                if (!checkMove || !checkMove.possible) continue;
+                    const checkMove = moveAction.canDo(candCell, null);
+                    if (!checkMove || !checkMove.possible) continue;
 
-                const dist = HexGrid.distance(candCell, targetCell);
-                if (dist < closestDist) {
-                    closestDist = dist;
-                    closestCell = candCell;
+                    const dist = HexGrid.distance(candCell, targetCell);
+                    if (dist < closestDist) {
+                        closestDist = dist;
+                        closestCell = candCell;
+                    }
                 }
-            }
 
-            if (closestCell) {
-                const fromCoord = `(${sourceEntity.q},${sourceEntity.r})`;
-                const moved = moveAction.do(closestCell, null);
-                if (moved) {
-                    ordersUsed++;
-                    aiLog(attackerPlayer, 'combat', `Repositioning: ${sourceEntity.name} moved from ${fromCoord} to (${closestCell.q},${closestCell.r}) to close distance on ${targetEntity.name} (dist: ${closestDist}). AP left: ${sourceEntity.actionPoints}. Order used: ${ordersUsed}/${availableOrders}.`);
-                    continue; // Continue loop, will try to attack from new position
+                if (closestCell) {
+                    const fromCoord = `(${sourceEntity.q},${sourceEntity.r})`;
+                    if (moveAction.do(closestCell, null)) {
+                        ordersUsed++;
+                        aiLog(attackerPlayer, 'combat', `Repositioning: ${sourceEntity.name} moved from ${fromCoord} to (${closestCell.q},${closestCell.r}) to close distance on ${targetEntity.name} (dist: ${closestDist}). AP left: ${sourceEntity.actionPoints}. Order used: ${ordersUsed}/${availableOrders}.`);
+                        moved = true;
+                    }
                 }
             }
         }
+        if (moved) continue; // Re-evaluate the attack from the new position
 
         // If we can NOT move at all but can do an attack from current cell then do the attack
         if (isCurrentPossible) {
@@ -204,19 +209,92 @@ export function attack(gameState, sourceEntity, targetEntity, maxOrders = 1) {
 }
 
 /**
+ * BFS from the unit's cell across traversable hexes.
+ * A step is traversable when the unit can stand on the cell, the single-step
+ * movement cost does not exceed the unit's max AP (it could never cross
+ * otherwise, e.g. deep water for a land unit), and no other entity blocks it.
+ * Search depth is bounded by maxDistance.
+ *
+ * @returns {Map<string, {cell: Object, path: Array<Object>}>} key `${q},${r}` -> cell + path from the unit (excluding start)
+ */
+export function findReachableCells(gameState, unit, maxDistance = Infinity) {
+    const grid = gameState.hexGrid;
+    const reachable = new Map();
+    if (!grid || !unit) return reachable;
+    const startCell = unit.cell || grid.getCell(unit.q, unit.r);
+    if (!startCell) return reachable;
+    const maxAP = unit.maxActionPoints ?? unit.actionPoints ?? Infinity;
+    const startKey = `${unit.q},${unit.r}`;
+    reachable.set(startKey, { cell: startCell, path: [] });
+    const queue = [{ q: unit.q, r: unit.r, path: [], dist: 0 }];
+    while (queue.length > 0) {
+        const cur = queue.shift();
+        if (cur.dist >= maxDistance) continue;
+        for (const nb of grid.getNeighbors(cur.q, cur.r)) {
+            const key = `${nb.q},${nb.r}`;
+            if (reachable.has(key)) continue;
+            if (typeof unit.canStandOn === 'function' && !unit.canStandOn(nb)) continue;
+            if ((nb.terrain?.movementCost ?? 1) > maxAP) continue;
+            const occupant = gameState.getEntityAt(nb.q, nb.r);
+            if (occupant && occupant !== unit) continue;
+            const path = [...cur.path, nb];
+            reachable.set(key, { cell: nb, path });
+            queue.push({ q: nb.q, r: nb.r, path, dist: cur.dist + 1 });
+        }
+    }
+    return reachable;
+}
+
+/**
+ * Expected total yield if an improvement named canonicalName were built on
+ * cell. Delegates to applyResourceYieldBonus (resources.js) with a minimal
+ * stand-in entity so the bonus formula lives in exactly one place.
+ * Entities without yields score a constant 1, which makes the closest
+ * candidate win the distance/penalty comparison below.
+ */
+function expectedYieldAt(gameState, cell, canonicalName, baseYields) {
+    if (!baseYields || Object.keys(baseYields).length === 0) return 1;
+    const adjusted = applyResourceYieldBonus(
+        { name: canonicalName, q: cell.q, r: cell.r },
+        { ...baseYields },
+        gameState
+    );
+    return Object.values(adjusted).reduce((sum, v) => sum + (typeof v === 'number' ? v : 0), 0);
+}
+
+/**
  * Builds targetName construct or unit with sourceEntity.
- * Attempts construction on neighboring cells. If none support construction and sourceEntity can move,
- * finds the closest cell in the grid supporting construction, moves adjacent to it, and builds.
- * 
+ *
+ * All cells (adjacent or not) compete uniformly: candidates must be explored
+ * by the owner, within maxDistance, on valid terrain, unoccupied, resourceless,
+ * and have a reachable, unoccupied neighboring cell to build from. Each
+ * candidate is scored by its expected yield (base yields adjusted for adjacent
+ * natural resources via applyResourceYieldBonus). The closest candidate wins
+ * unless a farther, richer site justifies the trip:
+ *   distancePenalty * deltaDistance < richerYield / bestYield
+ * Non-mobile builders (no Move action) can only consider adjacent cells.
+ *
+ * Once the best site is chosen the builder moves toward it and builds. If
+ * orders run out, it returns without re-targeting; the same build command
+ * next turn re-selects the same site deterministically and continues.
+ *
  * @param {GameState} gameState
  * @param {BaseEntity} sourceEntity
  * @param {string} targetName
+ * @param {number} [maxDistance] furthest cell from the builder to consider
+ * @param {number} [distancePenalty] weighting of extra travel vs. yield gain
  * @returns {number} Number of orders used
  */
-export function build(gameState, sourceEntity, targetName) {
+export function build(gameState, sourceEntity, targetName,
+    maxDistance = CONFIG.AI_BUILD_MAX_DISTANCE ?? 10,
+    distancePenalty = CONFIG.AI_BUILD_DISTANCE_PENALTY ?? 0.2) {
     if (!gameState || !sourceEntity || !targetName || !sourceEntity.active) return 0;
 
-    const availableOrders = sourceEntity.owner ? sourceEntity.owner.orders : 1;
+    const grid = gameState.hexGrid;
+    if (!grid) return 0;
+
+    const owner = sourceEntity.owner;
+    const availableOrders = owner ? owner.orders : 1;
     if (availableOrders <= 0) return 0;
 
     const actions = sourceEntity.getActions ? sourceEntity.getActions() : [];
@@ -226,117 +304,176 @@ export function build(gameState, sourceEntity, targetName) {
 
     const moveAction = actions.find(a => a.name === "Move");
 
-    // 1. Try all immediate neighboring cells
-    const neighbors = gameState.hexGrid ? gameState.hexGrid.getNeighbors(sourceEntity.q, sourceEntity.r) : [];
-    for (const neighborCell of neighbors) {
-        const targetOccupant = gameState.getEntityAt(neighborCell.q, neighborCell.r);
-        const check = buildAction.canDo(neighborCell, targetOccupant);
-        if (check && check.possible) {
-            const built = buildAction.do(neighborCell, targetOccupant);
-            if (built) return 1;
-        }
-    }
+    // Canonical manifest key (case-insensitive): drives base yields and the
+    // resource improvement-bonus name matching.
+    const manifestEntities = gameState.manifestData?.entities || {};
+    const canonicalName = Object.keys(manifestEntities).find(k => k.toLowerCase() === String(targetName).toLowerCase()) || targetName;
+    const meta = manifestEntities[canonicalName];
+    const spawnConditions = meta?.spawnConditions;
+    const baseYields = meta?.yields;
 
-    // 2. If no neighbor works and entity can move, find the closest cell that supports construction
-    if (availableOrders > 1 && moveAction && sourceEntity.actionPoints > 0) {
-        const meta = gameState.manifestData?.entities?.[targetName] || gameState.manifestData?.entities?.[targetName.toLowerCase()];
-        const spawnConditions = meta ? meta.spawnConditions : null;
-        const allCells = gameState.hexGrid.getCellsArray();
+    // Cells the builder can stage from. Non-mobile builders stay put, so only
+    // adjacent cells are reachable for them.
+    const startCell = sourceEntity.cell || grid.getCell(sourceEntity.q, sourceEntity.r);
+    const reachable = moveAction
+        ? findReachableCells(gameState, sourceEntity, maxDistance)
+        : new Map([[`${sourceEntity.q},${sourceEntity.r}`, { cell: startCell, path: [] }]]);
+    const canStageFrom = (cell) => {
+        if (!reachable.has(`${cell.q},${cell.r}`)) return false;
+        const occupant = gameState.getEntityAt(cell.q, cell.r);
+        return !occupant || occupant === sourceEntity;
+    };
 
-        const candidateCells = allCells.filter(cell => {
-            if (!cell || !cell.terrain || cell.terrain.elevation <= SeaLevel) return false;
-            if (gameState.getEntityAt(cell.q, cell.r)) return false;
+    const isExplored = owner && typeof owner.isExplored === 'function'
+        ? (q, r) => owner.isExplored(q, r)
+        : () => true;
 
-            if (spawnConditions) {
-                if (Array.isArray(spawnConditions.terrain) && spawnConditions.terrain.length > 0) {
-                    const tName = cell.terrain.name || '';
-                    if (!spawnConditions.terrain.some(t => t.toLowerCase() === tName.toLowerCase())) {
-                        return false;
-                    }
-                }
-                if (typeof spawnConditions.minSeparation === 'number') {
-                    const reqSep = spawnConditions.minSeparation;
-                    const entities = gameState.entities || [];
-                    const manifestEnts = gameState.manifestData?.entities || {};
-                    for (const e of entities) {
-                        const eMeta = manifestEnts[e.name];
-                        const eSep = eMeta?.spawnConditions?.minSeparation;
-                        if (typeof eSep === 'number') {
-                            const needed = Math.max(reqSep, eSep);
-                            if (HexGrid.distance(cell, e) < needed) return false;
-                        }
-                    }
-                }
+    const candidates = [];
+    for (const cell of grid.getCellsArray()) {
+        if (!cell || !cell.terrain || cell.terrain.elevation <= SeaLevel) continue;
+        if (HexGrid.distance(sourceEntity, cell) > maxDistance) continue;
+        if (!isExplored(cell.q, cell.r)) continue;
+        if (gameState.getEntityAt(cell.q, cell.r)) continue;
+        if (cell.resource) continue; // Build.canDo rejects resource cells
+
+        if (spawnConditions) {
+            if (Array.isArray(spawnConditions.terrain) && spawnConditions.terrain.length > 0) {
+                const tName = cell.terrain.name || '';
+                if (!spawnConditions.terrain.some(t => t.toLowerCase() === tName.toLowerCase())) continue;
             }
-            return true;
+            if (typeof spawnConditions.minSeparation === 'number') {
+                const reqSep = spawnConditions.minSeparation;
+                let ok = true;
+                for (const e of gameState.entities || []) {
+                    const eSep = manifestEntities[e.name]?.spawnConditions?.minSeparation;
+                    if (typeof eSep === 'number' && HexGrid.distance(cell, e) < Math.max(reqSep, eSep)) {
+                        ok = false;
+                        break;
+                    }
+                }
+                if (!ok) continue;
+            }
+        }
+
+        // Need a reachable, unoccupied neighbor to build from; prefer the
+        // shortest staging path.
+        let stage = null;
+        for (const nb of grid.getNeighbors(cell.q, cell.r)) {
+            if (!canStageFrom(nb)) continue;
+            const entry = reachable.get(`${nb.q},${nb.r}`);
+            if (!stage || entry.path.length < stage.path.length) stage = entry;
+        }
+        if (!stage) continue;
+
+        candidates.push({
+            cell,
+            stage,
+            dist: HexGrid.distance(sourceEntity, cell),
+            yield: expectedYieldAt(gameState, cell, canonicalName, baseYields),
         });
+    }
 
-        // Sort by distance to sourceEntity
-        candidateCells.sort((a, b) => HexGrid.distance(sourceEntity, a) - HexGrid.distance(sourceEntity, b));
+    if (candidates.length === 0) return 0;
 
-        for (const targetBuildCell of candidateCells.slice(0, 8)) {
-            const adjNeighbors = gameState.hexGrid.getNeighbors(targetBuildCell.q, targetBuildCell.r);
-            adjNeighbors.sort((a, b) => HexGrid.distance(sourceEntity, a) - HexGrid.distance(sourceEntity, b));
-
-            for (const stepCell of adjNeighbors) {
-                if (gameState.getEntityAt(stepCell.q, stepCell.r)) continue;
-
-                const checkMove = moveAction.canDo(stepCell, null);
-                if (checkMove && checkMove.possible) {
-                    const moved = moveAction.do(stepCell, null);
-                    if (moved) {
-                        const checkBuild = buildAction.canDo(targetBuildCell, null);
-                        if (checkBuild && checkBuild.possible) {
-                            const built = buildAction.do(targetBuildCell, null);
-                            return built ? 2 : 1;
-                        }
-                        return 1;
-                    }
-                }
-            }
+    // Closest first; a farther site wins only if its relative yield gain
+    // justifies the extra travel.
+    candidates.sort((a, b) => a.dist - b.dist || b.yield - a.yield);
+    let best = candidates[0];
+    for (let i = 1; i < candidates.length; i++) {
+        const c = candidates[i];
+        if (c.yield > best.yield) {
+            const gain = best.yield > 0 ? c.yield / best.yield : Infinity;
+            if (distancePenalty * (c.dist - best.dist) < gain) best = c;
         }
     }
 
-    return 0;
+    aiLog(owner || 'AI', 'build', `Build ${canonicalName}: ${candidates.length} candidate site(s), chose (${best.cell.q},${best.cell.r}) dist ${best.dist} expected yield ${best.yield.toFixed(1)} (penalty ${distancePenalty}).`);
+
+    let ordersUsed = 0;
+
+    // Move into staging position (adjacent to the build site).
+    if (best.stage.path.length > 0) {
+        if (!moveAction || !(sourceEntity.actionPoints > 0)) return 0;
+        const moved = moveAlongPath(owner, sourceEntity, moveAction, best.stage.path, gameState, 'build',
+            `moving to build ${canonicalName} at (${best.cell.q},${best.cell.r})`);
+        if (!moved) return 0;
+        ordersUsed = 1;
+    }
+
+    // Out of orders: stop here without re-targeting; the same build command
+    // next turn will re-select this site and continue.
+    if (ordersUsed >= availableOrders) return ordersUsed;
+    if (HexGrid.distance(sourceEntity, best.cell) !== 1) return ordersUsed;
+
+    const checkBuild = buildAction.canDo(best.cell, null);
+    if (checkBuild && checkBuild.possible) {
+        if (buildAction.do(best.cell, null)) {
+            aiLog(owner || 'AI', 'build', `Built ${canonicalName} at (${best.cell.q},${best.cell.r}).`);
+            return ordersUsed + 1;
+        }
+    } else {
+        aiLog(owner || 'AI', 'warn', `Build ${canonicalName} at (${best.cell.q},${best.cell.r}) failed check: ${checkBuild ? checkBuild.reason : 'unknown'}`);
+    }
+    return ordersUsed;
 }
 
-// TODO change this to support (could be actions like enhance - increases yield, defend - increases defense, etc.) and not just repair
+
 /**
- * Repairs targetEntity with sourceEntity.
- * If target is adjacent, performs repair directly.
- * If not adjacent and maxOrders > 1, moves adjacent to targetEntity, then repairs.
- * 
+ * Supports targetEntity with sourceEntity: moves adjacent to it and performs
+ * the named action (e.g. "Repair"; future actions like buff/defend work the
+ * same way). With no actionName, the unit simply moves up to the target unit,
+ * which lets an LLM move units as a group (move one, then have others support
+ * it so they follow along).
+ * If already adjacent, performs the action directly (or nothing, when just
+ * moving along). If orders run out after moving, returns without acting; the
+ * same call next turn continues.
+ *
  * @param {GameState} gameState
  * @param {BaseEntity} sourceEntity
  * @param {BaseEntity} targetEntity
- * @param {number} maxOrders
+ * @param {string|null} [actionName] action to perform once adjacent (case-insensitive); null = just move up
+ * @param {number} [maxOrders] max orders to spend
  * @returns {number} Number of orders used
  */
-export function repair(gameState, sourceEntity, targetEntity, maxOrders = 1) {
-    if (!gameState || !sourceEntity || !targetEntity || maxOrders <= 0) return 0;
-    if (!sourceEntity.active) return 0;
+export function support(gameState, sourceEntity, targetEntity, actionName = null, maxOrders = 1) {
+    if (!gameState || !sourceEntity || !targetEntity || !sourceEntity.active) return 0;
+    if (targetEntity.destroyed) return 0;
+    if (maxOrders <= 0) return 0;
 
-    const availableOrders = Math.min(maxOrders, sourceEntity.owner ? sourceEntity.owner.orders : maxOrders);
+    const owner = sourceEntity.owner;
+    const availableOrders = Math.min(maxOrders, owner ? owner.orders : maxOrders);
     if (availableOrders <= 0) return 0;
 
     const actions = sourceEntity.getActions ? sourceEntity.getActions() : [];
-    const repairAction = actions.find(a => a.name === "Repair");
-    if (!repairAction) return 0;
+    let supportAction = null;
+    if (actionName) {
+        supportAction = actions.find(a => a.name && a.name.toLowerCase() === String(actionName).toLowerCase());
+        if (!supportAction) {
+            aiLog(owner || 'AI', 'warn', `${sourceEntity.name} has no "${actionName}" action to support ${targetEntity.name} with.`);
+            return 0;
+        }
+    }
 
     const moveAction = actions.find(a => a.name === "Move");
     const targetCell = targetEntity.cell;
 
-    // 1. If adjacent, perform repair directly
-    if (HexGrid.distance(sourceEntity, targetEntity) === 1) {
-        const check = repairAction.canDo(targetCell, targetEntity);
-        if (check && check.possible) {
-            const repaired = repairAction.do(targetCell, targetEntity);
-            return repaired ? 1 : 0;
+    const tryAct = () => {
+        if (!supportAction) return 0;
+        const check = supportAction.canDo(targetCell, targetEntity);
+        if (check && check.possible && supportAction.do(targetCell, targetEntity)) {
+            aiLog(owner || 'AI', 'detail', `${sourceEntity.name} used ${supportAction.name} on ${targetEntity.name}.`);
+            return 1;
         }
+        return 0;
+    };
+
+    // 1. If adjacent, act directly (nothing to do when merely moving along)
+    if (HexGrid.distance(sourceEntity, targetEntity) === 1) {
+        return tryAct();
     }
 
-    // 2. If not adjacent and maxOrders > 1, move adjacent and repair
-    if (availableOrders > 1 && moveAction && sourceEntity.actionPoints > 0) {
+    // 2. Move adjacent, then act if orders remain
+    if (moveAction && sourceEntity.actionPoints > 0) {
         const targetNeighbors = gameState.hexGrid.getNeighbors(targetEntity.q, targetEntity.r);
         targetNeighbors.sort((a, b) => HexGrid.distance(sourceEntity, a) - HexGrid.distance(sourceEntity, b));
 
@@ -345,15 +482,10 @@ export function repair(gameState, sourceEntity, targetEntity, maxOrders = 1) {
 
             const checkMove = moveAction.canDo(adjCell, null);
             if (checkMove && checkMove.possible) {
-                const moved = moveAction.do(adjCell, null);
-                if (moved) {
+                if (moveAction.do(adjCell, null)) {
                     let ordersUsed = 1;
-                    if (targetEntity.health < targetEntity.maxHealth) {
-                        const checkRepair = repairAction.canDo(targetCell, targetEntity);
-                        if (checkRepair && checkRepair.possible) {
-                            const repaired = repairAction.do(targetCell, targetEntity);
-                            if (repaired) ordersUsed++;
-                        }
+                    if (supportAction && availableOrders > 1) {
+                        ordersUsed += tryAct();
                     }
                     return ordersUsed;
                 }
@@ -740,43 +872,61 @@ export function moveAlongPath(player, unit, moveAction, path, gameState, categor
 }
 
 /**
- * Finds a path from an explorer towards the nearest unexplored cell on the map.
- * 
+ * Finds a path from an explorer towards the nearest target cell.
+ *
+ * Default (targetCells null): targets are all unexplored cells on the map.
+ * Pass an explicit targetCells array to restrict the search (e.g. unexplored
+ * cells in one compass direction, or explored cells holding treasure).
+ * Cells in targetedCells are ignored entirely (already claimed by others).
+ *
  * Behavior:
- * 1. Checks all unexplored cells on the map. If none exist, reports map fully explored.
- * 2. Uses BFS from the explorer across walkable terrain (explorer.canStandOn).
- * 3. Identifies reachable unexplored cells or reachable walkable cells that border unexplored cells.
- * 4. If all reachable cells and their borders are already explored, finds the closest unexplored
- *    cell on the map (by hex distance) and pathfinds to the reachable cell closest to that target
- *    (e.g., shoreline/frontier facing the target), so the unit moves TOWARDS it.
+ * 1. With no targets (or a fully explored map in default mode), reports
+ *    fullyExplored accordingly.
+ * 2. BFS from the explorer across walkable terrain (explorer.canStandOn).
+ * 3. Prefers directly reachable target cells; in default mode also considers
+ *    reachable walkable cells bordering target hexes (e.g. shoreline facing
+ *    unexplored water).
+ * 4. Otherwise moves to the reachable cell closest to the nearest target.
  * 5. Returns { targetCell, path, fullyExplored, arrivedAtBestReachable }.
- * 
- * Note: A unit does not need to reach the unexplored cell in the same turn; as it moves along
- * the path across turns, its sight range dynamically reveals unexplored cells.
- * 
- * @param {BaseEntity} explorer 
- * @param {GameState} gameState 
- * @param {Player} player 
- * @param {Set<string>} [targetedCells]
+ *
+ * Note: A unit does not need to reach the target in the same turn; as it
+ * moves along the path across turns, its sight range dynamically reveals
+ * unexplored cells.
+ *
+ * @param {BaseEntity} explorer
+ * @param {GameState} gameState
+ * @param {Player} player
+ * @param {Set<string>|Array} [targetedCells] "q,r" keys or cells to ignore
+ * @param {Array<Object>|null} [targetCells] explicit target cells; null = all unexplored
  * @returns {{targetCell: Object|null, path: Array<Object>, fullyExplored: boolean, arrivedAtBestReachable: boolean}}
  */
-export function findPathTowardsUnexplored(explorer, gameState, player, targetedCells = new Set()) {
+export function findPathTowardsUnexplored(explorer, gameState, player, targetedCells = new Set(), targetCells = null) {
     const grid = gameState.hexGrid;
-    if (!grid || !explorer || !player) {
-        return { targetCell: null, path: [], fullyExplored: false, arrivedAtBestReachable: true };
-    }
+    const empty = { targetCell: null, path: [], fullyExplored: false, arrivedAtBestReachable: true };
+    if (!grid || !explorer || !player) return empty;
 
     const startCell = explorer.cell || grid.getCell(explorer.q, explorer.r);
-    if (!startCell) {
-        return { targetCell: null, path: [], fullyExplored: false, arrivedAtBestReachable: true };
+    if (!startCell) return empty;
+
+    const ignore = new Set();
+    if (targetedCells) {
+        for (const t of targetedCells) {
+            if (typeof t === 'string') ignore.add(t);
+            else if (t && typeof t.q === 'number') ignore.add(`${t.q},${t.r}`);
+        }
     }
 
     const allCells = grid.getCellsArray ? grid.getCellsArray() : Object.values(grid.cells || {});
-    const unexploredCells = allCells.filter(c => c && !player.isExplored(c.q, c.r));
-
-    if (unexploredCells.length === 0) {
+    const unexploredCount = allCells.reduce((n, c) => n + (c && !player.isExplored(c.q, c.r) ? 1 : 0), 0);
+    if (!targetCells && unexploredCount === 0) {
         return { targetCell: null, path: [], fullyExplored: true, arrivedAtBestReachable: true };
     }
+
+    const pool = targetCells
+        ? targetCells.filter(c => c && !ignore.has(`${c.q},${c.r}`))
+        : allCells.filter(c => c && !player.isExplored(c.q, c.r) && !ignore.has(`${c.q},${c.r}`));
+    if (pool.length === 0) return empty;
+    const poolKeys = new Set(pool.map(c => `${c.q},${c.r}`));
 
     // BFS across walkable terrain from explorer
     const reachable = new Map(); // key -> { cell, path }
@@ -784,8 +934,8 @@ export function findPathTowardsUnexplored(explorer, gameState, player, targetedC
     reachable.set(startKey, { cell: startCell, path: [] });
 
     const queue = [{ q: explorer.q, r: explorer.r, path: [] }];
-    const directUnexplored = [];
-    const borderUnexplored = [];
+    const directTargets = [];
+    const borderTargets = [];
 
     while (queue.length > 0) {
         const cur = queue.shift();
@@ -794,16 +944,14 @@ export function findPathTowardsUnexplored(explorer, gameState, player, targetedC
         for (const nb of neighbors) {
             const nbKey = `${nb.q},${nb.r}`;
 
-            // Check if neighbor itself is unexplored
-            const nbExplored = player.isExplored(nb.q, nb.r);
-            if (!nbExplored) {
-                // If explorer can stand on it, it's a direct walkable unexplored cell
+            if (poolKeys.has(nbKey)) {
                 if (explorer.canStandOn(nb) && !reachable.has(nbKey)) {
                     const pathToNb = [...cur.path, nb];
-                    directUnexplored.push({ targetCell: nb, path: pathToNb, dist: pathToNb.length });
-                } else {
-                    // nb is impassable (water/mountain) or already visited; reaching cur borders it
-                    borderUnexplored.push({ targetCell: nb, path: cur.path, dist: cur.path.length, borderCell: cur });
+                    directTargets.push({ targetCell: nb, path: pathToNb, dist: pathToNb.length });
+                } else if (!targetCells) {
+                    // Default mode only: impassable target hexes (water/mountain)
+                    // can still be approached via a bordering walkable cell.
+                    borderTargets.push({ targetCell: nb, path: cur.path, dist: cur.path.length });
                 }
             }
 
@@ -821,45 +969,27 @@ export function findPathTowardsUnexplored(explorer, gameState, player, targetedC
         }
     }
 
-    // Priority 1: Reachable unexplored cells that can be directly walked on
-    if (directUnexplored.length > 0) {
-        // Sort by distance; prefer cells not already targeted by other explorers
-        directUnexplored.sort((a, b) => {
-            const aTargeted = targetedCells.has(`${a.targetCell.q},${a.targetCell.r}`) ? 1 : 0;
-            const bTargeted = targetedCells.has(`${b.targetCell.q},${b.targetCell.r}`) ? 1 : 0;
-            if (aTargeted !== bTargeted) return aTargeted - bTargeted;
-            return a.dist - b.dist;
-        });
-
-        const best = directUnexplored[0];
+    // Priority 1: directly reachable target cells, closest first
+    if (directTargets.length > 0) {
+        directTargets.sort((a, b) => a.dist - b.dist);
+        const best = directTargets[0];
         return { targetCell: best.targetCell, path: best.path, fullyExplored: false, arrivedAtBestReachable: false };
     }
 
-    // Priority 2: Reachable walkable cells that border unexplored hexes (e.g. coastal waters or cliffs)
-    const validBorderTargets = borderUnexplored.filter(b => b.path.length > 0);
-    if (validBorderTargets.length > 0) {
-        validBorderTargets.sort((a, b) => {
-            const aTargeted = targetedCells.has(`${a.targetCell.q},${a.targetCell.r}`) ? 1 : 0;
-            const bTargeted = targetedCells.has(`${b.targetCell.q},${b.targetCell.r}`) ? 1 : 0;
-            if (aTargeted !== bTargeted) return aTargeted - bTargeted;
-            return a.dist - b.dist;
-        });
-
-        const best = validBorderTargets[0];
-        return { targetCell: best.targetCell, path: best.path, fullyExplored: false, arrivedAtBestReachable: false };
+    // Priority 2 (default mode): walkable cells bordering target hexes
+    if (!targetCells) {
+        const validBorderTargets = borderTargets.filter(b => b.path.length > 0);
+        if (validBorderTargets.length > 0) {
+            validBorderTargets.sort((a, b) => a.dist - b.dist);
+            const best = validBorderTargets[0];
+            return { targetCell: best.targetCell, path: best.path, fullyExplored: false, arrivedAtBestReachable: false };
+        }
     }
 
-    // Priority 3: All reachable terrain on this landmass is fully explored.
-    // Pick the closest unexplored cell anywhere on the map, and move to the reachable cell
-    // that brings the explorer closest to that unexplored target (e.g. the frontier/coast facing it).
-    const sortedUnexplored = [...unexploredCells].sort((a, b) => {
-        const aTargeted = targetedCells.has(`${a.q},${a.r}`) ? 1 : 0;
-        const bTargeted = targetedCells.has(`${b.q},${b.r}`) ? 1 : 0;
-        if (aTargeted !== bTargeted) return aTargeted - bTargeted;
-        return HexGrid.distance(explorer, a) - HexGrid.distance(explorer, b);
-    });
-
-    const chosenTarget = sortedUnexplored[0];
+    // Priority 3: move to the reachable cell closest to the nearest target
+    // (e.g. the frontier/coast facing it).
+    const sortedPool = [...pool].sort((a, b) => HexGrid.distance(explorer, a) - HexGrid.distance(explorer, b));
+    const chosenTarget = sortedPool[0];
     let bestReachable = null;
     let minTargetDist = Infinity;
 
@@ -886,5 +1016,92 @@ export function findPathTowardsUnexplored(explorer, gameState, player, targetedC
         fullyExplored: false,
         arrivedAtBestReachable: true
     };
+}
+
+/**
+ * Moves a unit to explore, using at most 1 order. The caller repeats the call
+ * to keep exploring across orders/turns.
+ *
+ * - direction (optional): one of DIRECTIONS_8; only unexplored cells lying in
+ *   that compass direction from the unit are considered.
+ * - getTreasure (optional): move onto (or towards) the closest treasure on an
+ *   explored cell. Overrides direction. Falls back to normal exploration when
+ *   no treasure is reachable.
+ * - targetedCells (optional): "q,r" keys or cells to ignore (already claimed
+ *   by other explorers); the chosen target is added on success.
+ *
+ * Unit choice (mobile, non-builder, etc.) is the caller's job.
+ *
+ * @param {GameState} gameState
+ * @param {BaseEntity} unit
+ * @param {string|null} [direction]
+ * @param {boolean} [getTreasure]
+ * @param {Set<string>|Array|null} [targetedCells]
+ * @returns {number} 1 if the unit moved, 0 otherwise
+ */
+export function explore(gameState, unit, direction = null, getTreasure = false, targetedCells = null) {
+    if (!gameState || !unit || !unit.active) return 0;
+    const grid = gameState.hexGrid;
+    if (!grid) return 0;
+    const player = unit.owner;
+    const moveAction = unit.getActions ? unit.getActions().find(a => a.name === "Move") : null;
+    if (!moveAction) return 0;
+    if (unit.actionPoints !== undefined && unit.actionPoints <= 0) return 0;
+
+    const claim = (targetCell) => {
+        if (targetedCells instanceof Set) targetedCells.add(`${targetCell.q},${targetCell.r}`);
+        else if (Array.isArray(targetedCells)) targetedCells.push(targetCell);
+    };
+
+    const doExplore = (targetCells, reason) => {
+        const res = findPathTowardsUnexplored(unit, gameState, player, targetedCells, targetCells);
+        if (res.fullyExplored) {
+            aiLog(player || 'AI', 'explore', `All map territory is fully explored.`);
+            return 0;
+        }
+        if (!res.targetCell || !res.path || res.path.length === 0) return 0;
+        const used = moveAlongPath(player, unit, moveAction, res.path, gameState, 'explore', reason);
+        if (used > 0) {
+            claim(res.targetCell);
+            aiLog(player || 'AI', 'explore', `${unit.name} exploring ${reason} -> (${res.targetCell.q},${res.targetCell.r}).`);
+            return 1;
+        }
+        return 0;
+    };
+
+    // Treasure mode overrides direction: closest treasure on an explored cell.
+    // The unit must move ONTO the cell to pick the treasure up.
+    if (getTreasure && player) {
+        const treasures = [];
+        for (const cell of grid.getCellsArray()) {
+            if (!cell || cell.resource?.kind !== 'treasure') continue;
+            if (!player.isExplored(cell.q, cell.r)) continue;
+            treasures.push(cell);
+        }
+        if (treasures.length > 0 && doExplore(treasures, 'towards treasure')) return 1;
+        // Fall back to normal exploration (direction stays overridden).
+        return explore(gameState, unit, null, false, targetedCells);
+    }
+
+    if (direction) {
+        if (!DIRECTIONS_8.includes(direction)) {
+            aiLog(player || 'AI', 'warn', `explore: unknown direction "${direction}" (expected one of ${DIRECTIONS_8.join(', ')}).`);
+            return 0;
+        }
+        const fromCell = unit.cell || grid.getCell(unit.q, unit.r);
+        const targets = [];
+        for (const cell of grid.getCellsArray()) {
+            if (!cell) continue;
+            if (player && player.isExplored(cell.q, cell.r)) continue;
+            if (grid.directionTo(fromCell, cell).fromSource === direction) targets.push(cell);
+        }
+        if (targets.length === 0) {
+            aiLog(player || 'AI', 'explore', `No unexplored cells to the ${direction}.`);
+            return 0;
+        }
+        return doExplore(targets, `to the ${direction}`);
+    }
+
+    return doExplore(null, 'towards unexplored territory');
 }
 

@@ -29,7 +29,7 @@ const OPPOSITE_DIRECTION = {
 /**
  * The eight compass directions in clockwise order starting from East (0 rad).
  */
-const DIRECTIONS_8 = ['E', 'NE', 'N', 'NW', 'W', 'SW', 'S', 'SE'];
+export const DIRECTIONS_8 = ['E', 'NE', 'N', 'NW', 'W', 'SW', 'S', 'SE'];
 
 /**
  * Reverse mapping for 8-way compass directions.

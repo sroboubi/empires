@@ -1,7 +1,8 @@
 import {
     attack,
     build,
-    repair,
+    support,
+    explore,
     onActionDone,
     aiLog,
     isBuilder,
@@ -13,8 +14,6 @@ import {
     getEntitiesByCapability,
     getEntitiesSortedByPower,
     selectCandidateCombatUnits,
-    moveAlongPath,
-    findPathTowardsUnexplored
 } from '../utils.js';
 import { HexGrid } from '../../hexGrid.js';
 import { camelToTitle } from '../../utils.js';
@@ -451,7 +450,7 @@ async function handleHeavyRepairs(player, gameState, myEntities) {
         for (const target of heavilyDamaged) {
             const startingCell = { q: repairer.q, r: repairer.r };
             aiLog(player, 'build', `Repairing critical damage: ${repairer.name} at (${repairer.q},${repairer.r}) restoring ${target.name} at (${target.q},${target.r}) (HP: ${Math.round(target.health)}/${target.maxHealth})`);
-            const ordersUsed = repair(gameState, repairer, target, player.orders);
+            const ordersUsed = support(gameState, repairer, target, "Repair", player.orders);
             if (ordersUsed > 0) {
                 involvedCells.push(startingCell, repairer.cell);
                 return true;
@@ -570,9 +569,8 @@ async function handleProactiveGrowth(player, gameState, manifest, myEntities, ev
 
 /**
  * 5. FOG-OF-WAR EXPLORATION:
- * Finds closest unexplored cell on the map and moves towards it using as many actions
- * as possible in a single order. Does NOT require reaching the cell in the same turn.
- * Strictly excludes any builder units.
+ * Sends the best-suited explorer (non-builder mobile unit) out using explore(),
+ * which moves at most 1 order per call. Strictly excludes builder units.
  */
 async function handleExploration(player, gameState, manifest, myEntities, targetedCells, involvedCells) {
     // Strictly filter out builder units, constructs, inactive units, or units with 0 AP
@@ -593,36 +591,9 @@ async function handleExploration(player, gameState, manifest, myEntities, target
     });
 
     for (const explorer of explorers) {
-        const moveAction = explorer.getActions().find(a => a.name === "Move");
-        if (!moveAction) continue;
-
-        const pathResult = findPathTowardsUnexplored(explorer, gameState, player, targetedCells);
-        if (!pathResult || pathResult.fullyExplored) {
-            aiLog(player, 'explore', `All map territory is fully explored.`);
-            return false;
-        }
-
-        const { targetCell, path, arrivedAtBestReachable } = pathResult;
-
-        if (arrivedAtBestReachable || !path || path.length === 0) {
-            aiLog(player, 'detail', `Explorer ${explorer.name} at (${explorer.q},${explorer.r}): Positioned at frontier overlooking unexplored regions.`);
-            continue;
-        }
-
         const startingCell = { q: explorer.q, r: explorer.r };
-        const destKey = `${targetCell.q},${targetCell.r}`;
-        const ordersUsed = moveAlongPath(
-            player,
-            explorer,
-            moveAction,
-            path,
-            gameState,
-            'explore',
-            `towards unexplored cell (${targetCell.q},${targetCell.r})`
-        );
-
+        const ordersUsed = explore(gameState, explorer, null, false, targetedCells);
         if (ordersUsed > 0) {
-            targetedCells.add(destKey);
             involvedCells.push(startingCell, explorer.cell);
             return true;
         }
@@ -631,10 +602,6 @@ async function handleExploration(player, gameState, manifest, myEntities, target
     return false;
 }
 
-/**
- * SmartManager AI Controller
- * Executes orders sequentially until exhausted or no valid actions remain.
- */
 export class SmartManager extends BaseManager {
     constructor(player, gameState, controller) {
         super(player, gameState, controller);

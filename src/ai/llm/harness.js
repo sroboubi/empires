@@ -1,7 +1,7 @@
 import { BaseManager } from "../baseManager.js";
 import { LLMClient } from "./client.js";
 import responseSchema from './response.schema.json' with { type: 'json' };
-import { attack, repair, build, onActionDone } from "../utils.js";
+import { attack, support, build, onActionDone } from "../utils.js";
 import { HexGrid } from '../../hexGrid.js';
 
 export class Harness extends BaseManager {
@@ -101,7 +101,7 @@ export class Harness extends BaseManager {
                         continue;
                     }
                 } else if (actionLower === "repair") {
-                    ordersUsed = repair(this.gameState, entity, target, this.player.orders);
+                    ordersUsed = support(this.gameState, entity, target, "Repair", this.player.orders);
                     if (ordersUsed === 0) {
                         lastResponseError = `Could not initiate repair on target`;
                         continue;
