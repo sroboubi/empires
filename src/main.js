@@ -46,17 +46,9 @@ let setupLlmModels = []; // Array<{ id: string, name: string, enabled: boolean }
  */
 async function init() {
   try {
-    // 1. Parse manifest URL parameter & load default settings
-    const urlParams = new URLSearchParams(window.location.search);
-    const manifestUrl = urlParams.get('manifest') || './manifest.json';
-
-    const [manifestResult, settingsResult] = await Promise.all([
-      loadGameManifest(manifestUrl),
-      fetch('./defaultSettings.json').then(r => r.json())
-    ]);
-
-    manifestData = manifestResult;
-    defaultSettings = settingsResult;
+    // 1. Load game definitions and default settings
+    manifestData = await loadGameManifest();
+    defaultSettings = manifestData.defaultSettings;
 
     // Audio: hand the manifest to the SFX manager (file names are config-driven)
     // and initialize the Web Audio context (unlocked on first user gesture).

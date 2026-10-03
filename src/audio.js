@@ -51,7 +51,7 @@ class AudioManager {
   /** Hand the manager the loaded manifest so it can resolve file names. */
   setManifest(manifest) {
     if (!manifest) return;
-    const sfx = manifest.sfx || {};
+    const sfx = manifest.audio.sfx || {};
     if (typeof sfx.basePath === 'string' && sfx.basePath) this.basePath = sfx.basePath;
     if (sfx.ui && typeof sfx.ui === 'object') this.uiSounds = sfx.ui;
   }
@@ -71,7 +71,7 @@ class AudioManager {
 
   _ensureContext() {
     if (this.ctx) {
-      if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
+      if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => { });
       return;
     }
     try {
@@ -82,7 +82,7 @@ class AudioManager {
       this.master.gain.value = this._volume();
       this.master.connect(this.ctx.destination);
       if (this.ctx.state === 'suspended') {
-        this.ctx.resume().catch(() => {});
+        this.ctx.resume().catch(() => { });
       } else {
         this._unlocked = true;
       }

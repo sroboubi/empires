@@ -1,0 +1,757 @@
+[
+  {
+    "name": "barbarian",
+    "modelUrl": "./assets/units/barbarian-optimized.glb",
+    "size": 1.5,
+    "health": 300,
+    "maxHealth": 300,
+    "actionPoints": 4,
+    "maxActionPoints": 4,
+    "attackCostScale": 1.2,
+    "healthRegenScale": 10,
+    "movement": {
+      "terrainCostScale": {
+        "ShallowWater": 9999,
+        "DeepWater": 9999,
+        "Tundra": 0.8,
+        "Desert": 1.5
+      }
+    },
+    "damage": {
+      "value": 60,
+      "type": "slashing",
+      "elevationAdjustment": 1.1
+    },
+    "range": null,
+    "armor": {
+      "slashing": 1.5,
+      "piercing": 1.5,
+      "blunt": 1.5
+    },
+    "maintenance": {
+      "food": 6,
+      "gold": 3
+    },
+    "spawnCost": {
+      "food": 80,
+      "gold": 20,
+      "iron": 40
+    },
+    "rotationOffset": 90,
+    "sightRange": 4,
+    "score": {
+      "military": 0,
+      "economic": 0
+    },
+    "sfx": {
+      "select": "select_unit.mp3",
+      "action": {
+        "move": "move.mp3",
+        "attack": "sword_attack.mp3",
+        "default": "move.mp3"
+      },
+      "damage": "damage_unit.mp3",
+      "destroy": "unit_destroy.mp3"
+    }
+  },
+  {
+    "name": "barbarianPrincess",
+    "modelUrl": "./assets/units/barbarianPrincess-optimized.glb",
+    "size": 1.4,
+    "health": 250,
+    "maxHealth": 250,
+    "actionPoints": 6,
+    "maxActionPoints": 6,
+    "attackCostScale": 1.2,
+    "healthRegenScale": 10,
+    "movement": {
+      "terrainCostScale": {
+        "ShallowWater": 9999,
+        "DeepWater": 9999,
+        "Tundra": 0.8,
+        "Desert": 1.5
+      }
+    },
+    "damage": {
+      "value": 50,
+      "type": "slashing",
+      "elevationAdjustment": 1.2
+    },
+    "range": null,
+    "armor": {
+      "slashing": 1.6,
+      "piercing": 1.8,
+      "blunt": 1.2
+    },
+    "maintenance": {
+      "food": 8,
+      "gold": 4
+    },
+    "spawnCost": {
+      "food": 100,
+      "gold": 50,
+      "iron": 40
+    },
+    "rotationOffset": 90,
+    "sightRange": 4,
+    "score": {
+      "military": 0,
+      "economic": 0
+    },
+    "sfx": {
+      "select": "select_unit.mp3",
+      "action": {
+        "move": "move.mp3",
+        "attack": "sword_attack.mp3",
+        "default": "move.mp3"
+      },
+      "damage": "damage_unit.mp3",
+      "destroy": "unit_destroy.mp3"
+    }
+  },
+  {
+    "name": "barbarianChief",
+    "modelUrl": "./assets/units/barbarianChief-optimized.glb",
+    "size": 1.7,
+    "health": 400,
+    "maxHealth": 400,
+    "actionPoints": 4,
+    "maxActionPoints": 4,
+    "attackCostScale": 1.1,
+    "healthRegenScale": 20,
+    "movement": {
+      "terrainCostScale": {
+        "ShallowWater": 9999,
+        "DeepWater": 9999,
+        "Tundra": 0.8,
+        "Desert": 1.5
+      }
+    },
+    "damage": {
+      "value": 100,
+      "type": "slashing",
+      "elevationAdjustment": 1.1
+    },
+    "range": null,
+    "armor": {
+      "slashing": 1.8,
+      "piercing": 1.8,
+      "blunt": 1.6
+    },
+    "maintenance": {
+      "food": 8,
+      "gold": 4
+    },
+    "spawnCost": {
+      "food": 100,
+      "gold": 50,
+      "iron": 40
+    },
+    "rotationOffset": 90,
+    "sightRange": 4,
+    "score": {
+      "military": 0,
+      "economic": 0
+    },
+    "sfx": {
+      "select": "select_unit.mp3",
+      "action": {
+        "move": "move.mp3",
+        "attack": "sword_attack.mp3",
+        "default": "move.mp3"
+      },
+      "damage": "damage_unit.mp3",
+      "destroy": "unit_destroy.mp3"
+    }
+  },
+  {
+    "name": "swordsman",
+    "modelUrl": "./assets/units/swordsman-optimized.glb",
+    "size": 1.3,
+    "health": 200,
+    "maxHealth": 200,
+    "actionPoints": 5,
+    "maxActionPoints": 5,
+    "attackCostScale": 1.5,
+    "healthRegenScale": 5,
+    "movement": {
+      "terrainCostScale": {
+        "ShallowWater": 9999,
+        "DeepWater": 9999
+      }
+    },
+    "damage": {
+      "value": 50,
+      "type": "slashing",
+      "elevationAdjustment": 1.2
+    },
+    "range": null,
+    "armor": {
+      "slashing": 2,
+      "piercing": 1.2,
+      "blunt": 1.5
+    },
+    "maintenance": {
+      "food": 4,
+      "gold": 2
+    },
+    "spawnCost": {
+      "food": 40,
+      "gold": 10,
+      "iron": 30
+    },
+    "rotationOffset": 90,
+    "sightRange": 4,
+    "score": {
+      "military": 10,
+      "economic": 0
+    },
+    "sfx": {
+      "select": "select_unit.mp3",
+      "action": {
+        "move": "move.mp3",
+        "attack": "sword_attack.mp3",
+        "default": "move.mp3"
+      },
+      "damage": "damage_unit.mp3",
+      "destroy": "unit_destroy.mp3"
+    }
+  },
+  {
+    "name": "knight",
+    "modelUrl": "./assets/units/knight-optimized.glb",
+    "size": 1.4,
+    "health": 250,
+    "maxHealth": 250,
+    "actionPoints": 4,
+    "maxActionPoints": 4,
+    "attackCostScale": 1.2,
+    "healthRegenScale": 10,
+    "movement": {
+      "terrainCostScale": {
+        "ShallowWater": 9999,
+        "DeepWater": 9999,
+        "Mountains": 1.5,
+        "SnowyMountains": 1.5,
+        "Swamp": 1.2
+      }
+    },
+    "damage": {
+      "value": 60,
+      "type": "blunt",
+      "elevationAdjustment": 1.1
+    },
+    "range": null,
+    "armor": {
+      "slashing": 2.5,
+      "piercing": 2.5,
+      "blunt": 2
+    },
+    "maintenance": {
+      "food": 4,
+      "gold": 6
+    },
+    "spawnCost": {
+      "food": 80,
+      "gold": 80,
+      "iron": 50
+    },
+    "rotationOffset": 90,
+    "sightRange": 3,
+    "score": {
+      "military": 20,
+      "economic": 0
+    },
+    "sfx": {
+      "select": "select_unit.mp3",
+      "action": {
+        "move": "move.mp3",
+        "attack": "sword_attack.mp3",
+        "default": "move.mp3"
+      },
+      "damage": "damage_unit.mp3",
+      "destroy": "unit_destroy.mp3"
+    }
+  },
+  {
+    "name": "worker",
+    "modelUrl": "./assets/units/worker-optimized.glb",
+    "size": 1.2,
+    "health": 100,
+    "maxHealth": 100,
+    "actionPoints": 5,
+    "maxActionPoints": 5,
+    "attackCostScale": 2,
+    "healthRegenScale": 5,
+    "repairAmountPerAp": 20,
+    "movement": {
+      "terrainCostScale": {
+        "ShallowWater": 9999,
+        "DeepWater": 9999
+      }
+    },
+    "damage": {
+      "value": 10,
+      "type": "blunt",
+      "elevationAdjustment": 1.1
+    },
+    "range": null,
+    "armor": {
+      "slashing": 1,
+      "piercing": 1,
+      "blunt": 1.2
+    },
+    "maintenance": {
+      "food": 2
+    },
+    "spawnCost": {
+      "food": 50,
+      "gold": 10,
+      "gems": 2
+    },
+    "rotationOffset": 90,
+    "sightRange": 3,
+    "buildables": [
+      "mine",
+      "lumberMill",
+      "farm",
+      "forge"
+    ],
+    "buildCharges": 3,
+    "repairables": [
+      "mine",
+      "lumberMill",
+      "farm",
+      "forge",
+      "village"
+    ],
+    "score": {
+      "military": 1,
+      "economic": 2
+    },
+    "sfx": {
+      "select": "select_unit.mp3",
+      "action": {
+        "move": "move.mp3",
+        "default": "move.mp3"
+      },
+      "damage": "damage_unit.mp3",
+      "destroy": "unit_destroy.mp3"
+    }
+  },
+  {
+    "name": "settler",
+    "modelUrl": "./assets/units/settler-optimized.glb",
+    "size": 1.5,
+    "health": 150,
+    "maxHealth": 150,
+    "actionPoints": 5,
+    "maxActionPoints": 5,
+    "attackCostScale": 2,
+    "healthRegenScale": 5,
+    "movement": {
+      "terrainCostScale": {
+        "ShallowWater": 9999,
+        "DeepWater": 9999
+      }
+    },
+    "damage": {
+      "value": 10,
+      "type": "blunt",
+      "elevationAdjustment": 1.1
+    },
+    "range": null,
+    "armor": {
+      "slashing": 1,
+      "piercing": 1,
+      "blunt": 1.5
+    },
+    "maintenance": {
+      "food": 5,
+      "gold": 5
+    },
+    "spawnCost": {
+      "food": 100,
+      "gold": 50,
+      "gems": 10
+    },
+    "rotationOffset": 180,
+    "sightRange": 5,
+    "buildables": [
+      "village"
+    ],
+    "buildCharges": 1,
+    "score": {
+      "military": 1,
+      "economic": 4
+    },
+    "sfx": {
+      "select": "select_unit.mp3",
+      "action": {
+        "move": "move.mp3",
+        "default": "move.mp3"
+      },
+      "damage": "damage_unit.mp3",
+      "destroy": "unit_destroy.mp3"
+    }
+  },
+  {
+    "name": "bowman",
+    "modelUrl": "./assets/units/bowman-optimized.glb",
+    "size": 1.3,
+    "health": 150,
+    "maxHealth": 150,
+    "actionPoints": 6,
+    "maxActionPoints": 6,
+    "attackCostScale": 1,
+    "healthRegenScale": 5,
+    "movement": {
+      "terrainCostScale": {
+        "ShallowWater": 9999,
+        "DeepWater": 9999
+      }
+    },
+    "damage": {
+      "value": 30,
+      "type": "piercing",
+      "elevationAdjustment": 1.5
+    },
+    "range": {
+      "minCells": 1,
+      "maxCells": 3,
+      "arcHeight": 0.3
+    },
+    "armor": {
+      "slashing": 1,
+      "piercing": 1.5,
+      "blunt": 1
+    },
+    "maintenance": {
+      "food": 3,
+      "gold": 2,
+      "wood": 2
+    },
+    "spawnCost": {
+      "food": 30,
+      "gold": 20,
+      "wood": 20
+    },
+    "rotationOffset": 90,
+    "sightRange": 5,
+    "score": {
+      "military": 10,
+      "economic": 0
+    },
+    "sfx": {
+      "select": "select_unit.mp3",
+      "action": {
+        "move": "move.mp3",
+        "attack": "bow_attack.mp3",
+        "default": "move.mp3"
+      },
+      "damage": "damage_unit.mp3",
+      "destroy": "unit_destroy.mp3"
+    }
+  },
+  {
+    "name": "horseman",
+    "modelUrl": "./assets/units/horseman-optimized.glb",
+    "size": 1.5,
+    "health": 200,
+    "maxHealth": 200,
+    "actionPoints": 8,
+    "maxActionPoints": 8,
+    "attackCostScale": 1.2,
+    "healthRegenScale": 5,
+    "movement": {
+      "terrainCostScale": {
+        "ShallowWater": 9999,
+        "DeepWater": 9999,
+        "Mountains": 1.8,
+        "SnowyMountains": 1.8,
+        "Swamp": 1.2
+      }
+    },
+    "damage": {
+      "value": 60,
+      "type": "piercing",
+      "elevationAdjustment": 1.2
+    },
+    "range": null,
+    "armor": {
+      "slashing": 1.5,
+      "piercing": 1.5,
+      "blunt": 2
+    },
+    "maintenance": {
+      "food": 6,
+      "gold": 5
+    },
+    "spawnCost": {
+      "food": 100,
+      "gold": 60
+    },
+    "rotationOffset": 180,
+    "sightRange": 5,
+    "score": {
+      "military": 15,
+      "economic": 0
+    },
+    "sfx": {
+      "select": "select_unit.mp3",
+      "action": {
+        "move": "move.mp3",
+        "attack": "sword_attack.mp3",
+        "default": "move.mp3"
+      },
+      "damage": "damage_unit.mp3",
+      "destroy": "unit_destroy.mp3"
+    }
+  },
+  {
+    "name": "assassin",
+    "modelUrl": "./assets/units/assassin-optimized.glb",
+    "size": 1.1,
+    "health": 100,
+    "maxHealth": 100,
+    "actionPoints": 7,
+    "maxActionPoints": 7,
+    "attackCostScale": 2,
+    "healthRegenScale": 5,
+    "movement": {
+      "terrainCostScale": {
+        "ShallowWater": 9999,
+        "DeepWater": 9999,
+        "Desert": 0.8,
+        "Swamp": 0.8
+      }
+    },
+    "damage": {
+      "value": 20,
+      "lifeFraction": 0.4,
+      "type": "poison",
+      "elevationAdjustment": 1
+    },
+    "range": null,
+    "armor": {
+      "slashing": 1,
+      "piercing": 1,
+      "blunt": 0.75
+    },
+    "maintenance": {
+      "food": 5,
+      "gold": 5
+    },
+    "spawnCost": {
+      "food": 60,
+      "gold": 120
+    },
+    "rotationOffset": 90,
+    "sightRange": 4,
+    "score": {
+      "military": 10,
+      "economic": 0
+    },
+    "sfx": {
+      "select": "select_unit.mp3",
+      "action": {
+        "move": "move.mp3",
+        "attack": "sword_attack.mp3",
+        "default": "move.mp3"
+      },
+      "damage": "damage_unit.mp3",
+      "destroy": "unit_destroy.mp3"
+    }
+  },
+  {
+    "name": "village",
+    "modelUrl": "./assets/constructs/village-optimized.glb",
+    "health": 500,
+    "maxHealth": 500,
+    "actionPoints": 1,
+    "maxActionPoints": 1,
+    "maintenance": {},
+    "spawnCost": {
+      "gold": 100,
+      "food": 100,
+      "wood": 100
+    },
+    "spawnConditions": {
+      "terrain": [
+        "Grasslands",
+        "Desert",
+        "FootHills",
+        "Tundra",
+        "Hills"
+      ],
+      "minSeparation": 4
+    },
+    "yields": {
+      "gold": 10,
+      "food": 6,
+      "gems": 1
+    },
+    "ordersPerTurn": 1,
+    "rotationOffset": 0,
+    "sightRange": 8,
+    "buildables": [
+      "swordsman",
+      "bowman",
+      "worker",
+      "settler",
+      "horseman",
+      "assassin"
+    ],
+    "score": {
+      "military": 2,
+      "economic": 20
+    },
+    "sfx": {
+      "select": "select_unit.mp3",
+      "build": "build.mp3",
+      "damage": "damage_building.mp3",
+      "destroy": "building_destroy.mp3"
+    }
+  },
+  {
+    "name": "forge",
+    "modelUrl": "./assets/constructs/forge-optimized.glb",
+    "health": 300,
+    "maxHealth": 300,
+    "maintenance": {},
+    "spawnCost": {
+      "wood": 80,
+      "gold": 40
+    },
+    "spawnConditions": {
+      "terrain": [
+        "FootHills",
+        "Hills",
+        "Mountains",
+        "SnowyHills",
+        "SnowyMountains"
+      ],
+      "minSeparation": 3
+    },
+    "yields": {
+      "iron": 12
+    },
+    "rotationOffset": 0,
+    "sightRange": 3,
+    "score": {
+      "military": 4,
+      "economic": 4
+    },
+    "sfx": {
+      "select": "select_unit.mp3",
+      "build": "build.mp3",
+      "damage": "damage_building.mp3",
+      "destroy": "building_destroy.mp3"
+    }
+  },
+  {
+    "name": "lumberMill",
+    "modelUrl": "./assets/constructs/lumberMill-optimized.glb",
+    "health": 300,
+    "maxHealth": 300,
+    "maintenance": {},
+    "spawnCost": {
+      "iron": 80,
+      "gold": 40
+    },
+    "spawnConditions": {
+      "terrain": [
+        "Grasslands",
+        "Swamp",
+        "FootHills",
+        "Tundra"
+      ],
+      "minSeparation": 3
+    },
+    "yields": {
+      "wood": 8
+    },
+    "rotationOffset": 0,
+    "sightRange": 3,
+    "score": {
+      "military": 3,
+      "economic": 5
+    },
+    "sfx": {
+      "select": "select_unit.mp3",
+      "build": "build.mp3",
+      "damage": "damage_building.mp3",
+      "destroy": "building_destroy.mp3"
+    }
+  },
+  {
+    "name": "mine",
+    "modelUrl": "./assets/constructs/mine-optimized.glb",
+    "health": 400,
+    "maxHealth": 400,
+    "maintenance": {},
+    "spawnCost": {
+      "wood": 60,
+      "iron": 60
+    },
+    "spawnConditions": {
+      "terrain": [
+        "FootHills",
+        "Hills",
+        "Mountains",
+        "SnowyHills",
+        "SnowyMountains"
+      ],
+      "minSeparation": 3
+    },
+    "yields": {
+      "gold": 12,
+      "gems": 1
+    },
+    "rotationOffset": 0,
+    "sightRange": 3,
+    "score": {
+      "military": 2,
+      "economic": 6
+    },
+    "sfx": {
+      "select": "select_unit.mp3",
+      "build": "build.mp3",
+      "damage": "damage_building.mp3",
+      "destroy": "building_destroy.mp3"
+    }
+  },
+  {
+    "name": "farm",
+    "modelUrl": "./assets/constructs/farm-optimized.glb",
+    "health": 200,
+    "maxHealth": 200,
+    "maintenance": {},
+    "spawnCost": {
+      "wood": 40,
+      "iron": 40,
+      "gold": 20
+    },
+    "spawnConditions": {
+      "terrain": [
+        "Grasslands"
+      ],
+      "minSeparation": 2
+    },
+    "yields": {
+      "food": 20
+    },
+    "rotationOffset": 0,
+    "sightRange": 3,
+    "score": {
+      "military": 2,
+      "economic": 4
+    },
+    "sfx": {
+      "select": "select_unit.mp3",
+      "build": "build.mp3",
+      "damage": "damage_building.mp3",
+      "destroy": "building_destroy.mp3"
+    }
+  }
+]

@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EntitiesDefinition",
+  "type": "array",
+  "description": "Game pieces (Terrain, Units, Constructs) that can occupy the hex grid.",
+  "items": {
+    "type": "object",
+    "required": [
+      "name",
+      "modelUrl"
+    ],
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Unique name (e.g., 'swordsman', 'mine')"
+      },
+      "modelUrl": {
+        "type": "string",
+        "format": "uri",
+        "description": "Path to the 3D .glb file"
+      },
+      "controllerUrl": {
+        "type": "string",
+        "format": "uri",
+        "description": "Path to the JS module defining the controller class"
+      },
+      "rotationOffset": {
+        "type": "number",
+        "description": "Y-axis rotation offset in degrees to orient GLB model correctly"
+      },
+      "sightRange": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "Vision sight range in hex cell radius"
+      },
+      "spawnConditions": {
+        "type": "object",
+        "description": "Conditions required to spawn or build the entity on a hex cell.",
+        "properties": {
+          "terrain": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of allowed terrain type names the entity can be spawned on."
+          },
+          "minSeparation": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Minimum cell distance from any other construct entity."
+          }
+        }
+      },
+      "damage": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "number"
+          },
+          "type": {
+            "type": "string"
+          },
+          "elevationAdjustment": {
+            "type": "number",
+            "description": "Multiplier/divisor applied based on relative elevation between attacker and target."
+          }
+        }
+      },
+      "sfx": {
+        "type": "object",
+        "description": "Sound effect file names for entity events, relative to sfx.basePath. 'action' may be a file name or an object keyed by action name.",
+        "properties": {
+          "select": {
+            "type": "string",
+            "description": "Played when the entity is selected"
+          },
+          "action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "description": "Maps lowercased action names (e.g. move, attack) to file names; 'default' is the fallback."
+              }
+            ],
+            "description": "Played when the entity performs an action"
+          },
+          "build": {
+            "type": "string",
+            "description": "Played when this construct finishes building"
+          },
+          "damage": {
+            "type": "string",
+            "description": "Played when the entity takes damage"
+          },
+          "destroy": {
+            "type": "string",
+            "description": "Played when the entity is destroyed"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}

@@ -3,6 +3,7 @@ import { Player } from './player.js';
 import { manageBarbarians } from './ai/barbarians/manager.js';
 import { spawnCellResources } from './resources.js';
 import { CONFIG } from './config.js';
+import Entity from './entity.js';
 
 /**
  * GameState tracks players, turn cycle, the hex grid, and active entity instances.
@@ -250,7 +251,7 @@ export class GameState {
     }
 
     const meta = this.manifestData.entities[entityName];
-    const ControllerClass = meta.controllerClass;
+    const ControllerClass = meta.controllerClass || Entity;
     if (!ControllerClass) {
       console.warn(`Controller class for "${entityName}" not loaded.`);
       return null;

@@ -245,7 +245,14 @@ Implement the game configuration loading system using the provided JSON architec
 
 ## Task: Phase 21 - Simplify LLM Interface ##
 
-1. Collapse controllers into a single statically loaded class that is data driven (isConstruct if it can't move, add move/attack actions if it has movement/damage).
-   - this makes it easier for LLM to understand what it can do based on manifest data
-2. Build possible LLM actions purely based on ai/utils.js and entity attributes instead of using the entity controller.
-
+1. Split manifest.json into
+   - entities.json
+   - naturalResources.json
+   - treasures.json
+   - terrains.json
+   - audio.json
+2. The URL of all of the above, and defaultSettings.json should be added as overrideable values in config.js. This allows individual definitions to be updated. Put the base files all into a folder called definitions. Split and update the manifest.schema.json accordingly. Update the manifest loader to read these files.
+3. Collapse controllers into a single statically loaded Entity class that is data driven, this makes it easier for LLM to understand what it can do based on manifest data:
+   - isConstruct if it can't move (has no movement object in the entity definition) 
+   - add move/attack actions if it has movement/damage defined
+4. Move this entity.js into the src folder and delete controllers folder.

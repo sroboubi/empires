@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TerrainsDefinition",
+  "type": "array",
+  "description": "Terrain definitions used by the terrain provider and hex grid.",
+  "items": {
+    "type": "object",
+    "required": [
+      "name",
+      "height",
+      "movementCost",
+      "material",
+      "conditions"
+    ],
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Unique display name of the terrain type."
+      },
+      "height": {
+        "type": "number",
+        "description": "Height / elevation scale for rendering."
+      },
+      "movementCost": {
+        "type": "number",
+        "description": "Action points / movement cost to traverse this terrain."
+      },
+      "material": {
+        "type": "object",
+        "description": "Three.js material properties.",
+        "properties": {
+          "color": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Color hex string or hex integer value."
+          },
+          "roughness": {
+            "type": "number"
+          },
+          "metalness": {
+            "type": "number"
+          },
+          "transparent": {
+            "type": "boolean"
+          },
+          "opacity": {
+            "type": "number"
+          },
+          "flatShading": {
+            "type": "boolean"
+          }
+        }
+      },
+      "conditions": {
+        "type": "object",
+        "description": "Procedural noise conditions (min/max) for elevation, temperature, and humidity.",
+        "properties": {
+          "elevation": {
+            "type": "object",
+            "properties": {
+              "min": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              }
+            }
+          },
+          "temperature": {
+            "type": "object",
+            "properties": {
+              "min": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              }
+            }
+          },
+          "humidity": {
+            "type": "object",
+            "properties": {
+              "min": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

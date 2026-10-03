@@ -1,0 +1,237 @@
+[
+  {
+    "name": "ShallowWater",
+    "height": 1,
+    "movementCost": 9999,
+    "material": {
+      "color": "#3498db",
+      "roughness": 0.1,
+      "metalness": 0.8,
+      "transparent": true,
+      "opacity": 0.8,
+      "flatShading": true
+    },
+    "conditions": {
+      "elevation": {
+        "min": -0.7,
+        "max": -0.3
+      }
+    }
+  },
+  {
+    "name": "DeepWater",
+    "height": 1,
+    "movementCost": 9999,
+    "material": {
+      "color": "#1d396e",
+      "roughness": 0.1,
+      "metalness": 0.6,
+      "transparent": true,
+      "opacity": 0.9,
+      "flatShading": true
+    },
+    "conditions": {
+      "elevation": {
+        "min": -1,
+        "max": -0.7
+      }
+    }
+  },
+  {
+    "name": "Tundra",
+    "height": 1.2,
+    "movementCost": 1.1,
+    "material": {
+      "color": "#e0d3bf",
+      "roughness": 0.5,
+      "metalness": 0.3,
+      "flatShading": true
+    },
+    "conditions": {
+      "elevation": {
+        "min": -0.3,
+        "max": 0.3
+      },
+      "temperature": {
+        "min": -1,
+        "max": -0.5
+      }
+    }
+  },
+  {
+    "name": "Swamp",
+    "height": 1.1,
+    "movementCost": 1.4,
+    "material": {
+      "color": "#163b12",
+      "roughness": 0.8,
+      "metalness": 0.2,
+      "flatShading": true
+    },
+    "conditions": {
+      "elevation": {
+        "min": -0.3,
+        "max": 0.3
+      },
+      "temperature": {
+        "min": 0.5,
+        "max": 1
+      },
+      "humidity": {
+        "min": 0,
+        "max": 1
+      }
+    }
+  },
+  {
+    "name": "Grasslands",
+    "height": 1.2,
+    "movementCost": 1,
+    "material": {
+      "color": "#13bd32",
+      "roughness": 0.8,
+      "metalness": 0.1,
+      "flatShading": true
+    },
+    "conditions": {
+      "elevation": {
+        "min": -0.3,
+        "max": 0.3
+      },
+      "temperature": {
+        "min": -0.5,
+        "max": 0.5
+      }
+    }
+  },
+  {
+    "name": "Desert",
+    "height": 1.1,
+    "movementCost": 1.2,
+    "material": {
+      "color": "#b5b333",
+      "roughness": 0.8,
+      "metalness": 0.3,
+      "flatShading": true
+    },
+    "conditions": {
+      "elevation": {
+        "min": -0.3,
+        "max": 0.3
+      },
+      "temperature": {
+        "min": 0.5,
+        "max": 1
+      },
+      "humidity": {
+        "min": -1,
+        "max": 0
+      }
+    }
+  },
+  {
+    "name": "FootHills",
+    "height": 1.4,
+    "movementCost": 1.3,
+    "material": {
+      "color": "#768749",
+      "roughness": 0.8,
+      "metalness": 0.1,
+      "flatShading": true
+    },
+    "conditions": {
+      "elevation": {
+        "min": 0.3,
+        "max": 0.5
+      },
+      "temperature": {
+        "min": -0.5,
+        "max": 1
+      }
+    }
+  },
+  {
+    "name": "Hills",
+    "height": 1.6,
+    "movementCost": 1.4,
+    "material": {
+      "color": "#ab771d",
+      "roughness": 0.8,
+      "metalness": 0.1,
+      "flatShading": true
+    },
+    "conditions": {
+      "elevation": {
+        "min": 0.5,
+        "max": 0.75
+      },
+      "temperature": {
+        "min": -0.5,
+        "max": 1
+      }
+    }
+  },
+  {
+    "name": "Mountains",
+    "height": 2,
+    "movementCost": 2,
+    "material": {
+      "color": "#797d6f",
+      "roughness": 0.7,
+      "metalness": 0.2,
+      "flatShading": true
+    },
+    "conditions": {
+      "elevation": {
+        "min": 0.75,
+        "max": 1
+      },
+      "temperature": {
+        "min": -0.5,
+        "max": 1
+      }
+    }
+  },
+  {
+    "name": "SnowyHills",
+    "height": 1.5,
+    "movementCost": 1.7,
+    "material": {
+      "color": "#ffffff",
+      "roughness": 0.8,
+      "metalness": 0.1,
+      "flatShading": true
+    },
+    "conditions": {
+      "elevation": {
+        "min": 0.3,
+        "max": 0.5
+      },
+      "temperature": {
+        "min": -1,
+        "max": -0.5
+      }
+    }
+  },
+  {
+    "name": "SnowyMountains",
+    "height": 2,
+    "movementCost": 2.5,
+    "material": {
+      "color": "#ffffff",
+      "roughness": 0.7,
+      "metalness": 0.2,
+      "flatShading": true
+    },
+    "conditions": {
+      "elevation": {
+        "min": 0.5,
+        "max": 1
+      },
+      "temperature": {
+        "min": -1,
+        "max": -0.5
+      }
+    }
+  }
+]

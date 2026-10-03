@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "NaturalResourcesDefinition",
+  "type": "array",
+  "description": "Natural resources placed on map cells at generation. One resource OR treasure per cell (no stacking).",
+  "items": {
+    "type": "object",
+    "required": [
+      "name",
+      "terrains"
+    ],
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Unique resource name (e.g. 'tree', 'gold')."
+      },
+      "iconUrl": {
+        "type": "string",
+        "description": "2D image asset for UIs."
+      },
+      "terrains": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "types",
+            "modelUrls",
+            "quantity",
+            "probability"
+          ],
+          "properties": {
+            "types": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Terrain names this group can spawn on (e.g. 'Grasslands', 'Hills')."
+            },
+            "modelUrls": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "GLB models to pick from when spawning. One random model per item."
+            },
+            "quantity": {
+              "type": "object",
+              "required": [
+                "min",
+                "max"
+              ],
+              "properties": {
+                "min": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "max": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "description": "How many items spawn on a single cell (visual count)."
+            },
+            "probability": {
+              "type": "object",
+              "required": [
+                "base",
+                "adjacent"
+              ],
+              "properties": {
+                "base": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "Spawn chance on an eligible cell with no adjacent same-type items."
+                },
+                "adjacent": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "Spawn chance on an eligible empty cell adjacent to the same resource/treasure type (clustering)."
+                }
+              }
+            },
+            "size": {
+              "type": "number",
+              "minimum": 0.1,
+              "description": "Optional: normalize models so their largest dimension equals HEX_SIZE * size. Defaults to 1."
+            }
+          }
+        }
+      },
+      "improvement": {
+        "type": "object",
+        "description": "Maps improvement entity name -> yield bonus. When the improvement generates yields, each adjacent cell with this resource multiplies the yield: base * yieldMultiplier * sqrt(total quantity on adjacent cells).",
+        "additionalProperties": {
+          "type": "object",
+          "required": [
+            "type",
+            "yieldMultiplier"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "description": "Yield resource key this bonus applies to (must exist in the improvement's yields)."
+            },
+            "yieldMultiplier": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    }
+  }
+}

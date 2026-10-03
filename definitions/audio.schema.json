@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AudioDefinition",
+  "type": "object",
+  "description": "Audio configuration: basePath, ui sounds, etc.",
+  "properties": {
+    "sfx": {
+      "type": "object",
+      "description": "Global audio configuration: base path and UI sounds.",
+      "properties": {
+        "basePath": {
+          "type": "string",
+          "description": "Base path for all SFX file names"
+        },
+        "ui": {
+          "type": "object",
+          "description": "UI event sounds (click, turn, ...)",
+          "properties": {
+            "click": {
+              "type": "string"
+            },
+            "turn": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

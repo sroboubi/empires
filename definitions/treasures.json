@@ -1,0 +1,70 @@
+[
+  {
+    "name": "smallRuins",
+    "terrains": [
+      {
+        "types": [
+          "Swamp",
+          "Desert"
+        ],
+        "modelUrls": [
+          "./assets/resources/ruins/columns_ancient_stone_ruins.glb",
+          "./assets/resources/ruins/stone_ruins_with_sanctuary_and_columns.glb"
+        ],
+        "quantity": {
+          "min": 1,
+          "max": 2
+        },
+        "probability": {
+          "base": 0.05,
+          "adjacent": 0
+        },
+        "size": 0.7,
+        "sizeVariance": 0.2
+      }
+    ],
+    "rewards": [
+      {
+        "type": "gold",
+        "quantity": 100
+      },
+      {
+        "type": "iron",
+        "quantity": 200
+      },
+      {
+        "type": "gems",
+        "quantity": 4
+      }
+    ]
+  },
+  {
+    "name": "richRuins",
+    "terrains": [
+      {
+        "types": [
+          "Desert"
+        ],
+        "modelUrls": [
+          "./assets/resources/ruins/pillars_with_vines.glb"
+        ],
+        "quantity": {
+          "min": 1,
+          "max": 2
+        },
+        "probability": {
+          "base": 0.03,
+          "adjacent": 0
+        },
+        "size": 0.7,
+        "sizeVariance": 0.2
+      }
+    ],
+    "rewards": [
+      {
+        "type": "gems",
+        "quantity": 10
+      }
+    ]
+  }
+]

@@ -19,6 +19,7 @@
 
 ## Later ##
 
+- instead of direction and distance to player start, give grouped positions (e.g. group of 3 units at distance 10 NE, enemy at distance 5 N of group, etc)
 - players need to be able to dynamically provide their ai controller class and options
 - entities add/remove themselves from gamestate?
 - unit vision considers center of cell, some cells that are partly visible are hidden - fix?
@@ -28,7 +29,7 @@
 ## AI ##
 
 - *** simplify system message and prompt based on thinking output from local model
-- instead of direction and distance to player start, give grouped positions (e.g. group of 3 units at distance 10 NE, enemy at distance 5 N of group, etc)
+- Build possible LLM actions purely based on ai/utils.js and entity attributes instead of using the entity controller.
 
 ## BUGS ##
 

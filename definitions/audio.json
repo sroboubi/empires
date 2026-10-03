@@ -1,0 +1,9 @@
+{
+  "sfx": {
+    "basePath": "assets/audio/",
+    "ui": {
+      "click": "ui_click.mp3",
+      "turn": "ui_turn.mp3"
+    }
+  }
+}

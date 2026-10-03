@@ -14,6 +14,12 @@ export var CONFIG = {
   MIN_GAME_ROUNDS: 5,
   AUDIO_ENABLED: true,   // master switch for all game audio (query-param overridable)
   AUDIO_VOLUME: 0.8,     // master volume 0..1 (query-param overridable)
+  ENTITIES_URL: './definitions/entities.json',
+  NATURAL_RESOURCES_URL: './definitions/naturalResources.json',
+  TREASURES_URL: './definitions/treasures.json',
+  TERRAINS_URL: './definitions/terrains.json',
+  AUDIO_URL: './definitions/audio.json',
+  DEFAULT_SETTINGS_URL: './definitions/defaultSettings.json',
 };
 
 // Parse the current URL parameters
@@ -21,21 +27,27 @@ const urlParams = new URLSearchParams(window.location.search);
 
 // Loop through the URL parameters and update the CONFIG properties
 urlParams.forEach((value, key) => {
-  // 1. Only update if the property already exists on your target object
-  if (key in CONFIG) {
-    const targetType = typeof CONFIG[key];
+  // Find key in CONFIG directly or case-insensitively / ignoring underscores
+  let targetKey = key in CONFIG ? key : null;
+  if (!targetKey) {
+    const normalizedKey = key.replace(/_/g, '').toLowerCase();
+    targetKey = Object.keys(CONFIG).find(k => k.replace(/_/g, '').toLowerCase() === normalizedKey);
+  }
 
-    // 2. Cast the string value dynamically based on the target type
+  if (targetKey) {
+    const targetType = typeof CONFIG[targetKey];
+
+    // Cast the string value dynamically based on the target type
     if (targetType === "number") {
-      CONFIG[key] = Number(value);
+      CONFIG[targetKey] = Number(value);
     }
     else if (targetType === "boolean") {
       // URL string "true" becomes true, anything else becomes false
-      CONFIG[key] = value.toLowerCase() === "true";
+      CONFIG[targetKey] = value.toLowerCase() === "true";
     }
     else {
       // Default fallback for strings
-      CONFIG[key] = value;
+      CONFIG[targetKey] = value;
     }
   }
 });
