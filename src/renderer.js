@@ -1144,13 +1144,24 @@ export function reconcileCellResources(gameState) {
     const faded = visible && occupied.has(key);
     for (const slot of slots) {
       if (!visible) {
+        // Hidden by fog of war: collapse the instance, but remember it so the
+        // real matrix is restored when the cell gets explored later.
         if (slot.fadedIndex >= 0) unfadeResourceSlot(slot);
-        slot.mesh.setMatrixAt(slot.index, _zeroMatrix);
-        slot.mesh.instanceMatrix.needsUpdate = true;
+        if (!slot.hidden) {
+          slot.mesh.setMatrixAt(slot.index, _zeroMatrix);
+          slot.mesh.instanceMatrix.needsUpdate = true;
+          slot.hidden = true;
+        }
       } else if (faded) {
+        slot.hidden = false;
         fadeResourceSlot(slot);
-      } else if (slot.fadedIndex >= 0) {
-        unfadeResourceSlot(slot);
+      } else {
+        if (slot.fadedIndex >= 0) unfadeResourceSlot(slot);
+        if (slot.hidden) {
+          slot.mesh.setMatrixAt(slot.index, slot.matrix);
+          slot.mesh.instanceMatrix.needsUpdate = true;
+          slot.hidden = false;
+        }
       }
     }
     if (!hasResource) delete cellResourceSlots[key];
