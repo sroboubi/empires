@@ -1,5 +1,5 @@
 import { SeaLevel } from './terrainProvider.js';
-import { camelToTitle, calculateAttackMultiplier, showToast } from './utils.js';
+import { camelToTitle, calculateAttackMultiplier, showToast, displayNum } from './utils.js';
 import { HexGrid } from './hexGrid.js';
 import { spawnDamageText, spawnParticleBurst } from './renderer.js';
 import { audio } from './audio.js';
@@ -156,6 +156,16 @@ export default class Entity {
   }
 
   /**
+   * Returns the entity's per-terrain movement cost scale map, or null if none.
+   * e.g. { Desert: 1.5, Tundra: 0.8, ShallowWater: 9999 }
+   * @returns {Object|null}
+   */
+  get terrainCostScale() {
+    const movement = this.state.movement || this.data.movement;
+    return (movement && movement.terrainCostScale) || null;
+  }
+
+  /**
    * Returns object e.g. {food: 2, wood: 3} with maintenance cost deducted on each step().
    * @returns {Object}
    */
@@ -196,7 +206,7 @@ export default class Entity {
     if (apCost > 0 && this.state.actionPoints !== undefined) {
       const currentAP = this.state.actionPoints;
       if (currentAP < apCost) {
-        return { possible: false, reason: `Insufficient Action Points (${currentAP}/${apCost} AP required).` };
+        return { possible: false, reason: `Insufficient Action Points (${displayNum(currentAP)}/${displayNum(apCost)} AP required).` };
       }
     }
 
@@ -205,7 +215,7 @@ export default class Entity {
       return { possible: true, ordersRequired: 0 };
     }
     if (!this.owner.hasOrders(ordersRequired)) {
-      return { possible: false, reason: `Insufficient Orders (${this.owner.orders}/${ordersRequired} required).` };
+      return { possible: false, reason: `Insufficient Orders (${displayNum(this.owner.orders)}/${displayNum(ordersRequired)} required).` };
     }
 
     return { possible: true, ordersRequired };
@@ -413,7 +423,7 @@ export default class Entity {
           if (entity && entity !== this) return { possible: false, reason: "Target cell is occupied." };
           if (!this.canStandOn(cell)) return { possible: false, reason: "Cannot stand on target terrain." };
 
-          const pathRes = this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.movementCostTo(this, cell) : null;
+          const pathRes = this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.movementCostTo(this, cell, this.terrainCostScale) : null;
           if (!pathRes) return { possible: false, reason: "No valid path to target cell." };
 
           const cost = pathRes.cost;
@@ -424,7 +434,7 @@ export default class Entity {
 
           return {
             possible: true,
-            reason: `Move to (${cell.q}, ${cell.r}) for ${cost} AP and 1 order.`,
+            reason: `Move to (${cell.q}, ${cell.r}) for ${displayNum(cost)} AP and 1 order.`,
             cost: cost,
             ordersRequired: affordability.ordersRequired,
             path: pathRes.path
@@ -490,7 +500,11 @@ export default class Entity {
           if (!cell) return { possible: false, reason: "No target cell selected." };
 
           const currentCell = this.cell || (this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.getCell(this.q, this.r) : null);
-          const cellMovementCost = currentCell && currentCell.terrain ? currentCell.terrain.movementCost : 1;
+          const baseMovementCost = currentCell && currentCell.terrain ? currentCell.terrain.movementCost : 1;
+          const tcs = this.terrainCostScale;
+          const terrainName = currentCell && currentCell.terrain ? currentCell.terrain.name : '';
+          const scale = (tcs && terrainName in tcs) ? tcs[terrainName] : 1;
+          const cellMovementCost = baseMovementCost * scale;
           const cost = Math.ceil(cellMovementCost / 2);
 
           const affordability = this.checkActionAffordability(cost);
@@ -501,7 +515,7 @@ export default class Entity {
           const dirToTarget = this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.directionTo(this, cell).fromSource : 'E';
           return {
             possible: true,
-            reason: `Face direction ${dirToTarget} costing ${cost} AP and 1 order`,
+            reason: `Face direction ${dirToTarget} costing ${displayNum(cost)} AP and 1 order`,
             cost: cost,
             ordersRequired: affordability.ordersRequired,
             facingDir: dirToTarget
@@ -571,7 +585,7 @@ export default class Entity {
             cost = Math.ceil(this.attackCostScale * this.state.battleExhaustion * dist);
           } else {
             // Melee attack
-            const pathRes = this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.movementCostTo(this, cell || entity) : null;
+            const pathRes = this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.movementCostTo(this, cell || entity, this.terrainCostScale) : null;
             if (!pathRes) {
               return { possible: false, reason: "No valid path to target for melee attack." };
             } else if (pathRes.path.length > 2) {
@@ -591,7 +605,7 @@ export default class Entity {
 
           return {
             possible: true,
-            reason: `Attack ${entity.name.toUpperCase()} for ~${rawDamage.toFixed(2)} dmg (${multiplier.direction.toFixed(2)}x dir, ${multiplier.elevation.toFixed(2)}x elev)${lifeFractionStr} costing ${cost} AP and 1 order.`,
+            reason: `Attack ${entity.name.toUpperCase()} for ~${displayNum(rawDamage)} dmg (${displayNum(multiplier.direction)}x dir, ${displayNum(multiplier.elevation)}x elev)${lifeFractionStr} costing ${displayNum(cost)} AP and 1 order.`,
             cost: cost,
             ordersRequired: affordability.ordersRequired,
             multiplier: multiplier.direction,
@@ -841,7 +855,7 @@ export default class Entity {
       for (const [type, baseVal] of Object.entries(baseYields)) {
         const adjVal = adjusted[type];
         if (typeof baseVal === 'number' && typeof adjVal === 'number' && adjVal > baseVal) {
-          parts.push(`+${baseVal} ${type} → <b>+${adjVal.toFixed(1)} ${type}</b>`);
+          parts.push(`+${displayNum(baseVal)} ${type} → <b>+${displayNum(adjVal)} ${type}</b>`);
         } else {
           parts.push(`+${baseVal} ${type}`);
         }
@@ -850,7 +864,7 @@ export default class Entity {
     }
     let apStr = '';
     if (this.maxActionPoints !== undefined && this.maxActionPoints > 0) {
-      apStr = `AP: ${this.actionPoints}/${this.maxActionPoints}. `;
+      apStr = `AP: ${displayNum(this.actionPoints)}/${displayNum(this.maxActionPoints)}. `;
     }
 
     const base = `${camelToTitle(this.name)}. Owner: ${ownerName}. HP: ${Math.max(0, Math.round(this.state.health))}/${this.maxHealth}. ${apStr}Status: ${activeStr}.${yieldStr ? ` Income/turn: ${yieldStr}` : ''}`;
@@ -860,7 +874,7 @@ export default class Entity {
     }
 
     const rangeStr = this.range ? `Rng:${this.range.minCells}-${this.range.maxCells}` : 'Melee';
-    const atkStr = this.damage && this.damage.value > 0 ? ` Atk: ${this.damage.value} (${this.damage.type}, ${rangeStr}).` : '';
+    const atkStr = this.damage && this.damage.value > 0 ? ` Atk: ${displayNum(this.damage.value)} (${this.damage.type}, ${rangeStr}).` : '';
     return `${base}${atkStr} Facing: ${this.facing}`;
   }
 

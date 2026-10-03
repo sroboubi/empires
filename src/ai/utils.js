@@ -79,7 +79,7 @@ export function attack(gameState, sourceEntity, targetEntity, maxOrders = 1) {
         let moved = false;
         if (moveAction && sourceEntity.actionPoints > 0) {
             // Find path to target and collect neighbors of path cells + current neighbors
-            const pathResult = gameState.hexGrid.movementCostTo(sourceEntity.cell, targetCell);
+            const pathResult = gameState.hexGrid.movementCostTo(sourceEntity.cell, targetCell, sourceEntity.terrainCostScale);
             let pathCells = pathResult ? pathResult.path : [];
             if (pathCells.length === 0) {
                 const altPath = findWalkablePath(gameState, sourceEntity, targetCell);
@@ -234,7 +234,10 @@ export function findReachableCells(gameState, unit, maxDistance = Infinity) {
             const key = `${nb.q},${nb.r}`;
             if (reachable.has(key)) continue;
             if (typeof unit.canStandOn === 'function' && !unit.canStandOn(nb)) continue;
-            if ((nb.terrain?.movementCost ?? 1) > maxAP) continue;
+            const baseMc = nb.terrain?.movementCost ?? 1;
+            const tcs = unit.terrainCostScale;
+            const tScale = (tcs && nb.terrain?.name in tcs) ? tcs[nb.terrain.name] : 1;
+            if ((baseMc * tScale) > maxAP) continue;
             const occupant = gameState.getEntityAt(nb.q, nb.r);
             if (occupant && occupant !== unit) continue;
             const path = [...cur.path, nb];
@@ -849,7 +852,10 @@ export function moveAlongPath(player, unit, moveAction, path, gameState, categor
     let acc = 0;
     let furthest = -1;
     for (let i = 0; i < path.length; i++) {
-        acc += path[i].terrain?.movementCost || 1;
+        const baseMc = path[i].terrain?.movementCost || 1;
+        const tcs = unit.terrainCostScale;
+        const tScale = (tcs && path[i].terrain?.name in tcs) ? tcs[path[i].terrain.name] : 1;
+        acc += baseMc * tScale;
         if (acc > apBudget) break;
         furthest = i;
     }

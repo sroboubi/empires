@@ -369,14 +369,16 @@ export class HexGrid {
    * neighbors whose distance to target is strictly less than the
    * current cell's distance to target.
    *
-   * Returns the total cost (sum of terrain.movementCost along the path)
-   * and the ordered list of cells along the best path (including source and target).
+   * Returns the total cost (sum of terrain.movementCost along the path,
+   * multiplied by any entity-specific terrain cost scale) and the ordered
+   * list of cells along the best path (including source and target).
    *
    * @param {{q: number, r: number}} source - Source cell coordinates
    * @param {{q: number, r: number}} target - Target cell coordinates
+   * @param {Object|null} [terrainCostScale=null] - Optional per-terrain cost multiplier map from entity movement definition (e.g. { Desert: 1.5, Tundra: 0.8 })
    * @returns {{cost: number, path: Array<Object>}|null} Null if no path exists
    */
-  movementCostTo(source, target) {
+  movementCostTo(source, target, terrainCostScale = null) {
     const sourceCell = this.getCell(source.q, source.r);
     const targetCell = this.getCell(target.q, target.r);
     if (!sourceCell || !targetCell) return null;
@@ -458,7 +460,9 @@ export class HexGrid {
         if (nbDistToTarget >= currentDistToTarget) continue;
 
         const nbKey = `${nb.q},${nb.r}`;
-        const edgeCost = nb.terrain.movementCost;
+        const baseEdgeCost = nb.terrain.movementCost;
+        const terrainScale = (terrainCostScale && nb.terrain.name in terrainCostScale) ? terrainCostScale[nb.terrain.name] : 1;
+        const edgeCost = baseEdgeCost * terrainScale;
         const newCost = currentCost + edgeCost;
 
         if (newCost < (dist[nbKey] ?? Infinity)) {

@@ -11,8 +11,8 @@
     "healthRegenScale": 10,
     "movement": {
       "terrainCostScale": {
-        "ShallowWater": 9999,
-        "DeepWater": 9999,
+        "ShallowWater": 1e1000,
+        "DeepWater": 1e1000,
         "Tundra": 0.8,
         "Desert": 1.5
       }
@@ -66,8 +66,8 @@
     "healthRegenScale": 10,
     "movement": {
       "terrainCostScale": {
-        "ShallowWater": 9999,
-        "DeepWater": 9999,
+        "ShallowWater": 1e1000,
+        "DeepWater": 1e1000,
         "Tundra": 0.8,
         "Desert": 1.5
       }
@@ -121,8 +121,8 @@
     "healthRegenScale": 20,
     "movement": {
       "terrainCostScale": {
-        "ShallowWater": 9999,
-        "DeepWater": 9999,
+        "ShallowWater": 1e1000,
+        "DeepWater": 1e1000,
         "Tundra": 0.8,
         "Desert": 1.5
       }
@@ -176,8 +176,8 @@
     "healthRegenScale": 5,
     "movement": {
       "terrainCostScale": {
-        "ShallowWater": 9999,
-        "DeepWater": 9999
+        "ShallowWater": 1e1000,
+        "DeepWater": 1e1000
       }
     },
     "damage": {
@@ -229,8 +229,8 @@
     "healthRegenScale": 10,
     "movement": {
       "terrainCostScale": {
-        "ShallowWater": 9999,
-        "DeepWater": 9999,
+        "ShallowWater": 1e1000,
+        "DeepWater": 1e1000,
         "Mountains": 1.5,
         "SnowyMountains": 1.5,
         "Swamp": 1.2
@@ -286,8 +286,8 @@
     "repairAmountPerAp": 20,
     "movement": {
       "terrainCostScale": {
-        "ShallowWater": 9999,
-        "DeepWater": 9999
+        "ShallowWater": 1e1000,
+        "DeepWater": 1e1000
       }
     },
     "damage": {
@@ -351,8 +351,8 @@
     "healthRegenScale": 5,
     "movement": {
       "terrainCostScale": {
-        "ShallowWater": 9999,
-        "DeepWater": 9999
+        "ShallowWater": 1e1000,
+        "DeepWater": 1e1000
       }
     },
     "damage": {
@@ -407,8 +407,8 @@
     "healthRegenScale": 5,
     "movement": {
       "terrainCostScale": {
-        "ShallowWater": 9999,
-        "DeepWater": 9999
+        "ShallowWater": 1e1000,
+        "DeepWater": 1e1000
       }
     },
     "damage": {
@@ -465,8 +465,8 @@
     "healthRegenScale": 5,
     "movement": {
       "terrainCostScale": {
-        "ShallowWater": 9999,
-        "DeepWater": 9999,
+        "ShallowWater": 1e1000,
+        "DeepWater": 1e1000,
         "Mountains": 1.8,
         "SnowyMountains": 1.8,
         "Swamp": 1.2
@@ -520,8 +520,8 @@
     "healthRegenScale": 5,
     "movement": {
       "terrainCostScale": {
-        "ShallowWater": 9999,
-        "DeepWater": 9999,
+        "ShallowWater": 1e1000,
+        "DeepWater": 1e1000,
         "Desert": 0.8,
         "Swamp": 0.8
       }

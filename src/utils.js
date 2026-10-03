@@ -1,5 +1,16 @@
 export const DIRECTIONS_LIST = ['E', 'NE', 'NW', 'W', 'SW', 'SE'];
 
+/**
+ * Rounds a number to 1 decimal place for display purposes.
+ * Does NOT modify the underlying value — use only in UI-facing strings.
+ * @param {number} n
+ * @returns {string}
+ */
+export const displayNum = (n) => {
+    if (typeof n !== 'number' || !isFinite(n)) return String(n);
+    return (Math.round(n * 10) / 10).toString();
+};
+
 export const camelToTitle = (text) => {
     return text.replace(/([A-Z])/g, ' $1').replace(/^./, (str) => str.toUpperCase()).trim();
 };

@@ -1,6 +1,6 @@
 import { GameState } from './gameState.js';
 import { CONFIG } from './config.js';
-import { showToast } from './utils.js';
+import { showToast, displayNum } from './utils.js';
 import {
   initRenderer,
   drawGrid,
@@ -2070,7 +2070,7 @@ function onMouseMove(event) {
           const cost = check.cost;
           if (moveRow && moveValue) {
             moveRow.style.display = 'flex';
-            moveValue.innerHTML = `<span style="color: #2ecc71; font-weight: 600;">${cost.toFixed(1)} AP</span> (${check.path.length - 1} steps, ${ap} AP avail)`;
+            moveValue.innerHTML = `<span style="color: #2ecc71; font-weight: 600;">${displayNum(cost)} AP</span> (${check.path.length - 1} steps, ${displayNum(ap)} AP avail)`;
           }
         } else {
           clearPathHighlight();

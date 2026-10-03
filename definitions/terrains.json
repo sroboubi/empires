@@ -2,7 +2,7 @@
   {
     "name": "ShallowWater",
     "height": 1,
-    "movementCost": 9999,
+    "movementCost": 1,
     "material": {
       "color": "#3498db",
       "roughness": 0.1,
@@ -21,7 +21,7 @@
   {
     "name": "DeepWater",
     "height": 1,
-    "movementCost": 9999,
+    "movementCost": 1,
     "material": {
       "color": "#1d396e",
       "roughness": 0.1,

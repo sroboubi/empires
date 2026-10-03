@@ -400,7 +400,10 @@ function moveAlongPath(player, unit, moveAction, path, gameState, category, reas
     let acc = 0;
     let furthest = -1;
     for (let i = 0; i < path.length; i++) {
-        acc += path[i].terrain?.movementCost || 1;
+        const baseMc = path[i].terrain?.movementCost || 1;
+        const tcs = unit.terrainCostScale;
+        const tScale = (tcs && path[i].terrain?.name in tcs) ? tcs[path[i].terrain.name] : 1;
+        acc += baseMc * tScale;
         if (acc > apBudget) break;
         furthest = i;
     }
