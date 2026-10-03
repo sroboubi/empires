@@ -19,8 +19,6 @@
 
 ## Later ##
 
-- entity controllers are dependent on game code, so they can't be dynamically provided (if they are moved our sourced from somewhere else, the imports won't work)
-  - consider making a single entity controller that is fully data driver (isConstruct if it can't move, add move/attack actions if it has movement/damage)
 - players need to be able to dynamically provide their ai controller class and options
 - entities add/remove themselves from gamestate?
 - unit vision considers center of cell, some cells that are partly visible are hidden - fix?
@@ -31,8 +29,6 @@
 
 - *** simplify system message and prompt based on thinking output from local model
 - instead of direction and distance to player start, give grouped positions (e.g. group of 3 units at distance 10 NE, enemy at distance 5 N of group, etc)
-- when exploring, try to land on treasure
-- when building, consider adjacent resource bonus
 
 ## BUGS ##
 

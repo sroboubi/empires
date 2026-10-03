@@ -242,3 +242,10 @@ Implement the game configuration loading system using the provided JSON architec
 3. Allow user to select an ordered list from these models to be used in priority order.
 4. Save the key and selected list in session storage and add it to game settings/state inside an "llm" object.
 5. Review the LLM integration in ai/llm and ensure the logic makes sense and will work as expected. Fix any issues you find. 
+
+## Task: Phase 21 - Simplify LLM Interface ##
+
+1. Collapse controllers into a single statically loaded class that is data driven (isConstruct if it can't move, add move/attack actions if it has movement/damage).
+   - this makes it easier for LLM to understand what it can do based on manifest data
+2. Build possible LLM actions purely based on ai/utils.js and entity attributes instead of using the entity controller.
+
