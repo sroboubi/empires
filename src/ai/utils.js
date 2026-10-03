@@ -376,13 +376,14 @@ export function build(gameState, sourceEntity, targetName,
     if (candidates.length === 0) return 0;
 
     // Closest first; a farther site wins only if its relative yield gain
-    // justifies the extra travel.
+    // justifies the extra travel: each extra hex must buy at least
+    // `distancePenalty` of relative yield (0.2 = 20% richer per hex).
     candidates.sort((a, b) => a.dist - b.dist || b.yield - a.yield);
     let best = candidates[0];
     for (let i = 1; i < candidates.length; i++) {
         const c = candidates[i];
         if (c.yield > best.yield) {
-            const gain = best.yield > 0 ? c.yield / best.yield : Infinity;
+            const gain = best.yield > 0 ? c.yield / best.yield - 1 : Infinity;
             if (distancePenalty * (c.dist - best.dist) < gain) best = c;
         }
     }
