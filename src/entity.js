@@ -726,6 +726,7 @@ export default class Entity {
     for (const buildable of this.state.buildables || []) {
       const targetName = camelToTitle(buildable);
       const actionName = `Build ${targetName}`;
+      const meta = this.gameState?.manifestData?.entities?.[buildable];
       this.actions.push({
         name: actionName,
         canDo: (cell, entity) => {
@@ -735,24 +736,7 @@ export default class Entity {
 
           if (!this.canStandOn(cell)) return { possible: false, reason: "Cannot build construct on target terrain." };
 
-          if (cell.resource) {
-            const what = cell.resource.kind === 'treasure' ? 'a treasure' : 'natural resources';
-            return { possible: false, reason: `Cannot build ${targetName} on a cell with ${what}.` };
-          }
-
-          const meta = this.gameState && this.gameState.manifestData ? this.gameState.manifestData.entities[buildable] : null;
           const spawnConditions = meta ? meta.spawnConditions : null;
-
-          if (spawnConditions) {
-            // Check terrain condition if present (in addition to canStandOn)
-            if (Array.isArray(spawnConditions.terrain) && spawnConditions.terrain.length > 0) {
-              const terrainName = cell.terrain ? cell.terrain.name : '';
-              const allowed = spawnConditions.terrain.some(t => t.toLowerCase() === terrainName.toLowerCase());
-              if (!allowed) {
-                return { possible: false, reason: `Cannot build ${targetName} on ${terrainName} terrain (requires ${spawnConditions.terrain.join(', ')}).` };
-              }
-            }
-          }
 
           // Check minSeparation (only if BOTH the new and existing entity have minSeparation defined)
           const newMinSep = spawnConditions ? spawnConditions.minSeparation : undefined;
@@ -809,6 +793,12 @@ export default class Entity {
           }
           this.spendActionCost(check.apCost, check.ordersRequired);
           if (this.gameState) {
+            // If building a construct on a resource cell, destroy the resources
+            // before spawning so they don't interfere. The renderer's
+            // reconcileCellResources() will clean up the 3D models.
+            if (cell.resource && !meta?.movement) {
+              delete cell.resource;
+            }
             const newEntity = this.gameState.spawnEntity(buildable, cell, this.owner);
             if (newEntity) {
               audio.playEntitySfx(newEntity, 'build');

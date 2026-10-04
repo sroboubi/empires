@@ -337,7 +337,7 @@ export function build(gameState, sourceEntity, targetName,
         if (HexGrid.distance(sourceEntity, cell) > maxDistance) continue;
         if (!isExplored(cell.q, cell.r)) continue;
         if (gameState.getEntityAt(cell.q, cell.r)) continue;
-        if (cell.resource) continue; // Build.canDo rejects resource cells
+        // canDo will reject non-construct builds on resource cells if needed
 
         if (spawnConditions) {
             if (Array.isArray(spawnConditions.terrain) && spawnConditions.terrain.length > 0) {
