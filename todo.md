@@ -33,3 +33,5 @@
 
 ## BUGS ##
 
+- allow building on natural resources or treasure (they get destroyed)
+

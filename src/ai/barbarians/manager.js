@@ -2,6 +2,7 @@ import { HexGrid } from '../../hexGrid.js';
 import { attack } from '../utils.js';
 import { onActionDone } from '../utils.js';
 import { reconcileEntities } from '../../renderer.js';
+import Entity from '../../entity.js';
 
 /**
  * Returns all border cells on the hex grid (cells with fewer than 6 neighbors).
@@ -114,14 +115,7 @@ export async function manageBarbarians(gameState, config) {
           }
 
           const meta = gameState.manifestData?.entities?.[unitName];
-          let dummy = null;
-          if (meta?.controllerClass) {
-            try {
-              dummy = new meta.controllerClass(meta, null, gameState, null);
-            } catch (e) {
-              console.warn(`[Barbarians] Could not create dummy entity for ${unitName}:`, e);
-            }
-          }
+          const dummy = new Entity(meta, null, gameState, null);
 
           const spawnCellIndex = candidateBorderCells.findIndex(cell => {
             if (!dummy || typeof dummy.canStandOn !== 'function') return false;

@@ -79,7 +79,7 @@ export function attack(gameState, sourceEntity, targetEntity, maxOrders = 1) {
         let moved = false;
         if (moveAction && sourceEntity.actionPoints > 0) {
             // Find path to target and collect neighbors of path cells + current neighbors
-            const pathResult = gameState.hexGrid.movementCostTo(sourceEntity.cell, targetCell, sourceEntity.terrainCostScale);
+            const pathResult = gameState.hexGrid.movementCostTo(sourceEntity.cell, targetCell, sourceEntity.getMovementCost.bind(sourceEntity));
             let pathCells = pathResult ? pathResult.path : [];
             if (pathCells.length === 0) {
                 const altPath = findWalkablePath(gameState, sourceEntity, targetCell);

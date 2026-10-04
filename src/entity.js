@@ -152,17 +152,16 @@ export default class Entity {
    * @returns {boolean}
    */
   get isConstruct() {
-    return !(this.state.movement || this.data.movement);
+    return !this.state.movement;
   }
 
   /**
    * Returns the entity's per-terrain movement cost scale map, or null if none.
-   * e.g. { Desert: 1.5, Tundra: 0.8, ShallowWater: 9999 }
+   * e.g. { Desert: 1.5, Tundra: 0.8, ShallowWater: 1e1000 }
    * @returns {Object|null}
    */
   get terrainCostScale() {
-    const movement = this.state.movement || this.data.movement;
-    return (movement && movement.terrainCostScale) || null;
+    return this.state.movement?.terrainCostScale;
   }
 
   /**
@@ -245,7 +244,24 @@ export default class Entity {
     if (!target) return false;
     const terrain = target.terrain ? target.terrain : target;
     if (!terrain) return false;
-    return terrain.elevation > SeaLevel;
+    if (this.isConstruct) {
+      // if no conditions defined, can be placed anywhere
+      if (!this.state.spawnConditions?.terrain) return true;
+      return this.state.spawnConditions.terrain.some(t => t.toLowerCase() === terrain.name?.toLowerCase());
+    }
+    return Number.isFinite(this.getMovementCost(target));
+  }
+
+  /**
+   * Gets the movement cost for a given cell.
+   * @param {Object} target - Cell object or Terrain object
+   * @returns {number}
+   */
+  getMovementCost(target) {
+    if (!target || this.isConstruct) return Infinity;
+    const terrain = target.terrain ? target.terrain : target;
+    const scale = (this.terrainCostScale && terrain.name in this.terrainCostScale) ? this.terrainCostScale[terrain.name] : 1;
+    return (terrain.movementCost || 1) * scale;
   }
 
   /**
@@ -423,7 +439,7 @@ export default class Entity {
           if (entity && entity !== this) return { possible: false, reason: "Target cell is occupied." };
           if (!this.canStandOn(cell)) return { possible: false, reason: "Cannot stand on target terrain." };
 
-          const pathRes = this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.movementCostTo(this, cell, this.terrainCostScale) : null;
+          const pathRes = this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.movementCostTo(this.cell, cell, this.getMovementCost.bind(this)) : null;
           if (!pathRes) return { possible: false, reason: "No valid path to target cell." };
 
           const cost = pathRes.cost;
@@ -498,15 +514,7 @@ export default class Entity {
         canDo: (cell, entity) => {
           if (!this.active) return { possible: false, reason: "Unit is inactive." };
           if (!cell) return { possible: false, reason: "No target cell selected." };
-
-          const currentCell = this.cell || (this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.getCell(this.q, this.r) : null);
-          const baseMovementCost = currentCell && currentCell.terrain ? currentCell.terrain.movementCost : 1;
-          const tcs = this.terrainCostScale;
-          const terrainName = currentCell && currentCell.terrain ? currentCell.terrain.name : '';
-          const scale = (tcs && terrainName in tcs) ? tcs[terrainName] : 1;
-          const cellMovementCost = baseMovementCost * scale;
-          const cost = Math.ceil(cellMovementCost / 2);
-
+          const cost = Math.ceil(this.getMovementCost(this.cell) / 2);
           const affordability = this.checkActionAffordability(cost);
           if (!affordability.possible) {
             return affordability;
@@ -585,7 +593,7 @@ export default class Entity {
             cost = Math.ceil(this.attackCostScale * this.state.battleExhaustion * dist);
           } else {
             // Melee attack
-            const pathRes = this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.movementCostTo(this, cell || entity, this.terrainCostScale) : null;
+            const pathRes = this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.movementCostTo(this.cell, cell || entity, this.getMovementCost.bind(this)) : null;
             if (!pathRes) {
               return { possible: false, reason: "No valid path to target for melee attack." };
             } else if (pathRes.path.length > 2) {

@@ -91,7 +91,6 @@ function processManifestPayload(rawData) {
     entityMetadata[entity.name] = {
       ...entity,
       modelUrl: absoluteModelUrl,
-      controllerClass: Entity,
       actions: actions
     };
   }

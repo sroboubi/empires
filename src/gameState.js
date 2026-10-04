@@ -120,25 +120,8 @@ export class GameState {
 
         const getUnitCanStandOnFn = (unitName) => {
           const uMeta = manifestData.entities[unitName];
-          if (uMeta && uMeta.controllerClass) {
-            try {
-              const tempEntity = new uMeta.controllerClass(uMeta, player, this, null);
-              return (cellOrTerrain) => {
-                const terrain = cellOrTerrain.terrain || cellOrTerrain;
-                if (!tempEntity.canStandOn(terrain)) return false;
-                if (uMeta.spawnConditions && Array.isArray(uMeta.spawnConditions.terrain) && uMeta.spawnConditions.terrain.length > 0) {
-                  return uMeta.spawnConditions.terrain.some(t => t.toLowerCase() === terrain.name?.toLowerCase());
-                }
-                return true;
-              };
-            } catch (e) {
-              console.warn('Could not create temp entity for canStandOn check:', e);
-            }
-          }
-          return (cellOrTerrain) => {
-            const terrain = cellOrTerrain.terrain || cellOrTerrain;
-            return terrain && terrain.elevation > -0.3;
-          };
+          const dummy = new Entity(uMeta, player, this, null);
+          return dummy.canStandOn.bind(dummy);
         };
 
         const firstUnitName = startingUnitNames[0];
@@ -251,34 +234,24 @@ export class GameState {
     }
 
     const meta = this.manifestData.entities[entityName];
-    const ControllerClass = meta.controllerClass || Entity;
-    if (!ControllerClass) {
-      console.warn(`Controller class for "${entityName}" not loaded.`);
-      return null;
+
+    const entity = new Entity(meta, owner, this, cell, initialState);
+    this.entities.push(entity);
+
+    // Add history entry for entity creation
+    if (owner) {
+      owner.addHistoryEntry(this.currentRound, {
+        category: 'spawn',
+        details: `Created ${entity.name} at (${cell.q}, ${cell.r})`,
+        extra: {
+          entityName: entity.name,
+          entityId: entity.id,
+          cell: { q: cell.q, r: cell.r }
+        }
+      });
     }
 
-    try {
-      const entity = new ControllerClass(meta, owner, this, cell, initialState);
-      this.entities.push(entity);
-
-      // Add history entry for entity creation
-      if (owner) {
-        owner.addHistoryEntry(this.currentRound, {
-          category: 'spawn',
-          details: `Created ${entity.name} at (${cell.q}, ${cell.r})`,
-          extra: {
-            entityName: entity.name,
-            entityId: entity.id,
-            cell: { q: cell.q, r: cell.r }
-          }
-        });
-      }
-
-      return entity;
-    } catch (err) {
-      console.error(`Failed to instantiate entity controller for "${entityName}":`, err);
-      return null;
-    }
+    return entity;
   }
 
   /**
