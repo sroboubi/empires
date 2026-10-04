@@ -1,4 +1,3 @@
-import { SeaLevel } from './terrainProvider.js';
 import { camelToTitle, calculateAttackMultiplier, showToast, displayNum } from './utils.js';
 import { HexGrid } from './hexGrid.js';
 import { spawnDamageText, spawnParticleBurst } from './renderer.js';
@@ -236,7 +235,9 @@ export default class Entity {
 
   /**
    * Determines if entity can stand on a given terrain or cell.
-   * Standard condition: terrain elevation is above SeaLevel.
+   * Constructs: allowed when the terrain is listed in spawnConditions.terrain
+   * (or anywhere when no terrain conditions are defined).
+   * Units: allowed when the movement cost for the terrain is finite.
    * @param {Object} target - Cell object or Terrain object
    * @returns {boolean}
    */
@@ -737,6 +738,16 @@ export default class Entity {
           if (!this.canStandOn(cell)) return { possible: false, reason: "Cannot build construct on target terrain." };
 
           const spawnConditions = meta ? meta.spawnConditions : null;
+
+          // The construct being built must allow the target terrain, in
+          // addition to the builder being able to stand on it.
+          if (Array.isArray(spawnConditions?.terrain) && spawnConditions.terrain.length > 0) {
+            const terrainName = cell.terrain ? cell.terrain.name : '';
+            const allowed = spawnConditions.terrain.some(t => t.toLowerCase() === terrainName.toLowerCase());
+            if (!allowed) {
+              return { possible: false, reason: `Cannot build ${targetName} on ${terrainName} terrain (requires ${spawnConditions.terrain.join(', ')}).` };
+            }
+          }
 
           // Check minSeparation (only if BOTH the new and existing entity have minSeparation defined)
           const newMinSep = spawnConditions ? spawnConditions.minSeparation : undefined;

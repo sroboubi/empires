@@ -79,7 +79,10 @@ export function attack(gameState, sourceEntity, targetEntity, maxOrders = 1) {
         let moved = false;
         if (moveAction && sourceEntity.actionPoints > 0) {
             // Find path to target and collect neighbors of path cells + current neighbors
-            const pathResult = gameState.hexGrid.movementCostTo(sourceEntity.cell, targetCell, sourceEntity.getMovementCost.bind(sourceEntity));
+            const costFunc = typeof sourceEntity.getMovementCost === 'function'
+                ? sourceEntity.getMovementCost.bind(sourceEntity)
+                : (terrain) => terrain.movementCost || 1;
+            const pathResult = gameState.hexGrid.movementCostTo(sourceEntity.cell, targetCell, costFunc);
             let pathCells = pathResult ? pathResult.path : [];
             if (pathCells.length === 0) {
                 const altPath = findWalkablePath(gameState, sourceEntity, targetCell);
@@ -274,7 +277,8 @@ function expectedYieldAt(gameState, cell, canonicalName, baseYields) {
  * candidate is scored by its expected yield (base yields adjusted for adjacent
  * natural resources via applyResourceYieldBonus). The closest candidate wins
  * unless a farther, richer site justifies the trip:
- *   distancePenalty * deltaDistance < richerYield / bestYield
+ *   distancePenalty * deltaDistance < richerYield / bestYield - 1
+ * i.e. each extra hex of travel must buy at least distancePenalty of relative yield.
  * Non-mobile builders (no Move action) can only consider adjacent cells.
  *
  * Once the best site is chosen the builder moves toward it and builds. If
@@ -337,7 +341,8 @@ export function build(gameState, sourceEntity, targetName,
         if (HexGrid.distance(sourceEntity, cell) > maxDistance) continue;
         if (!isExplored(cell.q, cell.r)) continue;
         if (gameState.getEntityAt(cell.q, cell.r)) continue;
-        // canDo will reject non-construct builds on resource cells if needed
+        // Resource/treasure cells are valid build sites: building a construct
+        // destroys the resource (see Build.do); units trained onto one coexist with it.
 
         if (spawnConditions) {
             if (Array.isArray(spawnConditions.terrain) && spawnConditions.terrain.length > 0) {
