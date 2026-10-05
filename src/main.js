@@ -1791,7 +1791,7 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
     const projectedStock = Math.max(0, stock + net);
 
     const netClass = net > 0 ? 'positive' : (net < 0 ? 'negative' : 'neutral');
-    const netStr = net > 0 ? `+${net}/turn` : (net < 0 ? `${net}/turn` : `0/turn`);
+    const netStr = net > 0 ? `+${displayNum(net)}/turn` : (net < 0 ? `${displayNum(net)}/turn` : `0/turn`);
 
     // Stock Bar Scale & Segments
     const maxStockScale = Math.max(stock, projectedStock, stock + Math.abs(net), 60);
@@ -1801,7 +1801,7 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
       const baseStockPct = Math.min(100, Math.round((stock / maxStockScale) * 100));
       const gainPct = Math.min(100 - baseStockPct, Math.round((net / maxStockScale) * 100));
       stockBarHTML = `
-        <div class="stock-bar-container" title="Current Stock: ${stock} | Projected Gain: +${net} | Projected Next Turn: ${projectedStock}">
+        <div class="stock-bar-container" title="Current Stock: ${displayNum(stock)} | Projected Gain: ${displayNum(net)} | Projected Next Turn: ${displayNum(projectedStock)}">
           <div class="stock-bar-current" style="width: ${baseStockPct}%;"></div>
           <div class="stock-bar-gain" style="width: ${gainPct}%;"></div>
         </div>
@@ -1812,7 +1812,7 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
       const safeStockPct = Math.min(100, Math.round((safeStock / maxStockScale) * 100));
       const lossPct = Math.min(100 - safeStockPct, Math.round((deficitAmount / maxStockScale) * 100));
       stockBarHTML = `
-        <div class="stock-bar-container" title="Current Stock: ${stock} | Projected Loss: ${net} | Projected Next Turn: ${projectedStock}">
+        <div class="stock-bar-container" title="Current Stock: ${displayNum(stock)} | Projected Loss: ${displayNum(net)} | Projected Next Turn: ${displayNum(projectedStock)}">
           <div class="stock-bar-current" style="width: ${safeStockPct}%;"></div>
           <div class="stock-bar-loss" style="width: ${lossPct}%;"></div>
         </div>
@@ -1825,7 +1825,7 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
     const upkeepPct = Math.min(100, Math.round((upkeep / maxFlowScale) * 100));
 
     const color = resourceIconColors[res.toLowerCase()] || 'var(--accent-color)';
-    const projectionText = net >= 0 ? `<span style="color: #2ecc71;">(+${net} ➔ ${projectedStock})</span>` : `<span style="color: #e74c3c;">(${net} ➔ ${projectedStock})</span>`;
+    const projectionText = net >= 0 ? `<span style="color: #2ecc71;">(+${displayNum(net)} ➔ ${displayNum(projectedStock)})</span>` : `<span style="color: #e74c3c;">(${displayNum(net)} ➔ ${displayNum(projectedStock)})</span>`;
 
     chartsHTML += `
       <div class="resource-chart-row">
@@ -1834,7 +1834,7 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
             ● ${res}
           </span>
           <div style="display: flex; align-items: center; gap: 8px;">
-            <span style="font-size: 11px; color: var(--text-muted);">Stock: <strong>${stock}</strong> ${projectionText}</span>
+            <span style="font-size: 11px; color: var(--text-muted);">Stock: <strong>${displayNum(stock)}</strong> ${projectionText}</span>
             <span class="resource-chart-net ${netClass}">${netStr}</span>
           </div>
         </div>
@@ -1842,13 +1842,13 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
         ${stockBarHTML}
 
         <div class="stacked-bar-container" style="margin-top: 2px;">
-          <div class="stacked-bar-yield" style="width: ${yieldPct}%;" title="Yields: +${yields}/turn"></div>
-          <div class="stacked-bar-upkeep" style="width: ${upkeepPct}%;" title="Upkeep: -${upkeep}/turn"></div>
+          <div class="stacked-bar-yield" style="width: ${yieldPct}%;" title="Yields: +${displayNum(yields)}/turn"></div>
+          <div class="stacked-bar-upkeep" style="width: ${upkeepPct}%;" title="Upkeep: -${displayNum(upkeep)}/turn"></div>
         </div>
 
         <div class="resource-details-line">
-          <span style="color: #2ecc71;">▲ Yield: +${yields}/turn</span>
-          <span style="color: #e74c3c;">▼ Upkeep: -${upkeep}/turn</span>
+          <span style="color: #2ecc71;">▲ Yield: +${displayNum(yields)}/turn</span>
+          <span style="color: #e74c3c;">▼ Upkeep: -${displayNum(upkeep)}/turn</span>
         </div>
       </div>
     `;
