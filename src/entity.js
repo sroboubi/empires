@@ -675,7 +675,7 @@ export default class Entity {
           if (!target) return { possible: false, reason: "No target to repair." };
           if (!this.active) return { possible: false, reason: "Entity is inactive." };
           if (this.actionPoints <= 0) return { possible: false, reason: "Entity has no Action Points left." };
-          if (!this.state.repairables.includes(target.name.toLowerCase())) return { possible: false, reason: "Target is not repairable by this entity." };
+          if (!this.state.repairables.some(r => r.toLowerCase() === target.name.toLowerCase())) return { possible: false, reason: "Target is not repairable by this entity." };
           if (target.health >= target.maxHealth) return { possible: false, reason: "Target is already at full health." };
           const dist = HexGrid.distance(this, cell || target);
           if (dist !== 1) return { possible: false, reason: "Target must be adjacent (1 cell away)." };
