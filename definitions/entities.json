@@ -857,6 +857,10 @@
       "build": "build.mp3",
       "damage": "damage_building.mp3",
       "destroy": "building_destroy.mp3"
+    },
+    "range": {
+      "minCells": 2,
+      "maxCells": 4
     }
   },
   {
