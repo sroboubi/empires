@@ -1,7 +1,7 @@
 [
   {
     "name": "barbarian",
-    "modelUrl": "./assets/units/barbarian-optimized.glb",
+    "modelUrl": "./assets/units/barbarian.glb",
     "size": 1.5,
     "health": 300,
     "maxHealth": 300,
@@ -56,7 +56,7 @@
   },
   {
     "name": "barbarianPrincess",
-    "modelUrl": "./assets/units/barbarianPrincess-optimized.glb",
+    "modelUrl": "./assets/units/barbarianPrincess.glb",
     "size": 1.4,
     "health": 250,
     "maxHealth": 250,
@@ -111,7 +111,7 @@
   },
   {
     "name": "barbarianChief",
-    "modelUrl": "./assets/units/barbarianChief-optimized.glb",
+    "modelUrl": "./assets/units/barbarianChief.glb",
     "size": 1.7,
     "health": 400,
     "maxHealth": 400,
@@ -165,9 +165,151 @@
     }
   },
   {
+    "name": "pikeman",
+    "actionPoints": 5,
+    "maxActionPoints": 5,
+    "armor": {
+      "blunt": 1.2,
+      "piercing": 1.5,
+      "slashing": 1.8
+    },
+    "attackCostScale": 1.5,
+    "damage": {
+      "elevationAdjustment": 1.2,
+      "type": "polearm",
+      "value": 45
+    },
+    "health": 180,
+    "healthRegenScale": 5,
+    "maintenance": {
+      "food": 4,
+      "gold": 2,
+      "iron": 2
+    },
+    "maxHealth": 180,
+    "modelUrl": "./assets/units/pikeman.glb",
+    "movement": {
+      "terrainCostScale": {
+        "DeepWater": 1e1000,
+        "ShallowWater": 1e1000
+      }
+    },
+    "rotationOffset": 90,
+    "score": {
+      "economic": 0,
+      "military": 10
+    },
+    "sightRange": 4,
+    "size": 1.4,
+    "spawnCost": {
+      "food": 50,
+      "gold": 20,
+      "iron": 40
+    }
+  },
+  {
+    "name": "scout",
+    "actionPoints": 8,
+    "maxActionPoints": 8,
+    "armor": {
+      "blunt": 1,
+      "piercing": 1,
+      "slashing": 1
+    },
+    "attackCostScale": 2,
+    "damage": {
+      "elevationAdjustment": 1.2,
+      "type": "slashing",
+      "value": 25
+    },
+    "health": 100,
+    "healthRegenScale": 10,
+    "maintenance": {
+      "food": 6,
+      "gold": 2
+    },
+    "maxHealth": 100,
+    "modelUrl": "./assets/units/scout.glb",
+    "movement": {
+      "terrainCostScale": {
+        "DeepWater": 1e1000,
+        "ShallowWater": 1e1000
+      }
+    },
+    "rotationOffset": 90,
+    "score": {
+      "economic": 0,
+      "military": 5
+    },
+    "sightRange": 7,
+    "size": 1.2,
+    "spawnCost": {
+      "food": 30,
+      "gold": 15,
+      "wood": 20
+    }
+  },
+  {
+    "name": "medic",
+    "actionPoints": 5,
+    "maxActionPoints": 5,
+    "armor": {
+      "blunt": 1,
+      "piercing": 1,
+      "slashing": 1
+    },
+    "attackCostScale": 2.5,
+    "damage": {
+      "elevationAdjustment": 1,
+      "type": "blunt",
+      "value": 10
+    },
+    "health": 120,
+    "healthRegenScale": 5,
+    "maintenance": {
+      "food": 4,
+      "gold": 4
+    },
+    "maxHealth": 120,
+    "modelUrl": "./assets/units/medic.glb",
+    "movement": {
+      "terrainCostScale": {
+        "DeepWater": 1e1000,
+        "ShallowWater": 1e1000,
+        "Mountains": 2,
+        "SnowyMountains": 2
+      }
+    },
+    "repairAmountPerAp": 30,
+    "repairables": [
+      "swordsman",
+      "knight",
+      "bowman",
+      "horseman",
+      "assassin",
+      "worker",
+      "settler",
+      "pikeman",
+      "scout",
+      "medic"
+    ],
+    "rotationOffset": 90,
+    "score": {
+      "economic": 0,
+      "military": 5
+    },
+    "sightRange": 3,
+    "size": 1.2,
+    "spawnCost": {
+      "food": 50,
+      "gold": 30,
+      "wood": 10
+    }
+  },
+  {
     "name": "swordsman",
-    "modelUrl": "./assets/units/swordsman-optimized.glb",
-    "size": 1.3,
+    "modelUrl": "./assets/units/swordsman.glb",
+    "size": 1.2,
     "health": 200,
     "maxHealth": 200,
     "actionPoints": 5,
@@ -219,8 +361,8 @@
   },
   {
     "name": "knight",
-    "modelUrl": "./assets/units/knight-optimized.glb",
-    "size": 1.4,
+    "modelUrl": "./assets/units/knight.glb",
+    "size": 1.3,
     "health": 250,
     "maxHealth": 250,
     "actionPoints": 4,
@@ -275,7 +417,7 @@
   },
   {
     "name": "worker",
-    "modelUrl": "./assets/units/worker-optimized.glb",
+    "modelUrl": "./assets/units/worker.glb",
     "size": 1.2,
     "health": 100,
     "maxHealth": 100,
@@ -315,7 +457,9 @@
       "mine",
       "lumberMill",
       "farm",
-      "forge"
+      "forge",
+      "temple",
+      "tower"
     ],
     "buildCharges": 3,
     "repairables": [
@@ -323,6 +467,8 @@
       "lumberMill",
       "farm",
       "forge",
+      "temple",
+      "tower",
       "village"
     ],
     "score": {
@@ -341,7 +487,7 @@
   },
   {
     "name": "settler",
-    "modelUrl": "./assets/units/settler-optimized.glb",
+    "modelUrl": "./assets/units/settler.glb",
     "size": 1.5,
     "health": 150,
     "maxHealth": 150,
@@ -397,7 +543,7 @@
   },
   {
     "name": "bowman",
-    "modelUrl": "./assets/units/bowman-optimized.glb",
+    "modelUrl": "./assets/units/bowman.glb",
     "size": 1.3,
     "health": 150,
     "maxHealth": 150,
@@ -455,7 +601,7 @@
   },
   {
     "name": "horseman",
-    "modelUrl": "./assets/units/horseman-optimized.glb",
+    "modelUrl": "./assets/units/horseman.glb",
     "size": 1.5,
     "health": 200,
     "maxHealth": 200,
@@ -481,7 +627,8 @@
     "armor": {
       "slashing": 1.5,
       "piercing": 1.5,
-      "blunt": 2
+      "blunt": 2,
+      "polearm": 0.75
     },
     "maintenance": {
       "food": 6,
@@ -510,7 +657,7 @@
   },
   {
     "name": "assassin",
-    "modelUrl": "./assets/units/assassin-optimized.glb",
+    "modelUrl": "./assets/units/assassin.glb",
     "size": 1.1,
     "health": 100,
     "maxHealth": 100,
@@ -565,7 +712,7 @@
   },
   {
     "name": "village",
-    "modelUrl": "./assets/constructs/village-optimized.glb",
+    "modelUrl": "./assets/constructs/village.glb",
     "health": 500,
     "maxHealth": 500,
     "actionPoints": 1,
@@ -593,14 +740,15 @@
     },
     "ordersPerTurn": 1,
     "rotationOffset": 0,
-    "sightRange": 8,
+    "sightRange": 7,
     "buildables": [
       "swordsman",
       "bowman",
       "worker",
       "settler",
       "horseman",
-      "assassin"
+      "pikeman",
+      "scout"
     ],
     "score": {
       "military": 2,
@@ -614,8 +762,106 @@
     }
   },
   {
+    "name": "temple",
+    "modelUrl": "./assets/constructs/temple.glb",
+    "health": 400,
+    "maxHealth": 400,
+    "actionPoints": 1,
+    "maxActionPoints": 1,
+    "maintenance": {
+      "gold": 10,
+      "gems": 1
+    },
+    "spawnCost": {
+      "gold": 100,
+      "food": 50,
+      "iron": 50
+    },
+    "spawnConditions": {
+      "terrain": [
+        "Grasslands",
+        "Desert",
+        "FootHills",
+        "Tundra",
+        "Hills"
+      ],
+      "minSeparation": 2
+    },
+    "ordersPerTurn": 1,
+    "rotationOffset": 0,
+    "sightRange": 5,
+    "buildables": [
+      "knight",
+      "medic",
+      "assassin"
+    ],
+    "score": {
+      "military": 10,
+      "economic": 10
+    },
+    "sfx": {
+      "select": "select_unit.mp3",
+      "build": "build.mp3",
+      "damage": "damage_building.mp3",
+      "destroy": "building_destroy.mp3"
+    }
+  },
+  {
+    "name": "tower",
+    "modelUrl": "./assets/constructs/tower.glb",
+    "size": 2,
+    "health": 500,
+    "maxHealth": 500,
+    "actionPoints": 2,
+    "maxActionPoints": 2,
+    "maintenance": {
+      "gold": 8,
+      "iron": 8,
+      "wood": 8
+    },
+    "spawnCost": {
+      "gold": 80,
+      "food": 80,
+      "iron": 80
+    },
+    "damage": {
+      "value": 50,
+      "type": "piercing",
+      "elevationAdjustment": 1.4
+    },
+    "spawnConditions": {
+      "terrain": [
+        "Grasslands",
+        "Desert",
+        "FootHills",
+        "Tundra",
+        "Hills",
+        "Swamp",
+        "Mountains",
+        "SnowyHills",
+        "SnowyMountains"
+      ],
+      "minSeparation": 2
+    },
+    "rotationOffset": 0,
+    "sightRange": 8,
+    "score": {
+      "military": 20,
+      "economic": 0
+    },
+    "sfx": {
+      "select": "select_unit.mp3",
+      "action": {
+        "attack": "bow_attack.mp3"
+      },
+      "build": "build.mp3",
+      "damage": "damage_building.mp3",
+      "destroy": "building_destroy.mp3"
+    }
+  },
+  {
     "name": "forge",
-    "modelUrl": "./assets/constructs/forge-optimized.glb",
+    "modelUrl": "./assets/constructs/forge.glb",
     "health": 300,
     "maxHealth": 300,
     "maintenance": {},
@@ -651,7 +897,7 @@
   },
   {
     "name": "lumberMill",
-    "modelUrl": "./assets/constructs/lumberMill-optimized.glb",
+    "modelUrl": "./assets/constructs/lumberMill.glb",
     "health": 300,
     "maxHealth": 300,
     "maintenance": {},
@@ -686,7 +932,7 @@
   },
   {
     "name": "mine",
-    "modelUrl": "./assets/constructs/mine-optimized.glb",
+    "modelUrl": "./assets/constructs/mine.glb",
     "health": 400,
     "maxHealth": 400,
     "maintenance": {},
@@ -723,7 +969,7 @@
   },
   {
     "name": "farm",
-    "modelUrl": "./assets/constructs/farm-optimized.glb",
+    "modelUrl": "./assets/constructs/farm.glb",
     "health": 200,
     "maxHealth": 200,
     "maintenance": {},
