@@ -3,14 +3,12 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { Sky } from 'three/addons/objects/Sky.js';
-import Stats from 'three/addons/libs/stats.module.js';
 import { HexGrid } from './hexGrid.js';
 import { CONFIG } from './config.js';
 import { findSpawnDef, findTerrainGroup } from './resources.js';
 
 export let scene, camera, renderer, controls;
 export let dirLight, hemiLight, sky, sunMesh;
-export let stats = null;
 let hexGroup;
 // Instanced hex rendering: one InstancedMesh per (terrain, fogState) bucket,
 // so the whole map draws in ~dozens of draw calls instead of one per hex.
@@ -228,17 +226,15 @@ export function initRenderer(canvas) {
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
 
-  // Optional Performance Monitor (Stats.js)
+  // FPS meter (CONFIG.SHOW_FPS): frame stats + draw calls + triangles
   if (CONFIG.SHOW_FPS) {
-    stats = new Stats();
-    stats.showPanel(0); // 0: fps, 1: ms, 2: mb, 3+: custom
-    stats.dom.id = 'fps-meter';
-    stats.dom.style.position = 'fixed';
-    stats.dom.style.top = '10px';
-    stats.dom.style.right = '10px';
-    stats.dom.style.left = 'auto';
-    stats.dom.style.zIndex = '9999';
-    document.body.appendChild(stats.dom);
+    window.__fpsMeter = { frames: 0, lastLog: performance.now() };
+    const overlay = document.createElement('div');
+    overlay.id = 'fps-overlay';
+    overlay.style.cssText = 'position:fixed;top:10px;right:10px;z-index:9999;background:rgba(0,0,0,0.7);color:#0f0;font:14px monospace;padding:8px;border-radius:4px;';
+    overlay.textContent = 'FPS: ...';
+    document.body.appendChild(overlay);
+    console.log('[FPS] meter enabled');
   }
 
   // Start Animation Loop
@@ -530,8 +526,6 @@ const _animUpY = new THREE.Vector3(0, 1, 0);
 function animate() {
   requestAnimationFrame(animate);
 
-  if (stats) stats.begin();
-
   const deltaTime = clock.getDelta();
 
   if (controls) {
@@ -599,7 +593,22 @@ function animate() {
     renderer.render(scene, camera);
   }
 
-  if (stats) stats.end();
+  // FPS meter: log frame stats + draw calls + triangles every 2s
+  if (window.__fpsMeter) {
+    const m = window.__fpsMeter;
+    m.frames++;
+    const now = performance.now();
+    if (now - m.lastLog > 2000) {
+      const fps = (m.frames / ((now - m.lastLog) / 1000)).toFixed(1);
+      const calls = renderer ? renderer.info.render.calls : -1;
+      const tris = renderer ? renderer.info.render.triangles : -1;
+      console.log(`[FPS] fps=${fps} drawcalls=${calls} triangles=${tris}`);
+      const el = document.getElementById('fps-overlay');
+      if (el) el.textContent = `FPS: ${fps} | draw calls: ${calls} | tris: ${tris}`;
+      m.frames = 0;
+      m.lastLog = now;
+    }
+  }
 }
 
 // --- Grid & Model Utilities ---
