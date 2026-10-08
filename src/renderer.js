@@ -103,7 +103,11 @@ export function initRenderer(canvas) {
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  // Perf test hook: ?shadowtype=basic|pcf|pcfsoft (default pcfsoft)
+  const _st = new URLSearchParams(window.location.search).get('shadowtype');
+  renderer.shadowMap.type = _st === 'basic' ? THREE.BasicShadowMap
+    : _st === 'pcf' ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
+  if (_st) console.log(`[FPS] shadow type: ${_st}`);
 
   // 4. Setup Controls
   controls = new OrbitControls(camera, renderer.domElement);
