@@ -4,12 +4,13 @@ import { showToast, displayNum } from './utils.js';
 import {
   initRenderer,
   drawGrid,
+  updateHexFog,
   highlightCell,
   highlightPathCells,
   clearPathHighlight,
   showExclusionZone,
   clearExclusionZone,
-  raycastHex,
+  pickHexCell,
   setEntitySelectionHighlight,
   clearEntitySelectionHighlight,
   preloadModels,
@@ -1226,7 +1227,7 @@ export async function nextTurn() {
     button.textContent = 'Next Turn';
   }
 
-  drawGrid(gameState);
+  updateHexFog(gameState);
   reconcileEntities(gameState);
   reconcileCellResources(gameState);
   updatePlayersUI();
@@ -1348,7 +1349,7 @@ function handleLeftClick(event) {
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
-  const hovered = raycastHex(mouse);
+  const hovered = pickHexCell(mouse, gameState);
   hideContextMenu();
 
   if (!hovered) {
@@ -1392,7 +1393,7 @@ function handleRightClick(event) {
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
-  const hovered = raycastHex(mouse);
+  const hovered = pickHexCell(mouse, gameState);
   if (!hovered) {
     hideContextMenu();
     return;
@@ -1516,7 +1517,7 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
           showToast(`Failed to execute ${action.name}`, true);
         }
 
-        drawGrid(gameState);
+        updateHexFog(gameState);
         reconcileEntities(gameState);
         reconcileCellResources(gameState);
         updatePlayersUI();
@@ -1989,7 +1990,7 @@ function onMouseMove(event) {
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
-  const hovered = raycastHex(mouse);
+  const hovered = pickHexCell(mouse, gameState);
   const infoPanel = document.getElementById('inspect-panel');
   const activePlayer = gameState.activePlayer;
 

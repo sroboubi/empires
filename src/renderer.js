@@ -10,7 +10,10 @@ import { findSpawnDef, findTerrainGroup } from './resources.js';
 export let scene, camera, renderer, controls;
 export let dirLight, hemiLight, sky, sunMesh;
 let hexGroup;
-let cellMeshMap = {}; // Maps "q,r" to Mesh object
+// Instanced hex rendering: one InstancedMesh per (terrain, fogState) bucket,
+// so the whole map draws in ~dozens of draw calls instead of one per hex.
+let hexBucketMeshes = new Map(); // bucketKey -> THREE.InstancedMesh
+let hexUnitGeometry = null; // shared unit-height hex cylinder
 let highlightMesh = null; // Mesh to show selection/hover highlight
 let pathHighlightGroup = null; // Group of meshes showing action path preview
 let pathHighlightGeometry = null;
@@ -492,6 +495,13 @@ function onWindowResize() {
   renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
+// Scratch vectors for the animation loop (allocated once, not per frame)
+const _animForward = new THREE.Vector3();
+const _animRight = new THREE.Vector3();
+const _animMove = new THREE.Vector3();
+const _animOffset = new THREE.Vector3();
+const _animUpY = new THREE.Vector3(0, 1, 0);
+
 function animate() {
   requestAnimationFrame(animate);
 
@@ -501,15 +511,16 @@ function animate() {
     const speed = 15 * deltaTime;
     const rotSpeed = 2.0 * deltaTime;
 
-    const forward = new THREE.Vector3();
+    const forward = _animForward;
     camera.getWorldDirection(forward);
     forward.y = 0;
     forward.normalize();
 
-    const right = new THREE.Vector3();
+    const right = _animRight;
     right.crossVectors(forward, camera.up).normalize();
 
-    const moveVector = new THREE.Vector3();
+    const moveVector = _animMove;
+    moveVector.set(0, 0, 0);
     if (keysPressed['KeyW'] || keysPressed['w']) moveVector.addScaledVector(forward, speed);
     if (keysPressed['KeyS'] || keysPressed['s']) moveVector.addScaledVector(forward, -speed);
     if (keysPressed['KeyD'] || keysPressed['d']) moveVector.addScaledVector(right, speed);
@@ -521,13 +532,13 @@ function animate() {
     }
 
     if (keysPressed['KeyQ'] || keysPressed['q']) {
-      const offset = camera.position.clone().sub(controls.target);
-      offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotSpeed);
+      const offset = _animOffset.copy(camera.position).sub(controls.target);
+      offset.applyAxisAngle(_animUpY, rotSpeed);
       camera.position.copy(controls.target).add(offset);
     }
     if (keysPressed['KeyE'] || keysPressed['e']) {
-      const offset = camera.position.clone().sub(controls.target);
-      offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), -rotSpeed);
+      const offset = _animOffset.copy(camera.position).sub(controls.target);
+      offset.applyAxisAngle(_animUpY, -rotSpeed);
       camera.position.copy(controls.target).add(offset);
     }
 
@@ -587,64 +598,111 @@ function getDesaturatedTerrainMaterial(terrain) {
 }
 
 export function drawGrid(gameState) {
-  while (hexGroup.children.length > 0) {
-    hexGroup.remove(hexGroup.children[0]);
-  }
-  cellMeshMap = {};
-  const geometryCache = {};
-
-  let maxDistanceSq = 0;
-
-  Object.values(gameState.cells).forEach(cell => {
-    const isExplored = gameState.isExploredByHuman(cell);
-    const isVisible = gameState.isVisibleToHuman(cell);
-
-    let height;
-    let material;
-    let shadows;
-
-    if (!isExplored && !CONFIG.SHOW_ALL) {
-      height = hiddenTerrain.height;
-      material = hiddenTerrain.material;
-      shadows = false;
-    } else if (!isVisible && !CONFIG.SHOW_ALL) {
-      height = cell.terrain.height;
-      material = getDesaturatedTerrainMaterial(cell.terrain);
-      shadows = true;
-    } else {
-      height = cell.terrain.height;
-      material = getTerrainMaterial(cell.terrain);
-      shadows = true;
-    }
-
-    let geometry = geometryCache[height];
-    if (!geometry) {
-      geometry = new THREE.CylinderGeometry(CONFIG.HEX_SIZE * cellSizeScale.normal, CONFIG.HEX_SIZE * cellSizeScale.normal, height, 6);
-      geometryCache[height] = geometry;
-    }
-
-    const mesh = new THREE.Mesh(geometry, material);
-    const { x, z } = HexGrid.axialToPixel(cell.q, cell.r);
-    mesh.position.set(x, height / 2, z);
-
-    const distSq = x * x + z * z;
-    if (distSq > maxDistanceSq) maxDistanceSq = distSq;
-
-    if (shadows) {
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-    }
-
-    mesh.userData = { q: cell.q, r: cell.r, terrain: cell.terrain, isExplored, isVisible };
-    cell.mesh = mesh;
-
-    hexGroup.add(mesh);
-    cellMeshMap[`${cell.q},${cell.r}`] = mesh;
-  });
+  const maxDistanceSq = rebuildHexInstances(gameState);
 
   // Automatically update dark ground bed based on map extent
   const maxMapRadius = Math.sqrt(maxDistanceSq) + CONFIG.HEX_SIZE;
   updateGroundBase(maxMapRadius);
+}
+
+/**
+ * Recomputes hex appearance after fog-of-war changes (exploration, turn end,
+ * actions). Buckets cells by (terrain, fogState) and rewrites instance
+ * matrices; GPU buffers are only reallocated when a bucket's cell count
+ * changes. This replaces the old full destroy/recreate of every hex mesh.
+ */
+export function updateHexFog(gameState) {
+  rebuildHexInstances(gameState);
+}
+
+// Scratch objects for instance matrix composition (no per-frame allocation)
+const _hexMatrix = new THREE.Matrix4();
+const _hexPos = new THREE.Vector3();
+const _hexScale = new THREE.Vector3();
+const _hexIdentityQuat = new THREE.Quaternion();
+
+function hexFogState(gameState, cell) {
+  if (!gameState.isExploredByHuman(cell) && !CONFIG.SHOW_ALL) return 'hidden';
+  if (!gameState.isVisibleToHuman(cell) && !CONFIG.SHOW_ALL) return 'dim';
+  return 'normal';
+}
+
+function rebuildHexInstances(gameState) {
+  if (!hexUnitGeometry) {
+    hexUnitGeometry = new THREE.CylinderGeometry(CONFIG.HEX_SIZE * cellSizeScale.normal, CONFIG.HEX_SIZE * cellSizeScale.normal, 1, 6);
+  }
+
+  // Bucket cells by (terrain, fogState); each bucket shares one material.
+  const buckets = new Map();
+  let maxDistanceSq = 0;
+  for (const cell of Object.values(gameState.cells)) {
+    const fog = hexFogState(gameState, cell);
+    // Hidden cells all share one material/height regardless of terrain.
+    const key = fog === 'hidden' ? 'hidden' : cell.terrain.name + '|' + fog;
+    let b = buckets.get(key);
+    if (!b) {
+      let material, shadows;
+      if (fog === 'hidden') {
+        material = hiddenTerrain.material;
+        shadows = false;
+      } else if (fog === 'dim') {
+        material = getDesaturatedTerrainMaterial(cell.terrain);
+        shadows = true;
+      } else {
+        material = getTerrainMaterial(cell.terrain);
+        shadows = true;
+      }
+      b = { cells: [], material, shadows, fog };
+      buckets.set(key, b);
+    }
+    b.cells.push(cell);
+
+    const { x, z } = HexGrid.axialToPixel(cell.q, cell.r);
+    const distSq = x * x + z * z;
+    if (distSq > maxDistanceSq) maxDistanceSq = distSq;
+  }
+
+  const seen = new Set();
+  for (const [key, b] of buckets) {
+    seen.add(key);
+    let im = hexBucketMeshes.get(key);
+    if (!im || im.count !== b.cells.length) {
+      // Bucket size changed (or new bucket): reallocate the instance buffer.
+      // Geometry and material are shared/cached, so this only uploads matrices.
+      if (im) {
+        hexGroup.remove(im);
+        im.dispose();
+      }
+      im = new THREE.InstancedMesh(hexUnitGeometry, b.material, b.cells.length);
+      im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      im.frustumCulled = false; // instances span the map; per-mesh culling is wrong
+      im.castShadow = b.shadows;
+      im.receiveShadow = b.shadows;
+      hexGroup.add(im);
+      hexBucketMeshes.set(key, im);
+    }
+    for (let i = 0; i < b.cells.length; i++) {
+      const cell = b.cells[i];
+      const h = b.fog === 'hidden' ? hiddenTerrain.height : cell.terrain.height;
+      const { x, z } = HexGrid.axialToPixel(cell.q, cell.r);
+      _hexPos.set(x, h / 2, z);
+      _hexScale.set(1, h, 1);
+      _hexMatrix.compose(_hexPos, _hexIdentityQuat, _hexScale);
+      im.setMatrixAt(i, _hexMatrix);
+    }
+    im.instanceMatrix.needsUpdate = true;
+  }
+
+  // Remove buckets that no longer have any cells
+  for (const [key, im] of hexBucketMeshes) {
+    if (!seen.has(key)) {
+      hexGroup.remove(im);
+      im.dispose();
+      hexBucketMeshes.delete(key);
+    }
+  }
+
+  return maxDistanceSq;
 }
 
 export async function preloadModels(entityMetadata) {
@@ -857,14 +915,36 @@ export function clearExclusionZone() {
   }
 }
 
-export function raycastHex(mouseNormalized) {
-  const raycaster = new THREE.Raycaster();
-  raycaster.setFromCamera(mouseNormalized, camera);
-  const intersects = raycaster.intersectObjects(hexGroup.children);
-  if (intersects.length > 0) {
-    return intersects[0].object.userData;
+const _pickRaycaster = new THREE.Raycaster();
+const _pickPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const _pickPoint = new THREE.Vector3();
+
+/**
+ * Math-based hex picking: intersect the mouse ray with the terrain plane and
+ * convert to axial coordinates. O(1) — replaces raycasting against every hex
+ * mesh (12k+ intersection tests per mousemove on large maps).
+ * Returns the same shape the old raycastHex returned: {q, r, terrain, isExplored, isVisible}.
+ */
+export function pickHexCell(mouseNormalized, gameState) {
+  if (!gameState || !gameState.cells || !camera) return null;
+  _pickRaycaster.setFromCamera(mouseNormalized, camera);
+  let cell = null;
+  // Two passes: intersect at y=0, then refine at the hovered cell's terrain height.
+  for (let pass = 0; pass < 2; pass++) {
+    const h = cell && cell.terrain ? cell.terrain.height : 0;
+    _pickPlane.constant = -h;
+    if (!_pickRaycaster.ray.intersectPlane(_pickPlane, _pickPoint)) return null;
+    const { q, r } = HexGrid.pixelToAxial(_pickPoint.x, _pickPoint.z);
+    cell = gameState.cells[`${q},${r}`];
+    if (!cell) return null;
   }
-  return null;
+  return {
+    q: cell.q,
+    r: cell.r,
+    terrain: cell.terrain,
+    isExplored: gameState.isExploredByHuman(cell),
+    isVisible: gameState.isVisibleToHuman(cell),
+  };
 }
 
 /**
