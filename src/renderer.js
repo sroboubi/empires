@@ -3,12 +3,14 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { Sky } from 'three/addons/objects/Sky.js';
+import Stats from 'three/addons/libs/stats.module.js';
 import { HexGrid } from './hexGrid.js';
 import { CONFIG } from './config.js';
 import { findSpawnDef, findTerrainGroup } from './resources.js';
 
 export let scene, camera, renderer, controls;
 export let dirLight, hemiLight, sky, sunMesh;
+export let stats = null;
 let hexGroup;
 // Instanced hex rendering: one InstancedMesh per (terrain, fogState) bucket,
 // so the whole map draws in ~dozens of draw calls instead of one per hex.
@@ -215,6 +217,19 @@ export function initRenderer(canvas) {
   window.addEventListener('resize', onWindowResize);
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
+
+  // Optional Performance Monitor (Stats.js)
+  if (CONFIG.SHOW_FPS) {
+    stats = new Stats();
+    stats.showPanel(0); // 0: fps, 1: ms, 2: mb, 3+: custom
+    stats.dom.id = 'fps-meter';
+    stats.dom.style.position = 'fixed';
+    stats.dom.style.top = '10px';
+    stats.dom.style.right = '10px';
+    stats.dom.style.left = 'auto';
+    stats.dom.style.zIndex = '9999';
+    document.body.appendChild(stats.dom);
+  }
 
   // Start Animation Loop
   clock.start();
@@ -505,6 +520,8 @@ const _animUpY = new THREE.Vector3(0, 1, 0);
 function animate() {
   requestAnimationFrame(animate);
 
+  if (stats) stats.begin();
+
   const deltaTime = clock.getDelta();
 
   if (controls) {
@@ -571,6 +588,8 @@ function animate() {
   if (renderer && scene && camera) {
     renderer.render(scene, camera);
   }
+
+  if (stats) stats.end();
 }
 
 // --- Grid & Model Utilities ---
@@ -675,7 +694,8 @@ function rebuildHexInstances(gameState) {
       }
       im = new THREE.InstancedMesh(hexUnitGeometry, b.material, b.cells.length);
       im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      im.frustumCulled = false; // instances span the map; per-mesh culling is wrong
+      // Compute tight bounds from instances so frustum culling works
+      // (without this, all instances render into the shadow map every frame)
       im.castShadow = b.shadows;
       im.receiveShadow = b.shadows;
       hexGroup.add(im);
@@ -691,6 +711,7 @@ function rebuildHexInstances(gameState) {
       im.setMatrixAt(i, _hexMatrix);
     }
     im.instanceMatrix.needsUpdate = true;
+    im.computeBoundingSphere();
   }
 
   // Remove buckets that no longer have any cells
@@ -1140,7 +1161,6 @@ export function buildCellResources(gameState) {
       const im = new THREE.InstancedMesh(part.geometry, part.material, items.length);
       im.castShadow = true;
       im.receiveShadow = true;
-      im.frustumCulled = false; // instances span the whole map
       // Faded overlay: same instances, semi-transparent. Used for resource
       // cells a unit is standing on so the unit stays clearly visible.
       const fadedMaterial = part.material.clone();
@@ -1150,7 +1170,6 @@ export function buildCellResources(gameState) {
       const fim = new THREE.InstancedMesh(part.geometry, fadedMaterial, items.length);
       fim.castShadow = false;
       fim.receiveShadow = false;
-      fim.frustumCulled = false;
       fim.count = 0;
       fim.userData.fadedSlots = [];
       items.forEach((it, idx) => {
@@ -1160,6 +1179,8 @@ export function buildCellResources(gameState) {
         cellResourceSlots[key].push({ mesh: im, fadedMesh: fim, index: idx, fadedIndex: -1, matrix });
       });
       im.instanceMatrix.needsUpdate = true;
+      im.computeBoundingSphere();
+      fim.computeBoundingSphere();
       scene.add(im);
       scene.add(fim);
       resourceInstancedMeshes.push(im, fim);
