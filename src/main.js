@@ -149,6 +149,43 @@ async function init() {
     // Open Setup Modal automatically on initial load
     openSetupModal(false);
 
+    // FPS test harness (?fps=1&autostart=1&mapsize=64&autopan=1)
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('fps') === '1') {
+      window.__fpsMeter = { frames: 0, lastLog: performance.now() };
+      const overlay = document.createElement('div');
+      overlay.id = 'fps-overlay';
+      overlay.style.cssText = 'position:fixed;top:10px;left:10px;z-index:99999;background:rgba(0,0,0,0.7);color:#0f0;font:14px monospace;padding:8px;border-radius:4px;';
+      overlay.textContent = 'FPS: ...';
+      document.body.appendChild(overlay);
+      console.log('[FPS] meter enabled');
+    }
+    if (params.get('autostart') === '1') {
+      const mapSize = parseInt(params.get('mapsize') || '64', 10);
+      document.getElementById('setup-map-size').value = String(mapSize);
+      console.log(`[FPS] autostarting game with mapsize=${mapSize}`);
+      // Wait for init to settle, then start
+      setTimeout(() => {
+        document.getElementById('btn-start-game').click();
+        console.log('[FPS] game started');
+        if (params.get('autopan') === '1') {
+          // Simulate camera panning: orbit around the map center
+          console.log('[FPS] autopan enabled');
+          let angle = 0;
+          setInterval(() => {
+            angle += 0.15;
+            const canvas = document.getElementById('game-canvas');
+            const rect = canvas.getBoundingClientRect();
+            const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+            const dx = Math.sin(angle) * 250, dy = Math.cos(angle * 0.7) * 180;
+            canvas.dispatchEvent(new PointerEvent('pointerdown', { clientX: cx, clientY: cy, bubbles: true }));
+            canvas.dispatchEvent(new PointerEvent('pointermove', { clientX: cx + dx, clientY: cy + dy, bubbles: true }));
+            canvas.dispatchEvent(new PointerEvent('pointerup', { clientX: cx + dx, clientY: cy + dy, bubbles: true }));
+          }, 400);
+        }
+      }, 2000);
+    }
+
     console.log('Game initialized successfully.');
   } catch (err) {
     console.error('Fatal initialization error:', err);

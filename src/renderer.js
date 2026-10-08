@@ -571,6 +571,24 @@ function animate() {
   if (renderer && scene && camera) {
     renderer.render(scene, camera);
   }
+
+  // FPS meter (?fps=1): logs frame stats to console + DOM overlay every 2s
+  if (window.__fpsMeter) {
+    const m = window.__fpsMeter;
+    m.frames++;
+    const now = performance.now();
+    if (now - m.lastLog > 2000) {
+      const elapsed = (now - m.lastLog) / 1000;
+      const fps = (m.frames / elapsed).toFixed(1);
+      const calls = renderer ? renderer.info.render.calls : -1;
+      const tris = renderer ? renderer.info.render.triangles : -1;
+      console.log(`[FPS] fps=${fps} drawcalls=${calls} triangles=${tris}`);
+      const el = document.getElementById('fps-overlay');
+      if (el) el.textContent = `FPS: ${fps} | draw calls: ${calls} | tris: ${tris}`;
+      m.frames = 0;
+      m.lastLog = now;
+    }
+  }
 }
 
 // --- Grid & Model Utilities ---
