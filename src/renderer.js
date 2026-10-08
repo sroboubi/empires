@@ -254,6 +254,22 @@ export function initRenderer(canvas) {
  * through semi-transparent tiles (like oceans).
  * @param {number} radius - Outer spatial radius of the hex map
  */
+/**
+ * Updates the shadow camera bounds to cover the map.
+ * Call after map generation with the map's approximate radius.
+ * @param {number} mapRadius - Half-width of the map in world units
+ */
+export function updateShadowCamera(mapRadius) {
+  if (!dirLight) return;
+  const d = Math.max(40, mapRadius * 1.2);
+  dirLight.shadow.camera.left = -d;
+  dirLight.shadow.camera.right = d;
+  dirLight.shadow.camera.top = d;
+  dirLight.shadow.camera.bottom = -d;
+  dirLight.shadow.camera.far = d * 4;
+  dirLight.shadow.camera.updateProjectionMatrix();
+}
+
 export function updateGroundBase(radius) {
   if (groundBaseMesh) {
     scene.remove(groundBaseMesh);
