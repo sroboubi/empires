@@ -128,8 +128,18 @@ export function initRenderer(canvas) {
 
   dirLight = new THREE.DirectionalLight(0xfffaed, 1.2);
   dirLight.castShadow = true;
-  dirLight.shadow.mapSize.width = 2048;
-  dirLight.shadow.mapSize.height = 2048;
+  // Perf test hooks: ?noshadows=1 disables shadows, ?shadowmap=N sets size
+  const _params = new URLSearchParams(window.location.search);
+  const _shadowSize = parseInt(_params.get('shadowmap') || '2048', 10);
+  dirLight.shadow.mapSize.width = _shadowSize;
+  dirLight.shadow.mapSize.height = _shadowSize;
+  if (_params.get('noshadows') === '1') {
+    renderer.shadowMap.enabled = false;
+    dirLight.castShadow = false;
+    console.log('[FPS] shadows disabled via ?noshadows=1');
+  } else {
+    console.log(`[FPS] shadow map size: ${_shadowSize}`);
+  }
   dirLight.shadow.bias = -0.0001;
   dirLight.shadow.normalBias = 0.02;
 
