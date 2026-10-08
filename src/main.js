@@ -1222,7 +1222,9 @@ export async function nextTurn() {
   hideContextMenu();
 
   // this updates the gameState.activePlayer and increments the round if needed
+  const __nt0 = performance.now();
   await gameState.endTurn();
+  console.log(`[action-timing] gameState.endTurn: ${(performance.now() - __nt0).toFixed(1)} ms`);
 
   // enable the button again if the next player is human
   if (gameState.activePlayer && !gameState.activePlayer.isAI) {
@@ -1230,10 +1232,17 @@ export async function nextTurn() {
     button.textContent = 'Next Turn';
   }
 
-  updateHexFog(gameState);
-  reconcileEntities(gameState);
-  reconcileCellResources(gameState);
-  updatePlayersUI();
+  const __stage = (name, fn) => {
+    const s = performance.now();
+    const r = fn();
+    console.log(`[action-timing] nextTurn ${name}: ${(performance.now() - s).toFixed(1)} ms`);
+    return r;
+  };
+  __stage('updateHexFog', () => updateHexFog(gameState));
+  __stage('reconcileEntities', () => reconcileEntities(gameState));
+  __stage('reconcileCellResources', () => reconcileCellResources(gameState));
+  __stage('updatePlayersUI', () => updatePlayersUI());
+  console.log(`[action-timing] nextTurn TOTAL: ${(performance.now() - __nt0).toFixed(1)} ms`);
 
   // Focus camera on center of mass of active player's entities
   if (gameState.activePlayer && gameState.entities.length > 0 &&
@@ -1511,7 +1520,16 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
           return;
         }
 
-        const success = action.do ? action.do(targetCell, targetEntity) : false;
+        // --- action-timing instrumentation (perf/action-timing branch, temporary) ---
+        const __at0 = performance.now();
+        const __stage = (name, fn) => {
+          const s = performance.now();
+          const r = fn();
+          console.log(`[action-timing] ${name}: ${(performance.now() - s).toFixed(1)} ms`);
+          return r;
+        };
+
+        const success = __stage(`action.do(${action.name})`, () => action.do ? action.do(targetCell, targetEntity) : false);
 
         if (success) {
           audio.playEntitySfx(selectedEntity, 'action', action.name);
@@ -1520,16 +1538,17 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
           showToast(`Failed to execute ${action.name}`, true);
         }
 
-        updateHexFog(gameState);
-        reconcileEntities(gameState);
-        reconcileCellResources(gameState);
-        updatePlayersUI();
+        __stage('updateHexFog', () => updateHexFog(gameState));
+        __stage('reconcileEntities', () => reconcileEntities(gameState));
+        __stage('reconcileCellResources', () => reconcileCellResources(gameState));
+        __stage('updatePlayersUI', () => updatePlayersUI());
 
         if (selectedEntity && !gameState.entities.includes(selectedEntity)) {
           deselectEntity();
         } else if (selectedEntity) {
-          selectEntity(selectedEntity);
+          __stage('selectEntity', () => selectEntity(selectedEntity));
         }
+        console.log(`[action-timing] TOTAL action handler: ${(performance.now() - __at0).toFixed(1)} ms`);
       });
       actionsDiv.appendChild(btn);
     });
