@@ -3,12 +3,14 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { Sky } from 'three/addons/objects/Sky.js';
+import Stats from 'three/addons/libs/stats.module.js';
 import { HexGrid } from './hexGrid.js';
 import { CONFIG } from './config.js';
 import { findSpawnDef, findTerrainGroup } from './resources.js';
 
 export let scene, camera, renderer, controls;
 export let dirLight, hemiLight, sky, sunMesh;
+export let stats = null;
 let hexGroup;
 let cellMeshMap = {}; // Maps "q,r" to Mesh object
 let highlightMesh = null; // Mesh to show selection/hover highlight
@@ -212,6 +214,19 @@ export function initRenderer(canvas) {
   window.addEventListener('resize', onWindowResize);
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
+
+  // Optional Performance Monitor (Stats.js)
+  if (CONFIG.SHOW_FPS) {
+    stats = new Stats();
+    stats.showPanel(0); // 0: fps, 1: ms, 2: mb, 3+: custom
+    stats.dom.id = 'fps-meter';
+    stats.dom.style.position = 'fixed';
+    stats.dom.style.top = '10px';
+    stats.dom.style.right = '10px';
+    stats.dom.style.left = 'auto';
+    stats.dom.style.zIndex = '9999';
+    document.body.appendChild(stats.dom);
+  }
 
   // Start Animation Loop
   clock.start();
@@ -495,6 +510,8 @@ function onWindowResize() {
 function animate() {
   requestAnimationFrame(animate);
 
+  if (stats) stats.begin();
+
   const deltaTime = clock.getDelta();
 
   if (controls) {
@@ -560,6 +577,8 @@ function animate() {
   if (renderer && scene && camera) {
     renderer.render(scene, camera);
   }
+
+  if (stats) stats.end();
 }
 
 // --- Grid & Model Utilities ---
