@@ -105,11 +105,15 @@ export function initRenderer(canvas) {
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.shadowMap.enabled = true;
-  // Perf test hook: ?shadowtype=basic|pcf|pcfsoft (default pcfsoft)
-  const _st = new URLSearchParams(window.location.search).get('shadowtype');
-  renderer.shadowMap.type = _st === 'basic' ? THREE.BasicShadowMap
-    : _st === 'pcf' ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
-  if (_st) console.log(`[FPS] shadow type: ${_st}`);
+  // Shadow type from CONFIG.SHADOW_TYPE ('none'|'basic'|'pcf'|'pcfsoft', ?shadowtype= override)
+  const _st = CONFIG.SHADOW_TYPE;
+  if (_st === 'none') {
+    renderer.shadowMap.enabled = false;
+  } else {
+    renderer.shadowMap.type = _st === 'basic' ? THREE.BasicShadowMap
+      : _st === 'pcf' ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
+  }
+  console.log(`[shadow] type: ${_st}`);
 
   // 4. Setup Controls
   controls = new OrbitControls(camera, renderer.domElement);
@@ -133,16 +137,17 @@ export function initRenderer(canvas) {
   dirLight = new THREE.DirectionalLight(0xfffaed, 1.2);
   dirLight.castShadow = true;
   // Perf test hooks: ?noshadows=1 disables shadows, ?shadowmap=N sets size
+  // (SHADOW_TYPE='none' in config also disables)
   const _params = new URLSearchParams(window.location.search);
   const _shadowSize = parseInt(_params.get('shadowmap') || '2048', 10);
   dirLight.shadow.mapSize.width = _shadowSize;
   dirLight.shadow.mapSize.height = _shadowSize;
-  if (_params.get('noshadows') === '1') {
+  if (_params.get('noshadows') === '1' || CONFIG.SHADOW_TYPE === 'none') {
     renderer.shadowMap.enabled = false;
     dirLight.castShadow = false;
-    console.log('[FPS] shadows disabled via ?noshadows=1');
+    console.log('[shadow] disabled via ?noshadows=1 or SHADOW_TYPE=none');
   } else {
-    console.log(`[FPS] shadow map size: ${_shadowSize}`);
+    console.log(`[shadow] map size: ${_shadowSize}`);
   }
   dirLight.shadow.bias = -0.0001;
   dirLight.shadow.normalBias = 0.02;
@@ -261,7 +266,7 @@ export function initRenderer(canvas) {
  */
 export function updateShadowCamera(mapRadius) {
   if (!dirLight) return;
-  const d = Math.max(40, mapRadius * 1.2);
+  const d = Math.max(40, mapRadius * CONFIG.SHADOW_CAMERA_SCALE);
   dirLight.shadow.camera.left = -d;
   dirLight.shadow.camera.right = d;
   dirLight.shadow.camera.top = d;
