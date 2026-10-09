@@ -12,6 +12,12 @@ export let scene, camera, renderer, controls;
 export let dirLight, hemiLight, sky, sunMesh;
 export let stats = null;
 let panClampRadius = Infinity; // camera-target pan limit in world units; set per map by setMapCameraLimits()
+let shadowStaticBound = 600; // pop-free max shadow half-extent; set per map by setMapCameraLimits()
+let shadowFitHalfExtent = -1; // last dynamically fitted half-extent (-1 = not yet fitted)
+const _fitNdc = new THREE.Vector3();
+const _fitWorld = new THREE.Vector3();
+const _fitDir = new THREE.Vector3();
+const _fitLight = new THREE.Vector3();
 const _limitOffset = new THREE.Vector3(); // scratch for camera-limit math
 let hexGroup;
 // Instanced hex rendering: one InstancedMesh per (terrain, fogState) bucket,
@@ -138,29 +144,20 @@ export function initRenderer(canvas) {
 
   dirLight = new THREE.DirectionalLight(0xfffaed, 1.2);
   dirLight.castShadow = true;
-  // Perf test hooks: ?noshadows=1 disables shadows, ?shadowmap=N sets size
-  // (SHADOW_TYPE='none' in config also disables)
-  const _params = new URLSearchParams(window.location.search);
-  const _shadowSize = parseInt(_params.get('shadowmap') || '2048', 10);
-  dirLight.shadow.mapSize.width = _shadowSize;
-  dirLight.shadow.mapSize.height = _shadowSize;
-  if (_params.get('noshadows') === '1' || CONFIG.SHADOW_TYPE === 'none') {
+  // All shadow config lives in config.js and is query-param overridable through the
+  // common mechanism (e.g. ?shadowmapsize=4096, ?shadowtype=none).
+  dirLight.shadow.mapSize.width = CONFIG.SHADOW_MAP_SIZE;
+  dirLight.shadow.mapSize.height = CONFIG.SHADOW_MAP_SIZE;
+  if (CONFIG.SHADOW_TYPE === 'none') {
     renderer.shadowMap.enabled = false;
     dirLight.castShadow = false;
-    console.log('[shadow] disabled via ?noshadows=1 or SHADOW_TYPE=none');
+    console.log('[shadow] disabled via SHADOW_TYPE=none');
   } else {
-    console.log(`[shadow] map size: ${_shadowSize}`);
+    console.log(`[shadow] map size: ${CONFIG.SHADOW_MAP_SIZE}`);
   }
   dirLight.shadow.bias = -0.0001;
   dirLight.shadow.normalBias = 0.02;
 
-  const d = 35;
-  dirLight.shadow.camera.left = -d;
-  dirLight.shadow.camera.right = d;
-  dirLight.shadow.camera.top = d;
-  dirLight.shadow.camera.bottom = -d;
-  dirLight.shadow.camera.near = 0.5;
-  dirLight.shadow.camera.far = 150;
   scene.add(dirLight);
   scene.add(dirLight.target);
 
@@ -292,10 +289,12 @@ export function setMapCameraLimits(mapRings) {
   }
   if (dirLight) {
     const d = Math.max(60, (panClampRadius + maxDistance) * CONFIG.SHADOW_CAMERA_SCALE);
+    shadowStaticBound = d;
     dirLight.shadow.camera.left = -d;
     dirLight.shadow.camera.right = d;
     dirLight.shadow.camera.top = d;
     dirLight.shadow.camera.bottom = -d;
+    dirLight.shadow.camera.near = 0.5;
     dirLight.shadow.camera.far = d * 4;
     dirLight.shadow.camera.updateProjectionMatrix();
   }
@@ -317,6 +316,74 @@ function clampCameraTarget() {
     t.z += dz;
     camera.position.x += dx;
     camera.position.z += dz;
+  }
+}
+
+/**
+ * Dynamically fits the shadow camera to the current view for crisp shadows.
+ *
+ * The shadow camera follows controls.target (see animate()). Each frame we cast
+ * rays through a grid over the view frustum, intersect them with the ground plane,
+ * and size the shadow ortho box (in light space, so sun angle is handled exactly)
+ * to cover the hits. Zoom and tilt are handled uniformly: looking straight down
+ * while zoomed in yields a small box (crisp shadows); zooming out enlarges it.
+ *
+ * If any ray hits the sky (grazing tilt toward the horizon), the visible ground
+ * is unbounded, so we fall back to the static pop-free bound from
+ * setMapCameraLimits() — softer shadows there, but that region is sub-pixel anyway.
+ * The fitted size is quantized to 16-unit steps to avoid shimmer.
+ */
+function fitShadowCameraToView() {
+  if (!dirLight || !dirLight.castShadow || !camera || !controls) return;
+  const shadowCam = dirLight.shadow.camera;
+
+  camera.updateMatrixWorld();
+  dirLight.updateMatrixWorld();
+  dirLight.target.updateMatrixWorld();
+  // Refresh the shadow camera matrices from the light (exactly what the shadow pass
+  // does at render time); this keeps our fitted ortho bounds intact.
+  dirLight.shadow.updateMatrices(dirLight);
+
+  const tx = controls.target.x;
+  const tz = controls.target.z;
+  let maxAbs = 0;
+  let skyHit = false;
+  for (let ix = -1; ix <= 1; ix += 0.5) {
+    for (let iy = -1; iy <= 1; iy += 0.5) {
+      _fitNdc.set(ix, iy, 1).unproject(camera); // world point on the far plane
+      _fitDir.copy(_fitNdc).sub(camera.position);
+      const len = _fitDir.length();
+      if (len < 1e-6 || _fitDir.y >= -1e-4 * len) { skyHit = true; continue; } // sky
+      _fitDir.divideScalar(len);
+      const t = -camera.position.y / _fitDir.y; // ground plane y=0; t>0 guaranteed
+      // Clamp the hit to the static bound around the target so a horizon stare
+      // can't blow up the box (those texels are sub-pixel anyway).
+      let hx = camera.position.x + _fitDir.x * t - tx;
+      let hz = camera.position.z + _fitDir.z * t - tz;
+      const hr = Math.hypot(hx, hz);
+      if (hr > shadowStaticBound) { const s = shadowStaticBound / hr; hx *= s; hz *= s; }
+      _fitLight.set(tx + hx, 0, tz + hz).applyMatrix4(shadowCam.matrixWorldInverse);
+      const ax = Math.abs(_fitLight.x), ay = Math.abs(_fitLight.y);
+      if (ax > maxAbs) maxAbs = ax;
+      if (ay > maxAbs) maxAbs = ay;
+    }
+  }
+  // The view target itself is always covered.
+  _fitLight.set(tx, 0, tz).applyMatrix4(shadowCam.matrixWorldInverse);
+  if (Math.abs(_fitLight.x) > maxAbs) maxAbs = Math.abs(_fitLight.x);
+  if (Math.abs(_fitLight.y) > maxAbs) maxAbs = Math.abs(_fitLight.y);
+
+  const need = skyHit ? shadowStaticBound : maxAbs;
+  const d = Math.min(shadowStaticBound, Math.max(48, Math.ceil((need * 1.15) / 16) * 16));
+  if (d !== shadowFitHalfExtent) {
+    shadowFitHalfExtent = d;
+    shadowCam.left = -d;
+    shadowCam.right = d;
+    shadowCam.top = d;
+    shadowCam.bottom = -d;
+    shadowCam.near = 0.5;
+    shadowCam.far = d * 4;
+    shadowCam.updateProjectionMatrix();
   }
 }
 
@@ -653,6 +720,9 @@ function animate() {
       dirLight.target.position.copy(controls.target);
       dirLight.target.updateMatrixWorld();
     }
+
+    // Fit the shadow camera to the current view (zoom + tilt aware) for crisp shadows
+    fitShadowCameraToView();
   }
 
   // Update animated effects
