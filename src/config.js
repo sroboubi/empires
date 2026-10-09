@@ -17,6 +17,9 @@ export var CONFIG = {
   AUDIO_VOLUME: 0.8,     // master volume 0..1 (query-param overridable)
   SHADOW_CAMERA_SCALE: 1.2,  // shadow camera half-extent = mapRadius * this (query-param overridable)
   SHADOW_TYPE: 'pcfsoft',    // 'none' | 'basic' | 'pcf' | 'pcfsoft' (query-param overridable via ?shadowtype=)
+  CAMERA_PAN_MARGIN: 10,      // world units past the map edge the camera target may pan (query-param overridable)
+  CAMERA_ZOOM_SCALE: 1.1,     // max zoom-out distance = map world radius * this (query-param overridable)
+  CAMERA_ZOOM_MIN: 60,        // ...but never below this (query-param overridable)
   ENTITIES_URL: './definitions/entities.json',
   NATURAL_RESOURCES_URL: './definitions/naturalResources.json',
   TREASURES_URL: './definitions/treasures.json',
