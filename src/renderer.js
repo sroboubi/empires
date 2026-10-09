@@ -1278,6 +1278,10 @@ export function reconcileCellResources(gameState) {
     const hasResource = !!(cell && cell.resource);
     const visible = hasResource && (CONFIG.SHOW_ALL || gameState.isExploredByHuman(cell));
     const faded = visible && occupied.has(key);
+    // DEBUG: log details for cells with units on them
+    if (occupied.has(key)) {
+      console.log(`[fade-detail] key=${key} hasResource=${hasResource} visible=${visible} faded=${faded} cell=${!!cell}`);
+    }
     if (faded) dbgFaded++;
     else if (!visible) dbgHidden++;
     else dbgNormal++;
