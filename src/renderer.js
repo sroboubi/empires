@@ -1270,12 +1270,18 @@ function unfadeResourceSlot(slot) {
 export function reconcileCellResources(gameState) {
   const occupied = new Set();
   for (const e of gameState.entities || []) occupied.add(`${e.q},${e.r}`);
+  let dbgCount = 0, dbgFaded = 0, dbgHidden = 0, dbgNormal = 0, dbgNoCell = 0;
   for (const key of Object.keys(cellResourceSlots)) {
     const cell = gameState.hexGrid.cells.get(key);
+    if (!cell) dbgNoCell++;
     const slots = cellResourceSlots[key];
     const hasResource = !!(cell && cell.resource);
     const visible = hasResource && (CONFIG.SHOW_ALL || gameState.isExploredByHuman(cell));
     const faded = visible && occupied.has(key);
+    if (faded) dbgFaded++;
+    else if (!visible) dbgHidden++;
+    else dbgNormal++;
+    dbgCount++;
     for (const slot of slots) {
       if (!visible) {
         // Hidden by fog of war: collapse the instance, but remember it so the
@@ -1300,6 +1306,7 @@ export function reconcileCellResources(gameState) {
     }
     if (!hasResource) delete cellResourceSlots[key];
   }
+  console.log(`[fade-debug] cells=${dbgCount} faded=${dbgFaded} hidden=${dbgHidden} normal=${dbgNormal} noCell=${dbgNoCell} occupied=${occupied.size}`);
 }
 
 /**
