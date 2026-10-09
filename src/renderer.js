@@ -261,12 +261,15 @@ export function initRenderer(canvas) {
  */
 /**
  * Updates the shadow camera bounds to cover the map.
- * Call after map generation with the map's approximate radius.
- * @param {number} mapRadius - Half-width of the map in world units
+ * Call after map generation with the map's hex ring radius.
+ * @param {number} mapRadius - Map radius in hex rings (converted to world units internally)
  */
 export function updateShadowCamera(mapRadius) {
   if (!dirLight) return;
-  const d = Math.max(40, mapRadius * CONFIG.SHADOW_CAMERA_SCALE);
+  // Ring count -> world units: pointy-top axial layout, max |x| = sqrt(3) * HEX_SIZE * rings.
+  // Callers pass settings.mapSize / hexGrid.radius (ring counts), not world units.
+  const worldRadius = mapRadius * Math.sqrt(3) * CONFIG.HEX_SIZE;
+  const d = Math.max(40, worldRadius * CONFIG.SHADOW_CAMERA_SCALE);
   dirLight.shadow.camera.left = -d;
   dirLight.shadow.camera.right = d;
   dirLight.shadow.camera.top = d;
