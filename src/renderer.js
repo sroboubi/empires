@@ -11,7 +11,8 @@ import { findSpawnDef, findTerrainGroup } from './resources.js';
 export let scene, camera, renderer, controls;
 export let dirLight, hemiLight, sky, sunMesh;
 export let stats = null;
-let panClampRadius = Infinity; // camera-target pan limit in world units; set per map by setMapCameraLimits()
+let panClampRings = Infinity; // camera-target pan limit in hex rings; set per map by setMapCameraLimits()
+const _tiltOffset = new THREE.Vector3(); // scratch for zoom-dependent tilt limit
 let shadowStaticBound = 600; // pop-free max shadow half-extent; set per map by setMapCameraLimits()
 let shadowFitHalfExtent = -1; // last dynamically fitted half-extent (-1 = not yet fitted)
 const _fitNdc = new THREE.Vector3();
@@ -261,8 +262,8 @@ export function initRenderer(canvas) {
 /**
  * Applies per-map camera and shadow limits. Call after map generation / load.
  *
- * - Clamps the OrbitControls target to the map bounds (+ CAMERA_PAN_MARGIN) so the
- *   view can't pan off into the void (enforced every frame in animate()).
+ * - Clamps the OrbitControls target to the hex map bounds (+ CAMERA_PAN_MARGIN_RINGS)
+ *   so the view can't pan off into the void (enforced every frame in animate()).
  * - Scales max zoom-out with map size so a small map isn't a tiny island in the void.
  * - Sizes the shadow camera to cover the whole map from any allowed target position.
  *   The directional light follows controls.target (see animate()), and the worst
@@ -275,7 +276,7 @@ export function initRenderer(canvas) {
 export function setMapCameraLimits(mapRings) {
   // Ring count -> world units: pointy-top axial layout, max |x| = sqrt(3) * HEX_SIZE * rings.
   const worldRadius = mapRings * Math.sqrt(3) * CONFIG.HEX_SIZE;
-  panClampRadius = worldRadius + CONFIG.CAMERA_PAN_MARGIN;
+  panClampRings = mapRings + CONFIG.CAMERA_PAN_MARGIN_RINGS;
   const maxDistance = Math.max(CONFIG.CAMERA_ZOOM_MIN, worldRadius * CONFIG.CAMERA_ZOOM_SCALE);
   if (controls) {
     controls.maxDistance = maxDistance;
@@ -288,7 +289,10 @@ export function setMapCameraLimits(mapRings) {
     clampCameraTarget();
   }
   if (dirLight) {
-    const d = Math.max(60, (panClampRadius + maxDistance) * CONFIG.SHADOW_CAMERA_SCALE);
+    // Worst map-point-to-target distance: the target roams a hex region of panClampRings
+    // rings and map corners sit at mapRings rings (corner-direction ring spacing).
+    const worstCase = (panClampRings + mapRings) * Math.sqrt(3) * CONFIG.HEX_SIZE;
+    const d = Math.max(60, worstCase * CONFIG.SHADOW_CAMERA_SCALE);
     shadowStaticBound = d;
     dirLight.shadow.camera.left = -d;
     dirLight.shadow.camera.right = d;
@@ -305,18 +309,38 @@ export function setMapCameraLimits(mapRings) {
  * so the view doesn't jump. No-op until setMapCameraLimits() has run.
  */
 function clampCameraTarget() {
-  if (!controls || !isFinite(panClampRadius)) return;
+  if (!controls || !isFinite(panClampRings)) return;
+  // World -> cube coords (pointy-top axial, same layout math as hexGrid.js).
+  const size = CONFIG.HEX_SIZE;
   const t = controls.target;
-  const r = Math.hypot(t.x, t.z);
-  if (r > panClampRadius) {
-    const s = panClampRadius / r;
-    const dx = t.x * (s - 1);
-    const dz = t.z * (s - 1);
-    t.x += dx;
-    t.z += dz;
+  const q = ((Math.sqrt(3) / 3) * t.x - (1 / 3) * t.z) / size;
+  const r = ((2 / 3) * t.z) / size;
+  const dist = (Math.abs(q) + Math.abs(r) + Math.abs(q + r)) / 2;
+  if (dist > panClampRings) {
+    // Hex region is convex and centered: scale toward the center to land on the boundary.
+    const k = panClampRings / dist;
+    const q2 = q * k, r2 = r * k;
+    const nx = size * (Math.sqrt(3) * q2 + (Math.sqrt(3) / 2) * r2);
+    const nz = size * (3 / 2) * r2;
+    const dx = nx - t.x, dz = nz - t.z;
+    t.x = nx;
+    t.z = nz;
     camera.position.x += dx;
     camera.position.z += dz;
   }
+}
+
+/**
+ * Limits how low the camera can tilt based on zoom level: when zoomed in there is
+ * no reason to stare at the horizon (it also keeps the dynamic shadow fit in its
+ * crisp regime instead of falling back to the blurry static bound).
+ */
+function updateTiltLimit() {
+  if (!controls) return;
+  const maxD = controls.maxDistance || 100;
+  const dist = _tiltOffset.copy(camera.position).sub(controls.target).length();
+  const t = THREE.MathUtils.clamp((dist - maxD * 0.25) / (maxD * 0.65), 0, 1);
+  controls.maxPolarAngle = THREE.MathUtils.lerp(CONFIG.CAMERA_TILT_CLOSE, CONFIG.CAMERA_TILT_FAR, t);
 }
 
 /**
@@ -703,6 +727,9 @@ function animate() {
       offset.applyAxisAngle(_animUpY, -rotSpeed);
       camera.position.copy(controls.target).add(offset);
     }
+
+    // Zoom-dependent tilt limit (set before update so OrbitControls enforces it)
+    updateTiltLimit();
 
     controls.update();
 
