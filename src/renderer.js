@@ -1203,6 +1203,7 @@ export function buildCellResources(gameState) {
       const fim = new THREE.InstancedMesh(part.geometry, fadedMaterial, items.length);
       fim.castShadow = false;
       fim.receiveShadow = false;
+      fim.frustumCulled = false; // instances are added/removed dynamically as units move; static bounds would be wrong
       fim.count = 0;
       fim.userData.fadedSlots = [];
       items.forEach((it, idx) => {
