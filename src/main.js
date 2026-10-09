@@ -1402,7 +1402,7 @@ function handleRightClick(event) {
     return;
   }
 
-  const targetCell = gameState.cells[`${hovered.q},${hovered.r}`];
+  const targetCell = gameState.hexGrid.cells.get(`${hovered.q},${hovered.r}`);
   const targetEntity = gameState.getEntityAt(hovered.q, hovered.r);
 
   const candidateActions = selectedEntity.getActions();
@@ -1412,7 +1412,7 @@ function handleRightClick(event) {
 function selectEntity(entity) {
   selectedEntity = entity;
   audio.playEntitySfx(entity, 'select');
-  const cell = entity.cell || gameState.cells[`${entity.q},${entity.r}`];
+  const cell = entity.cell || gameState.hexGrid.cells.get(`${entity.q},${entity.r}`);
 
   if (cell) {
     const { x, z } = HexGrid.axialToPixel(cell.q, cell.r);
@@ -2022,7 +2022,7 @@ function onMouseMove(event) {
     // Natural resource / treasure on the hovered cell (hidden under fog of war)
     const resourceRow = document.getElementById('inspect-resource-row');
     const resourceValue = document.getElementById('inspect-resource');
-    const hoveredCell = gameState.cells[`${hovered.q},${hovered.r}`];
+    const hoveredCell = gameState.hexGrid.cells.get(`${hovered.q},${hovered.r}`);
     if (isExplored && hoveredCell && hoveredCell.resource) {
       const res = hoveredCell.resource;
       const kindLabel = res.kind === 'treasure' ? 'Treasure' : 'Resource';

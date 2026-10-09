@@ -31,16 +31,6 @@ export class GameState {
   }
 
   /**
-   * Provides backwards-compatible access to cells as a plain object keyed by "q,r".
-   * Used by renderer, serialization, and other code that expects the old format.
-   * @returns {Object}
-   */
-  get cells() {
-    if (!this.hexGrid) return {};
-    return this.hexGrid.getCellsObject();
-  }
-
-  /**
    * Generates a hexagonal map of a given radius filled with terrain.
    * @param {number} radius - Grid radius (number of hex rings from the center)
    * @param {Array|Object} [terrainConfig=null] - Optional terrain definitions
@@ -322,7 +312,7 @@ export class GameState {
       gameOver: this.gameOver,
       players: this.players.map(p => p.toJSON()),
       entities: this.entities.map(e => e.toJSON()),
-      cells: this.cells,
+      cells: this.hexGrid ? this.hexGrid.getCellsObject() : {},
       settings: this.settings
     });
   }

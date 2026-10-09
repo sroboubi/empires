@@ -687,7 +687,7 @@ function rebuildHexInstances(gameState) {
   // Bucket cells by (terrain, fogState); each bucket shares one material.
   const buckets = new Map();
   let maxDistanceSq = 0;
-  for (const cell of Object.values(gameState.cells)) {
+  for (const cell of gameState.hexGrid.cells.values()) {
     const fog = hexFogState(gameState, cell);
     // Hidden cells all share one material/height regardless of terrain.
     const key = fog === 'hidden' ? 'hidden' : cell.terrain.name + '|' + fog;
@@ -802,7 +802,7 @@ export function reconcileEntities(gameState) {
     if (isEntityVisibleInScene || CONFIG.SHOW_ALL) {
       activeIds.add(entity.id);
 
-      const cell = entity.cell || gameState.cells[`${entity.q},${entity.r}`];
+      const cell = entity.cell || gameState.hexGrid.cells.get(`${entity.q},${entity.r}`);
       const terrainHeight = cell && cell.terrain ? cell.terrain.height : 1.0;
       const { x, z } = HexGrid.axialToPixel(entity.q, entity.r);
 
@@ -951,7 +951,7 @@ export function showExclusionZone(q, r, minSeparation, color = '#3498db', gameSt
       const targetQ = q + dq;
       const targetR = r + dr;
       const { x, z } = HexGrid.axialToPixel(targetQ, targetR);
-      const cell = gameState?.cells ? gameState.cells[`${targetQ},${targetR}`] : null;
+      const cell = gameState?.hexGrid ? gameState.hexGrid.cells.get(`${targetQ},${targetR}`) : null;
       const height = cell?.terrain ? cell.terrain.height : 1.0;
       const mesh = new THREE.Mesh(exclusionZoneGeometry, mat);
       mesh.position.set(x, height + CONFIG.HEX_SIZE / 30, z);
@@ -980,7 +980,7 @@ const _pickPoint = new THREE.Vector3();
  * Returns the same shape the old raycastHex returned: {q, r, terrain, isExplored, isVisible}.
  */
 export function pickHexCell(mouseNormalized, gameState) {
-  if (!gameState || !gameState.cells || !camera) return null;
+  if (!gameState || !gameState.hexGrid || !camera) return null;
   _pickRaycaster.setFromCamera(mouseNormalized, camera);
   let cell = null;
   // Two passes: intersect at y=0, then refine at the hovered cell's terrain height.
@@ -989,7 +989,7 @@ export function pickHexCell(mouseNormalized, gameState) {
     _pickPlane.constant = -h;
     if (!_pickRaycaster.ray.intersectPlane(_pickPlane, _pickPoint)) return null;
     const { q, r } = HexGrid.pixelToAxial(_pickPoint.x, _pickPoint.z);
-    cell = gameState.cells[`${q},${r}`];
+    cell = gameState.hexGrid.cells.get(`${q},${r}`);
     if (!cell) return null;
   }
   return {
@@ -1172,7 +1172,7 @@ export function buildCellResources(gameState) {
 
   // Bucket items by (modelUrl, size) — one InstancedMesh per bucket per GLB part.
   const buckets = new Map();
-  for (const cell of Object.values(gameState.cells)) {
+  for (const cell of gameState.hexGrid.cells.values()) {
     if (!cell.resource) continue;
     const def = findSpawnDef(manifestData, cell.resource.kind, cell.resource.name);
     const group = findTerrainGroup(def, cell.terrain ? cell.terrain.name : null);
@@ -1271,7 +1271,7 @@ export function reconcileCellResources(gameState) {
   const occupied = new Set();
   for (const e of gameState.entities || []) occupied.add(`${e.q},${e.r}`);
   for (const key of Object.keys(cellResourceSlots)) {
-    const cell = gameState.cells[key];
+    const cell = gameState.hexGrid.cells.get(key);
     const slots = cellResourceSlots[key];
     const hasResource = !!(cell && cell.resource);
     const visible = hasResource && (CONFIG.SHOW_ALL || gameState.isExploredByHuman(cell));
