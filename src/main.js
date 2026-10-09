@@ -1017,6 +1017,8 @@ function handleStartGameClicked() {
 }
 
 function startNewGame(settings) {
+  // DEBUG: expose for fade testing
+  window.__debugGameState = () => gameState;
   currentGameSettings = settings;
   deselectEntity();
   hideContextMenu();
