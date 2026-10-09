@@ -11,6 +11,8 @@ import { findSpawnDef, findTerrainGroup } from './resources.js';
 export let scene, camera, renderer, controls;
 export let dirLight, hemiLight, sky, sunMesh;
 export let stats = null;
+let panClampRadius = Infinity; // camera-target pan limit in world units; set per map by setMapCameraLimits()
+const _limitOffset = new THREE.Vector3(); // scratch for camera-limit math
 let hexGroup;
 // Instanced hex rendering: one InstancedMesh per (terrain, fogState) bucket,
 // so the whole map draws in ~dozens of draw calls instead of one per hex.
@@ -260,22 +262,62 @@ export function initRenderer(canvas) {
  * @param {number} radius - Outer spatial radius of the hex map
  */
 /**
- * Updates the shadow camera bounds to cover the map.
- * Call after map generation with the map's hex ring radius.
- * @param {number} mapRadius - Map radius in hex rings (converted to world units internally)
+ * Applies per-map camera and shadow limits. Call after map generation / load.
+ *
+ * - Clamps the OrbitControls target to the map bounds (+ CAMERA_PAN_MARGIN) so the
+ *   view can't pan off into the void (enforced every frame in animate()).
+ * - Scales max zoom-out with map size so a small map isn't a tiny island in the void.
+ * - Sizes the shadow camera to cover the whole map from any allowed target position.
+ *   The directional light follows controls.target (see animate()), and the worst
+ *   map-point-to-target distance (panClampRadius + worldRadius) is always within
+ *   (panClampRadius + maxDistance) * SHADOW_CAMERA_SCALE, so every map point stays
+ *   inside the shadow frustum: shadows can't pop.
+ *
+ * @param {number} mapRings - Map radius in hex rings (settings.mapSize / hexGrid.radius)
  */
-export function updateShadowCamera(mapRadius) {
-  if (!dirLight) return;
+export function setMapCameraLimits(mapRings) {
   // Ring count -> world units: pointy-top axial layout, max |x| = sqrt(3) * HEX_SIZE * rings.
-  // Callers pass settings.mapSize / hexGrid.radius (ring counts), not world units.
-  const worldRadius = mapRadius * Math.sqrt(3) * CONFIG.HEX_SIZE;
-  const d = Math.max(40, worldRadius * CONFIG.SHADOW_CAMERA_SCALE);
-  dirLight.shadow.camera.left = -d;
-  dirLight.shadow.camera.right = d;
-  dirLight.shadow.camera.top = d;
-  dirLight.shadow.camera.bottom = -d;
-  dirLight.shadow.camera.far = d * 4;
-  dirLight.shadow.camera.updateProjectionMatrix();
+  const worldRadius = mapRings * Math.sqrt(3) * CONFIG.HEX_SIZE;
+  panClampRadius = worldRadius + CONFIG.CAMERA_PAN_MARGIN;
+  const maxDistance = Math.max(CONFIG.CAMERA_ZOOM_MIN, worldRadius * CONFIG.CAMERA_ZOOM_SCALE);
+  if (controls) {
+    controls.maxDistance = maxDistance;
+    // Pull the camera in if it's currently parked beyond the new limit.
+    _limitOffset.copy(camera.position).sub(controls.target);
+    if (_limitOffset.length() > maxDistance) {
+      _limitOffset.setLength(maxDistance);
+      camera.position.copy(controls.target).add(_limitOffset);
+    }
+    clampCameraTarget();
+  }
+  if (dirLight) {
+    const d = Math.max(60, (panClampRadius + maxDistance) * CONFIG.SHADOW_CAMERA_SCALE);
+    dirLight.shadow.camera.left = -d;
+    dirLight.shadow.camera.right = d;
+    dirLight.shadow.camera.top = d;
+    dirLight.shadow.camera.bottom = -d;
+    dirLight.shadow.camera.far = d * 4;
+    dirLight.shadow.camera.updateProjectionMatrix();
+  }
+}
+
+/**
+ * Clamps the orbit target to the map bounds, shifting the camera by the same delta
+ * so the view doesn't jump. No-op until setMapCameraLimits() has run.
+ */
+function clampCameraTarget() {
+  if (!controls || !isFinite(panClampRadius)) return;
+  const t = controls.target;
+  const r = Math.hypot(t.x, t.z);
+  if (r > panClampRadius) {
+    const s = panClampRadius / r;
+    const dx = t.x * (s - 1);
+    const dz = t.z * (s - 1);
+    t.x += dx;
+    t.z += dz;
+    camera.position.x += dx;
+    camera.position.z += dz;
+  }
 }
 
 export function updateGroundBase(radius) {
@@ -596,6 +638,9 @@ function animate() {
     }
 
     controls.update();
+
+    // Keep the camera target on the map (pan clamp from setMapCameraLimits)
+    clampCameraTarget();
 
     // Keep Sun Mesh aligned with camera viewpoint (eliminates parallax)
     if (sunMesh && camera) {
