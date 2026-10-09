@@ -4,12 +4,14 @@ import { showToast, displayNum } from './utils.js';
 import {
   initRenderer,
   drawGrid,
+  updateHexFog,
+  updateShadowCamera,
   highlightCell,
   highlightPathCells,
   clearPathHighlight,
   showExclusionZone,
   clearExclusionZone,
-  raycastHex,
+  pickHexCell,
   setEntitySelectionHighlight,
   clearEntitySelectionHighlight,
   preloadModels,
@@ -1028,6 +1030,7 @@ function startNewGame(settings) {
   gameState.generateMap(settings.mapSize, manifestData.terrains, manifestData);
   gameState.initializeManifest(manifestData, settings);
 
+  updateShadowCamera(settings.mapSize);
   drawGrid(gameState);
   reconcileEntities(gameState);
   buildCellResources(gameState);
@@ -1176,6 +1179,7 @@ async function doLoadGame(saveName) {
     gameState.manifestData = manifestData;
     gameState.deserialize(record.data);
 
+    if (gameState.hexGrid?.radius) updateShadowCamera(gameState.hexGrid.radius);
     drawGrid(gameState);
     reconcileEntities(gameState);
     buildCellResources(gameState);
@@ -1226,7 +1230,7 @@ export async function nextTurn() {
     button.textContent = 'Next Turn';
   }
 
-  drawGrid(gameState);
+  updateHexFog(gameState);
   reconcileEntities(gameState);
   reconcileCellResources(gameState);
   updatePlayersUI();
@@ -1348,7 +1352,7 @@ function handleLeftClick(event) {
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
-  const hovered = raycastHex(mouse);
+  const hovered = pickHexCell(mouse, gameState);
   hideContextMenu();
 
   if (!hovered) {
@@ -1392,13 +1396,13 @@ function handleRightClick(event) {
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
-  const hovered = raycastHex(mouse);
+  const hovered = pickHexCell(mouse, gameState);
   if (!hovered) {
     hideContextMenu();
     return;
   }
 
-  const targetCell = gameState.cells[`${hovered.q},${hovered.r}`];
+  const targetCell = gameState.hexGrid.cells.get(`${hovered.q},${hovered.r}`);
   const targetEntity = gameState.getEntityAt(hovered.q, hovered.r);
 
   const candidateActions = selectedEntity.getActions();
@@ -1408,7 +1412,7 @@ function handleRightClick(event) {
 function selectEntity(entity) {
   selectedEntity = entity;
   audio.playEntitySfx(entity, 'select');
-  const cell = entity.cell || gameState.cells[`${entity.q},${entity.r}`];
+  const cell = entity.cell || gameState.hexGrid.cells.get(`${entity.q},${entity.r}`);
 
   if (cell) {
     const { x, z } = HexGrid.axialToPixel(cell.q, cell.r);
@@ -1516,7 +1520,7 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
           showToast(`Failed to execute ${action.name}`, true);
         }
 
-        drawGrid(gameState);
+        updateHexFog(gameState);
         reconcileEntities(gameState);
         reconcileCellResources(gameState);
         updatePlayersUI();
@@ -1989,7 +1993,7 @@ function onMouseMove(event) {
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
-  const hovered = raycastHex(mouse);
+  const hovered = pickHexCell(mouse, gameState);
   const infoPanel = document.getElementById('inspect-panel');
   const activePlayer = gameState.activePlayer;
 
@@ -2018,7 +2022,7 @@ function onMouseMove(event) {
     // Natural resource / treasure on the hovered cell (hidden under fog of war)
     const resourceRow = document.getElementById('inspect-resource-row');
     const resourceValue = document.getElementById('inspect-resource');
-    const hoveredCell = gameState.cells[`${hovered.q},${hovered.r}`];
+    const hoveredCell = gameState.hexGrid.cells.get(`${hovered.q},${hovered.r}`);
     if (isExplored && hoveredCell && hoveredCell.resource) {
       const res = hoveredCell.resource;
       const kindLabel = res.kind === 'treasure' ? 'Treasure' : 'Resource';

@@ -117,8 +117,8 @@ export class HexGrid {
   }
 
   /**
-   * Returns all cells as a plain object keyed by "q,r" — backwards compatible
-   * with the old gameState.cells format used by renderer and serialization.
+   * Returns all cells as a plain object keyed by "q,r".
+   * Used only for JSON serialization; game code uses the cells Map directly.
    * @returns {Object}
    */
   getCellsObject() {

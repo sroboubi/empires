@@ -15,6 +15,8 @@ export var CONFIG = {
   MIN_GAME_ROUNDS: 5,
   AUDIO_ENABLED: true,   // master switch for all game audio (query-param overridable)
   AUDIO_VOLUME: 0.8,     // master volume 0..1 (query-param overridable)
+  SHADOW_CAMERA_SCALE: 1.2,  // shadow camera half-extent = mapRadius * this (query-param overridable)
+  SHADOW_TYPE: 'pcfsoft',    // 'none' | 'basic' | 'pcf' | 'pcfsoft' (query-param overridable via ?shadowtype=)
   ENTITIES_URL: './definitions/entities.json',
   NATURAL_RESOURCES_URL: './definitions/naturalResources.json',
   TREASURES_URL: './definitions/treasures.json',
