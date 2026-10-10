@@ -9,7 +9,6 @@
 ## Game ##
 
 - prevent movement through enemy entities, and implement zone of control
-- prevent movement across tiles that units can't stand on, like water (check intermediate path)
 - Quest & event deck (manifest-driven). Random narrative events with 2–3 choices ("a plague strikes your farms: quarantine / pray / ignore"), authored as JSON frames in the manifest with LLM-generated prose on top.
 - Hero units. Let champions (knight, assassin, barbarianChief are natural seeds) gain XP and pick from 2–3 traits.
 - Asymmetric faction twists. The most praised engagement mechanic in modern 4X (Endless Legend's rule-breaking factions). 2–3 JSON-authored twists per faction
