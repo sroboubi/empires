@@ -5,7 +5,7 @@ import {
   initRenderer,
   drawGrid,
   updateHexFog,
-  updateShadowCamera,
+  setMapCameraLimits,
   highlightCell,
   highlightPathCells,
   clearPathHighlight,
@@ -1030,7 +1030,7 @@ function startNewGame(settings) {
   gameState.generateMap(settings.mapSize, manifestData.terrains, manifestData);
   gameState.initializeManifest(manifestData, settings);
 
-  updateShadowCamera(settings.mapSize);
+  setMapCameraLimits(settings.mapSize);
   drawGrid(gameState);
   reconcileEntities(gameState);
   buildCellResources(gameState);
@@ -1179,7 +1179,7 @@ async function doLoadGame(saveName) {
     gameState.manifestData = manifestData;
     gameState.deserialize(record.data);
 
-    if (gameState.hexGrid?.radius) updateShadowCamera(gameState.hexGrid.radius);
+    if (gameState.hexGrid?.radius) setMapCameraLimits(gameState.hexGrid.radius);
     drawGrid(gameState);
     reconcileEntities(gameState);
     buildCellResources(gameState);
