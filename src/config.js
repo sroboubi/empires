@@ -17,6 +17,7 @@ export var CONFIG = {
   AUDIO_VOLUME: 0.8,     // master volume 0..1 (query-param overridable)
   SHADOW_CAMERA_SCALE: 1.2,  // static pop-free shadow bound = (panRange + maxZoom) * this (query-param overridable)
   SHADOW_MAP_SIZE: 2048,      // shadow map texture resolution (query-param overridable via ?shadowmapsize=)
+  SHADOW_DEBUG: false,      // show shadow frustum helper + live stats overlay (query-param overridable via ?shadowdebug=1)
   SHADOW_TYPE: 'pcfsoft',    // 'none' | 'basic' | 'pcf' | 'pcfsoft' (query-param overridable via ?shadowtype=)
   CAMERA_PAN_MARGIN_RINGS: 6, // hex rings past the map edge the camera target may pan (query-param overridable)
   CAMERA_TILT_CLOSE: 1.05,    // max polar angle (~60 deg) at low camera height, radians (query-param overridable)
