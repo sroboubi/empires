@@ -19,8 +19,10 @@ export var CONFIG = {
   SHADOW_MAP_SIZE: 2048,      // shadow map texture resolution (query-param overridable via ?shadowmapsize=)
   SHADOW_TYPE: 'pcfsoft',    // 'none' | 'basic' | 'pcf' | 'pcfsoft' (query-param overridable via ?shadowtype=)
   CAMERA_PAN_MARGIN_RINGS: 6, // hex rings past the map edge the camera target may pan (query-param overridable)
-  CAMERA_TILT_CLOSE: 1.05,    // max polar angle (~60 deg) when zoomed in, radians (query-param overridable)
-  CAMERA_TILT_FAR: 1.52,      // max polar angle (~87 deg) when zoomed out, radians (query-param overridable)
+  CAMERA_TILT_CLOSE: 1.05,    // max polar angle (~60 deg) at low camera height, radians (query-param overridable)
+  CAMERA_TILT_FAR: 1.31,      // max polar angle (~75 deg) at high camera height, radians (query-param overridable)
+  CAMERA_TILT_H_CLOSE: 25,    // below this camera height the close tilt limit applies (query-param overridable)
+  CAMERA_TILT_H_FAR: 150,     // above this camera height the far tilt limit applies (query-param overridable)
   CAMERA_ZOOM_SCALE: 1.1,     // max zoom-out distance = map world radius * this (query-param overridable)
   CAMERA_ZOOM_MIN: 60,        // ...but never below this (query-param overridable)
   ENTITIES_URL: './definitions/entities.json',
