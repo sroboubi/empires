@@ -310,8 +310,12 @@ export function setMapCameraLimits(mapRings) {
     dirLight.shadow.camera.right = d;
     dirLight.shadow.camera.top = d;
     dirLight.shadow.camera.bottom = -d;
-    dirLight.shadow.camera.near = 0.5;
-    dirLight.shadow.camera.far = d * 4;
+    // Negative near: at low sun the light sits mostly sideways from the map (fixed
+    // 80-unit offset), so a positive near plane would clip everything sun-ward of the
+    // light into shadowlessness (sharp pop line). Far is static (not fitted) so low
+    // sun depth range is always covered.
+    dirLight.shadow.camera.near = -shadowStaticBound;
+    dirLight.shadow.camera.far = shadowStaticBound * 4;
     dirLight.shadow.camera.updateProjectionMatrix();
   }
 }
@@ -421,8 +425,6 @@ function fitShadowCameraToView() {
     shadowCam.right = d;
     shadowCam.top = d;
     shadowCam.bottom = -d;
-    shadowCam.near = 0.5;
-    shadowCam.far = d * 4;
     shadowCam.updateProjectionMatrix();
   }
 }
