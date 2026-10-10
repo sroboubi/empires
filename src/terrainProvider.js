@@ -38,9 +38,10 @@ export class TerrainProvider {
 
     get(q, r) {
         // values generated between -1 and 1
-        const elevation = this.elevationNoise(3 * q / this.radius, 3 * r / this.radius);
-        const temperature = this.temperatureNoise(q / this.radius, r / this.radius);
-        const humidity = this.humidityNoise(5 * q / this.radius, 5 * r / this.radius);
+        const waveLen = 25 + 2 * Math.sqrt(this.radius);
+        const elevation = this.elevationNoise(3 * q / waveLen, 3 * r / waveLen);
+        const temperature = this.temperatureNoise(q / waveLen, r / waveLen);
+        const humidity = this.humidityNoise(5 * q / waveLen, 5 * r / waveLen);
 
         for (const t of this.terrains) {
             const cond = t.conditions || {};

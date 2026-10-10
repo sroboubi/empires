@@ -13,8 +13,27 @@
     },
     "conditions": {
       "elevation": {
-        "min": -0.7,
+        "min": -0.4,
         "max": -0.3
+      }
+    }
+  },
+  {
+    "name": "Ocean",
+    "height": 1,
+    "movementCost": 1,
+    "material": {
+      "color": "#2b50A3",
+      "roughness": 0.1,
+      "metalness": 0.7,
+      "transparent": true,
+      "opacity": 0.85,
+      "flatShading": true
+    },
+    "conditions": {
+      "elevation": {
+        "min": -0.7,
+        "max": -0.4
       }
     }
   },

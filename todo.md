@@ -23,7 +23,6 @@
 - players need to be able to dynamically provide their ai controller class and options
 - entities add/remove themselves from gamestate?
 - unit vision considers center of cell, some cells that are partly visible are hidden - fix?
-- frame drop and lagging?
 - smooth move and animations
 
 ## AI ##

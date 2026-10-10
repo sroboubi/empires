@@ -98,10 +98,10 @@ export function initRenderer(canvas) {
 
   // 2. Setup Camera
   camera = new THREE.PerspectiveCamera(
-    45,
+    CONFIG.CAMERA_FOV,
     window.innerWidth / window.innerHeight,
-    0.1,
-    1000
+    CONFIG.CAMERA_ZOOM_CLOSE,
+    CONFIG.CAMERA_ZOOM_FAR
   );
   camera.position.set(0, 10, 12);
 
