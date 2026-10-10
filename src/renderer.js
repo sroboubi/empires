@@ -14,10 +14,7 @@ export let stats = null;
 let panClampRings = Infinity; // camera-target pan limit in hex rings; set per map by setMapCameraLimits()
 let shadowStaticBound = 600; // pop-free max shadow half-extent; set per map by setMapCameraLimits()
 let shadowFitHalfExtent = -1; // last dynamically fitted half-extent (-1 = not yet fitted)
-let shadowFitSkyHit = false; // last fit fell back to static bound (some view ray hit the sky)
-let shadowDebugHelper = null;
-let shadowDebugOverlay = null;
-const _shadowDbgVec = new THREE.Vector3(); // scratch for the shadow debug overlay
+const _tiltOffset = new THREE.Vector3(); // scratch for zoom-dependent tilt limit
 const _fitNdc = new THREE.Vector3();
 const _fitWorld = new THREE.Vector3();
 const _fitDir = new THREE.Vector3();
@@ -159,15 +156,6 @@ export function initRenderer(canvas) {
   } else {
     console.log(`[shadow] map size: ${CONFIG.SHADOW_MAP_SIZE}`);
   }
-  if (CONFIG.SHADOW_DEBUG) {
-    shadowDebugHelper = new THREE.CameraHelper(dirLight.shadow.camera);
-    scene.add(shadowDebugHelper);
-    shadowDebugOverlay = document.createElement('div');
-    shadowDebugOverlay.style.cssText = 'position:fixed;top:8px;left:8px;z-index:9999;' +
-      'background:rgba(0,0,0,0.65);color:#ffd75e;font:12px monospace;padding:6px 8px;' +
-      'border-radius:4px;pointer-events:none;white-space:pre;';
-    document.body.appendChild(shadowDebugOverlay);
-  }
   dirLight.shadow.bias = -0.0001;
   dirLight.shadow.normalBias = 0.02;
 
@@ -287,7 +275,8 @@ export function initRenderer(canvas) {
  */
 export function setMapCameraLimits(mapRings) {
   // Ring count -> world units: pointy-top axial layout, max |x| = sqrt(3) * HEX_SIZE * rings.
-  const worldRadius = mapRings * Math.sqrt(3) * CONFIG.HEX_SIZE;
+  const ringWorld = Math.sqrt(3) * CONFIG.HEX_SIZE;
+  const worldRadius = mapRings * ringWorld;
   panClampRings = mapRings + CONFIG.CAMERA_PAN_MARGIN_RINGS;
   const maxDistance = Math.max(CONFIG.CAMERA_ZOOM_MIN, worldRadius * CONFIG.CAMERA_ZOOM_SCALE);
   if (controls) {
@@ -303,7 +292,7 @@ export function setMapCameraLimits(mapRings) {
   if (dirLight) {
     // Worst map-point-to-target distance: the target roams a hex region of panClampRings
     // rings and map corners sit at mapRings rings (corner-direction ring spacing).
-    const worstCase = (panClampRings + mapRings) * Math.sqrt(3) * CONFIG.HEX_SIZE;
+    const worstCase = (panClampRings + mapRings) * ringWorld;
     const d = Math.max(60, worstCase * CONFIG.SHADOW_CAMERA_SCALE);
     shadowStaticBound = d;
     dirLight.shadow.camera.left = -d;
@@ -347,18 +336,15 @@ function clampCameraTarget() {
 }
 
 /**
- * Limits how low the camera can tilt based on its height above ground (the target
- * stays at y~=0, so camera.position.y is the height). The lower the camera gets,
- * the less it may tilt toward the horizon. This is self-correcting: the ceiling
- * lowers as the camera descends, so the dirt-skimming horizon stare is unreachable
- * at any zoom level. It also keeps the dynamic shadow fit in its crisp regime
- * instead of falling back to the blurry static bound.
+ * Limits how low the camera can tilt based on zoom level: when zoomed in there is
+ * no reason to stare at the horizon (it also keeps the dynamic shadow fit in its
+ * crisp regime instead of falling back to the blurry static bound).
  */
 function updateTiltLimit() {
   if (!controls) return;
-  const h = camera.position.y;
-  const t = THREE.MathUtils.clamp(
-    (h - CONFIG.CAMERA_TILT_H_CLOSE) / (CONFIG.CAMERA_TILT_H_FAR - CONFIG.CAMERA_TILT_H_CLOSE), 0, 1);
+  const maxD = controls.maxDistance || 100;
+  const dist = _tiltOffset.copy(camera.position).sub(controls.target).length();
+  const t = THREE.MathUtils.clamp((dist - maxD * 0.25) / (maxD * 0.65), 0, 1);
   controls.maxPolarAngle = THREE.MathUtils.lerp(CONFIG.CAMERA_TILT_CLOSE, CONFIG.CAMERA_TILT_FAR, t);
 }
 
@@ -416,7 +402,6 @@ function fitShadowCameraToView() {
   if (Math.abs(_fitLight.x) > maxAbs) maxAbs = Math.abs(_fitLight.x);
   if (Math.abs(_fitLight.y) > maxAbs) maxAbs = Math.abs(_fitLight.y);
 
-  shadowFitSkyHit = skyHit;
   const need = skyHit ? shadowStaticBound : maxAbs;
   const d = Math.min(shadowStaticBound, Math.max(48, Math.ceil((need * 1.15) / 16) * 16));
   if (d !== shadowFitHalfExtent) {
@@ -746,7 +731,7 @@ function animate() {
       camera.position.copy(controls.target).add(offset);
     }
 
-    // Height-dependent tilt limit (set before update so OrbitControls enforces it)
+    // Zoom-dependent tilt limit (set before update so OrbitControls enforces it)
     updateTiltLimit();
 
     controls.update();
@@ -768,14 +753,6 @@ function animate() {
 
     // Fit the shadow camera to the current view (zoom + tilt aware) for crisp shadows
     fitShadowCameraToView();
-    if (shadowDebugHelper) {
-      shadowDebugHelper.update();
-      const _sd = _shadowDbgVec.copy(camera.position).sub(controls.target);
-      const _pol = Math.acos(THREE.MathUtils.clamp(_sd.y / _sd.length(), -1, 1)) * 180 / Math.PI;
-      shadowDebugOverlay.textContent =
-        `shadow fit d=${shadowFitHalfExtent} static=${Math.round(shadowStaticBound)} skyFallback=${shadowFitSkyHit}\n` +
-        `cam dist=${_sd.length().toFixed(1)} polar=${_pol.toFixed(1)}deg mapSize=${CONFIG.SHADOW_MAP_SIZE}`;
-    }
   }
 
   // Update animated effects
