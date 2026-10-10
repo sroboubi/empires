@@ -12,7 +12,6 @@ export let scene, camera, renderer, controls;
 export let dirLight, hemiLight, sky, sunMesh;
 export let stats = null;
 let panClampRings = Infinity; // camera-target pan limit in hex rings; set per map by setMapCameraLimits()
-const _tiltOffset = new THREE.Vector3(); // scratch for zoom-dependent tilt limit
 let shadowStaticBound = 600; // pop-free max shadow half-extent; set per map by setMapCameraLimits()
 let shadowFitHalfExtent = -1; // last dynamically fitted half-extent (-1 = not yet fitted)
 const _fitNdc = new THREE.Vector3();
@@ -331,15 +330,18 @@ function clampCameraTarget() {
 }
 
 /**
- * Limits how low the camera can tilt based on zoom level: when zoomed in there is
- * no reason to stare at the horizon (it also keeps the dynamic shadow fit in its
- * crisp regime instead of falling back to the blurry static bound).
+ * Limits how low the camera can tilt based on its height above ground (the target
+ * stays at y~=0, so camera.position.y is the height). The lower the camera gets,
+ * the less it may tilt toward the horizon. This is self-correcting: the ceiling
+ * lowers as the camera descends, so the dirt-skimming horizon stare is unreachable
+ * at any zoom level. It also keeps the dynamic shadow fit in its crisp regime
+ * instead of falling back to the blurry static bound.
  */
 function updateTiltLimit() {
   if (!controls) return;
-  const maxD = controls.maxDistance || 100;
-  const dist = _tiltOffset.copy(camera.position).sub(controls.target).length();
-  const t = THREE.MathUtils.clamp((dist - maxD * 0.25) / (maxD * 0.65), 0, 1);
+  const h = camera.position.y;
+  const t = THREE.MathUtils.clamp(
+    (h - CONFIG.CAMERA_TILT_H_CLOSE) / (CONFIG.CAMERA_TILT_H_FAR - CONFIG.CAMERA_TILT_H_CLOSE), 0, 1);
   controls.maxPolarAngle = THREE.MathUtils.lerp(CONFIG.CAMERA_TILT_CLOSE, CONFIG.CAMERA_TILT_FAR, t);
 }
 
@@ -728,7 +730,7 @@ function animate() {
       camera.position.copy(controls.target).add(offset);
     }
 
-    // Zoom-dependent tilt limit (set before update so OrbitControls enforces it)
+    // Height-dependent tilt limit (set before update so OrbitControls enforces it)
     updateTiltLimit();
 
     controls.update();
