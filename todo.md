@@ -27,7 +27,7 @@
 ## AI ##
 
 - *** simplify system message and prompt based on thinking output from local model
-- Build possible LLM actions purely based on ai/utils.js and entity attributes instead of using the entity controller.
+- convert system and user prompt to simplified markdown as per gemini recommendation
 
 ## BUGS ##
 
