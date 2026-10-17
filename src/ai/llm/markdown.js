@@ -1,0 +1,313 @@
+/**
+ * Markdown serializers for LLM prompts.
+ *
+ * Design principles (from prompt-engineering review):
+ * - Data-driven: derive everything from the manifest / game state. No hardcoded
+ *   unit names, no "village ONLY" special cases.
+ * - Condensed: group related info, omit anything not applicable.
+ * - The engine pre-computes; the LLM just decides. Derived insights (runout
+ *   warnings, relative positions, per-unit capabilities) are inlined so the
+ *   model never does relational lookups or game math.
+ */
+
+const IMPASSABLE = 1e1000;
+const WATER_TERRAINS = ['ShallowWater', 'DeepWater', 'Ocean'];
+
+/**
+ * Converts the entity manifest to high-density Markdown for the system prompt.
+ * @param {Array<Object>} entities - Raw entity definitions (definitions/entities.json).
+ * @returns {string} Markdown catalog.
+ */
+export function manifestToMarkdown(entities) {
+  // Structures = anything buildable; the rest are units. Data-driven categorization.
+  const buildableNames = new Set();
+  for (const e of entities) {
+    for (const b of e.buildables || []) buildableNames.add(b);
+  }
+  const units = entities.filter(e => !buildableNames.has(e.name));
+  const structures = entities.filter(e => buildableNames.has(e.name));
+
+  const lines = [];
+  if (units.length) {
+    lines.push('## UNITS');
+    for (const e of units) lines.push(entityToMarkdown(e));
+  }
+  if (structures.length) {
+    lines.push('## STRUCTURES');
+    for (const e of structures) lines.push(entityToMarkdown(e));
+  }
+  return lines.join('\n');
+}
+
+function entityToMarkdown(e) {
+  const lines = [`### ${e.name.toUpperCase()}`];
+  if (e.description) lines.push(`* **Role**: ${e.description}`);
+
+  // Commands derived from capabilities, not hardcoded per unit.
+  const commands = [];
+  if ((e.buildables || []).length) commands.push('Build');
+  if ((e.repairables || []).length) commands.push('Repair');
+  if (e.movement) commands.push('Explore');
+  if (e.damage) {
+    const range = e.range ? `, range ${e.range.minCells}-${e.range.maxCells}` : '';
+    commands.push(`Attack (${e.damage.value} ${e.damage.type}${range})`);
+  }
+  if (commands.length) lines.push(`* **Commands**: ${commands.join(', ')}`);
+
+  if ((e.buildables || []).length) lines.push(`* **Builds**: ${(e.buildables || []).join(', ')}`);
+  if ((e.repairables || []).length) lines.push(`* **Repairs**: ${(e.repairables || []).join(', ')}`);
+
+  const cost = condenseResources(e.spawnCost);
+  if (cost) lines.push(`* **Cost**: ${cost}`);
+  const upkeep = condenseResources(e.maintenance);
+  if (upkeep) lines.push(`* **Upkeep**: ${upkeep}`);
+  const yields = condenseYields(e.yields);
+  if (yields) lines.push(`* **Yields**: ${yields}`);
+  const score = condenseScore(e.score);
+  if (score) lines.push(`* **Score**: ${score}`);
+
+  const terrain = describeTerrainAccess(e.movement);
+  if (terrain) lines.push(`* **Terrain**: ${terrain}.`);
+
+  return lines.join('\n');
+}
+
+/** "50 food, 10 gold, 2 gems" — omit empty. */
+function condenseResources(obj) {
+  if (!obj) return '';
+  const parts = Object.entries(obj)
+    .filter(([, v]) => v)
+    .map(([k, v]) => `${v} ${k}`);
+  return parts.join(', ');
+}
+
+/** "+20 food, +12 gold" — omit empty. */
+function condenseYields(obj) {
+  if (!obj) return '';
+  const parts = Object.entries(obj)
+    .filter(([, v]) => v)
+    .map(([k, v]) => `+${v} ${k}`);
+  return parts.join(', ');
+}
+
+/** "+1 military, +2 economic" — omit zero/empty. */
+function condenseScore(obj) {
+  if (!obj) return '';
+  const parts = Object.entries(obj)
+    .filter(([, v]) => v)
+    .map(([k, v]) => `+${v} ${k}`);
+  return parts.join(', ');
+}
+
+/**
+ * Derives a terrain-access summary from movement.terrainCostScale.
+ * "Land only" iff all known water terrains are impassable — data-driven,
+ * not a hardcoded unit list.
+ */
+function describeTerrainAccess(movement) {
+  if (!movement) return '';
+  const scale = movement.terrainCostScale || {};
+  const waterBlocked = WATER_TERRAINS.every(t => (scale[t] ?? 1) >= IMPASSABLE);
+  if (waterBlocked && Object.keys(scale).length) return 'Land only (cannot enter water)';
+
+  const blocked = Object.keys(scale).filter(t => (scale[t] ?? 1) >= IMPASSABLE);
+  const slow = Object.entries(scale)
+    .filter(([, v]) => v > 1 && v < IMPASSABLE)
+    .map(([k, v]) => `${k} ${v}x`);
+  const fast = Object.entries(scale)
+    .filter(([, v]) => v < 1 && v > 0)
+    .map(([k, v]) => `${k} ${v}x`);
+  const parts = [];
+  if (blocked.length) parts.push(`cannot enter ${blocked.join(', ')}`);
+  if (slow.length) parts.push(`slow on ${slow.join(', ')}`);
+  if (fast.length) parts.push(`fast on ${fast.join(', ')}`);
+  return parts.join('; ');
+}
+
+/**
+ * Converts a per-turn game state summary to Markdown for the user prompt.
+ * @param {Object} summary - Output of Harness.summarizeGameState().
+ * @param {Array<Object>} manifestEntities - Raw entity definitions, for per-unit capabilities.
+ * @returns {string} Markdown snapshot.
+ */
+export function serializeStateToMarkdown(summary, manifestEntities = []) {
+  const byName = new Map((manifestEntities || []).map(e => [e.name, e]));
+  const lines = [];
+
+  const totalOrders = summary.orders;
+  lines.push(`## Turn ${summary.turn} — ${totalOrders} order${totalOrders === 1 ? '' : 's'} remaining`);
+  lines.push('');
+
+  // Resources: grouped, condensed. Runout warnings only when actually depleting.
+  const res = summary.resources || {};
+  const stock = res.stock || {};
+  const net = res.netIncome || {};
+  const turnsLeft = res.turnsRemaining || {};
+  const resLines = [];
+  for (const [name, amount] of Object.entries(stock)) {
+    const delta = net[name] ?? 0;
+    const deltaStr = delta > 0 ? ` (+${delta}/turn)` : delta < 0 ? ` (${delta}/turn)` : '';
+    let warn = '';
+    if (delta < 0 && turnsLeft[name] !== undefined && turnsLeft[name] !== Infinity) {
+      warn = turnsLeft[name] <= 3 ? ` — CRITICAL: runs out in ${turnsLeft[name]} turns!` : ` — runs out in ${turnsLeft[name]} turns`;
+    }
+    resLines.push(`* **${capitalize(name)}**: ${amount}${deltaStr}${warn}`);
+  }
+  if (resLines.length) {
+    lines.push('### Resources');
+    lines.push(...resLines);
+    lines.push('');
+  }
+
+  // Score
+  if (summary.score !== undefined && summary.score !== null) {
+    const s = summary.score;
+    const scoreStr = typeof s === 'object'
+      ? Object.entries(s).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(', ')
+      : s;
+    if (scoreStr) lines.push(`**Score**: ${scoreStr}\n`);
+  }
+
+  // Entities: active first, with relative position + inline capabilities.
+  const entities = summary.entities || [];
+  const active = entities.filter(e => (e.actionPoints ?? 0) > 0);
+  const exhausted = entities.filter(e => (e.actionPoints ?? 0) <= 0);
+
+  if (active.length) {
+    lines.push(`### Active Entities (${active.length})`);
+    for (const e of active) lines.push(entityStateToMarkdown(e, byName));
+    lines.push('');
+  }
+  if (exhausted.length) {
+    lines.push(`### Exhausted / Inactive (${exhausted.length})`);
+    for (const e of exhausted) lines.push(entityStateToMarkdown(e, byName, true));
+    lines.push('');
+  }
+
+  // Opponents (condensed)
+  const opponents = summary.opponents || {};
+  const oppNames = Object.keys(opponents);
+  if (oppNames.length) {
+    lines.push(`### Opponents (${oppNames.length})`);
+    for (const name of oppNames) {
+      const opp = opponents[name];
+      const count = (opp.entities || []).length;
+      lines.push(`* **${name}**: ${count} visible entit${count === 1 ? 'y' : 'ies'}` +
+        (opp.score !== undefined ? `, score ${opp.score}` : ''));
+    }
+    lines.push('');
+  }
+
+  return lines.join('\n').trim();
+}
+
+function entityStateToMarkdown(e, byName, brief = false) {
+  const def = byName.get(e.name);
+  const hp = (e.health !== undefined && e.maxHealth !== undefined) ? ` ${e.health}/${e.maxHealth} HP` : '';
+  const ap = e.actionPoints !== undefined ? `, ${e.actionPoints} AP` : '';
+  const pos = describePosition(e);
+
+  if (brief) {
+    const bits = [];
+    if (pos) bits.push(`at ${pos}`);
+    if (hp) bits.push(hp.trim());
+    if (ap) bits.push(ap.trim().replace(/^, /, ''));
+    return `* **${e.id}** (${capitalize(e.name)})${bits.length ? ' — ' + bits.join(', ') : ''}`;
+  }
+
+  const parts = [`* **${e.id}** (${capitalize(e.name)})`];
+  const details = [];
+  if (pos) details.push(pos);
+  if (hp) details.push(hp.trim());
+  if (ap) details.push(ap.trim().replace(/^, /, ''));
+  if (details.length) parts.push(`  * ${details.join(' | ')}`);
+
+  // Inline capabilities — data-driven from the manifest. This is what stops
+  // the settler/farm hallucination: the model sees "Builds: village" directly.
+  if (def) {
+    const caps = [];
+    if ((def.buildables || []).length) caps.push(`Builds: ${(def.buildables || []).join(', ')}`);
+    if ((def.repairables || []).length) caps.push(`Repairs: ${(def.repairables || []).join(', ')}`);
+    if (caps.length) parts.push(`  * ${caps.join('; ')}`);
+  }
+  return parts.join('\n');
+}
+
+/** "3 NE of start", "at start", or "" — relative, no raw coordinates. */
+function describePosition(e) {
+  const fs = e.fromStart;
+  if (!fs) return '';
+  if (!fs.distance) return 'at start';
+  return `${fs.distance} ${fs.direction} of start`;
+}
+
+function capitalize(s) {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
+
+/**
+ * Vague terrain/topology summary for the LLM.
+ * Groups contiguous explored cells by terrain into regions and describes each
+ * as direction + distance + approximate size. Deliberately low-info: a vague
+ * idea of the terrain beats nothing, and beats coordinate soup.
+ *
+ * @param {Object} gameState
+ * @param {Object} player - needs exploredCells (Set of "q,r") and startCoord.
+ * @returns {string} Markdown section (empty string if nothing to report).
+ */
+export function summarizeTerrain(gameState, player) {
+  if (!gameState?.hexGrid || !player?.exploredCells?.size) return '';
+
+  const explored = player.exploredCells;
+  const grid = gameState.hexGrid;
+  const start = player.startCoord;
+
+  // Flood-fill contiguous regions by terrain name over explored cells.
+  const visited = new Set();
+  const regions = [];
+  for (const key of explored) {
+    if (visited.has(key)) continue;
+    const [q, r] = key.split(',').map(Number);
+    const cell = grid.getCell(q, r);
+    if (!cell) continue;
+    const terrain = cell.terrain?.name || 'Unknown';
+
+    // BFS
+    const queue = [key];
+    visited.add(key);
+    let size = 0, sumQ = 0, sumR = 0;
+    while (queue.length) {
+      const k = queue.pop();
+      const [cq, cr] = k.split(',').map(Number);
+      size++; sumQ += cq; sumR += cr;
+      for (const [dq, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, -1], [-1, 1]]) {
+        const nk = `${cq + dq},${cr + dr}`;
+        if (!explored.has(nk) || visited.has(nk)) continue;
+        const nc = grid.getCell(cq + dq, cr + dr);
+        if (!nc || (nc.terrain?.name || 'Unknown') !== terrain) continue;
+        visited.add(nk);
+        queue.push(nk);
+      }
+    }
+    regions.push({ terrain, size, cq: sumQ / size, cr: sumR / size });
+  }
+
+  // Keep only significant regions; sort biggest first.
+  const significant = regions.filter(r => r.size >= 8).sort((a, b) => b.size - a.size).slice(0, 6);
+  if (!significant.length) return '';
+
+  const lines = ['### Terrain Overview (explored)'];
+  for (const region of significant) {
+    let rel = '';
+    if (start && grid.directionTo) {
+      try {
+        const dir = grid.directionTo(start, { q: Math.round(region.cq), r: Math.round(region.cr) }, true).fromSource;
+        const dist = Math.round(Math.hypot(region.cq - start.q, region.cr - start.r));
+        rel = dist === 0 ? 'at your start' : `${dist} ${dir} of start`;
+      } catch { /* keep rel empty */ }
+    }
+    const kind = region.size >= 40 ? 'expanse' : region.size >= 20 ? 'region' : 'patch';
+    lines.push(`* **${region.terrain}** ${kind}${rel ? ` ${rel}` : ''}, ~${region.size} cells`);
+  }
+  return lines.join('\n');
+}

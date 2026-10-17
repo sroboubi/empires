@@ -1,6 +1,7 @@
 [
   {
     "name": "barbarian",
+    "description": "Aggressive melee raider. Strong slashing damage; best used to harass enemies, not to hold ground.",
     "modelUrl": "./assets/units/barbarian.glb",
     "size": 1.5,
     "health": 300,
@@ -57,6 +58,7 @@
   },
   {
     "name": "barbarianPrincess",
+    "description": "Fast barbarian leader. High mobility with solid damage; use for flanking and chasing down weak units.",
     "modelUrl": "./assets/units/barbarianPrincess.glb",
     "size": 1.4,
     "health": 250,
@@ -113,6 +115,7 @@
   },
   {
     "name": "barbarianChief",
+    "description": "Heavy barbarian bruiser. Devastating slashing damage but slow; keep at the front of an assault.",
     "modelUrl": "./assets/units/barbarianChief.glb",
     "size": 1.7,
     "health": 400,
@@ -169,6 +172,7 @@
   },
   {
     "name": "pikeman",
+    "description": "Defensive anti-cavalry infantry. Excels against mounted units; hold in defensive positions.",
     "actionPoints": 5,
     "maxActionPoints": 5,
     "armor": {
@@ -213,6 +217,7 @@
   },
   {
     "name": "scout",
+    "description": "Fast reconnaissance unit. Very high mobility but weak in combat; use to explore fog, not to fight.",
     "actionPoints": 8,
     "maxActionPoints": 8,
     "armor": {
@@ -256,6 +261,7 @@
   },
   {
     "name": "medic",
+    "description": "Support healer. Repairs damaged friendly units; weak in combat - keep behind the front line.",
     "actionPoints": 5,
     "maxActionPoints": 5,
     "armor": {
@@ -314,6 +320,7 @@
   },
   {
     "name": "swordsman",
+    "description": "Core melee infantry. Balanced slashing damage; the backbone of your army.",
     "modelUrl": "./assets/units/swordsman.glb",
     "size": 1.2,
     "health": 200,
@@ -368,6 +375,7 @@
   },
   {
     "name": "knight",
+    "description": "Heavy shock cavalry. High blunt damage; best used for breaking enemy lines.",
     "modelUrl": "./assets/units/knight.glb",
     "size": 1.3,
     "health": 250,
@@ -425,6 +433,7 @@
   },
   {
     "name": "worker",
+    "description": "Primary economic builder. Builds and repairs economic structures; weak in combat - keep protected.",
     "modelUrl": "./assets/units/worker.glb",
     "size": 1.2,
     "health": 100,
@@ -496,6 +505,7 @@
   },
   {
     "name": "settler",
+    "description": "Empire expansion unit. Builds villages ONLY; weak in combat - escort to a good site and found a village.",
     "modelUrl": "./assets/units/settler.glb",
     "size": 1.5,
     "health": 150,
@@ -553,6 +563,7 @@
   },
   {
     "name": "bowman",
+    "description": "Ranged attacker. Deals piercing damage from 1-3 cells away; keep at range, avoid melee.",
     "modelUrl": "./assets/units/bowman.glb",
     "size": 1.3,
     "health": 150,
@@ -612,6 +623,7 @@
   },
   {
     "name": "horseman",
+    "description": "Fast cavalry raider. High mobility and piercing damage; ideal for flanking and hit-and-run attacks.",
     "modelUrl": "./assets/units/horseman.glb",
     "size": 1.5,
     "health": 200,
@@ -669,6 +681,7 @@
   },
   {
     "name": "assassin",
+    "description": "Skirmisher. Poison damage weakens targets over time; best used to pick off high-value targets.",
     "modelUrl": "./assets/units/assassin.glb",
     "size": 1.1,
     "health": 100,
@@ -725,6 +738,7 @@
   },
   {
     "name": "village",
+    "description": "Primary population center. Spawns basic units and generates income; the foundation of your empire.",
     "modelUrl": "./assets/constructs/village.glb",
     "health": 500,
     "maxHealth": 500,
@@ -776,6 +790,7 @@
   },
   {
     "name": "temple",
+    "description": "Elite unit producer. Spawns knight, medic, and assassin; protect it.",
     "modelUrl": "./assets/constructs/temple.glb",
     "health": 400,
     "maxHealth": 400,
@@ -821,6 +836,7 @@
   },
   {
     "name": "tower",
+    "description": "Defensive structure. Attacks enemies at range 2-4; place at chokepoints and borders.",
     "modelUrl": "./assets/constructs/tower.glb",
     "size": 2,
     "health": 500,
@@ -878,6 +894,7 @@
   },
   {
     "name": "forge",
+    "description": "Industrial structure. Produces iron each turn; an economic asset with no combat ability.",
     "modelUrl": "./assets/constructs/forge.glb",
     "health": 300,
     "maxHealth": 300,
@@ -914,6 +931,7 @@
   },
   {
     "name": "lumberMill",
+    "description": "Economic structure. Produces wood each turn; keep protected.",
     "modelUrl": "./assets/constructs/lumberMill.glb",
     "health": 300,
     "maxHealth": 300,
@@ -949,6 +967,7 @@
   },
   {
     "name": "mine",
+    "description": "Economic structure. Produces gold and gems each turn; a high-value target - defend it.",
     "modelUrl": "./assets/constructs/mine.glb",
     "health": 400,
     "maxHealth": 400,
@@ -986,6 +1005,7 @@
   },
   {
     "name": "farm",
+    "description": "Economic structure. Produces food each turn; essential for feeding your army.",
     "modelUrl": "./assets/constructs/farm.glb",
     "health": 200,
     "maxHealth": 200,

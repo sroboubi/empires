@@ -3,6 +3,7 @@ import { LLMClient } from "./client.js";
 import responseSchema from './response.schema.json' with { type: 'json' };
 import { attack, support, build, explore, onActionDone } from "../utils.js";
 import { HexGrid } from '../../hexGrid.js';
+import { manifestToMarkdown, serializeStateToMarkdown, summarizeTerrain } from "./markdown.js";
 
 export class Harness extends BaseManager {
     constructor(player, gameState, controller) {
@@ -36,14 +37,19 @@ export class Harness extends BaseManager {
 
         while (attempts > 0) {
             if (lastResponseError) attempts--;
-            const userContent = `\n\`\`\`json\n${JSON.stringify({
-                state: this.summarizeGameState(),
-                lastResponseError: lastResponseError ? {
-                    message: lastResponseError,
-                    failedResponse: response
-                } : null,
-                turnResponseLog: turnResponseLog.length > 0 ? turnResponseLog : null
-            }, (key, value) => { return value === null ? undefined : value; }, 2)}\n\`\`\``;
+            const manifestEntities = this.gameState.manifestData?.entities || this.gameState.manifestData || [];
+            const manifestList = Array.isArray(manifestEntities) ? manifestEntities : Object.values(manifestEntities);
+            const stateMd = serializeStateToMarkdown(this.summarizeGameState(), manifestList);
+            const terrainMd = summarizeTerrain(this.gameState, this.player);
+            let userContent = stateMd;
+            if (terrainMd) userContent += '\n\n' + terrainMd;
+            if (lastResponseError) {
+                userContent += `\n\n### Last Action Failed\n${lastResponseError}` + (response ? `\nFailed response: ${JSON.stringify(response)}` : '');
+            }
+            if (turnResponseLog.length > 0) {
+                userContent += `\n\n### Actions Taken This Turn (${turnResponseLog.length})\n` +
+                    turnResponseLog.map((r, i) => `${i + 1}. ${r.command || r.type} (${r.entityId || ''})`).join('\n');
+            }
 
             console.debug("system prompt:", this.llmClient.systemPrompt);
             console.debug("user content:", userContent);
@@ -56,7 +62,7 @@ export class Harness extends BaseManager {
                 return;
             }
 
-            if (response.type == "COMMAND") {
+            if (response.type === "COMMAND") {
                 if (this.player.orders <= 0) {
                     lastResponseError = `You have 0 orders remaining. You cannot execute commands. You must respond with type: "END_TURN" and provide your strategic note.`;
                     continue;
@@ -66,7 +72,7 @@ export class Harness extends BaseManager {
                 if (!entity) {
                     lastResponseError = `Actor entity not found: ${response.entityId}`;
                     continue;
-                } else if (entity.owner != this.player) {
+                } else if (entity.owner !== this.player) {
                     lastResponseError = `Entity ${response.entityId} does not belong to you`;
                     continue;
                 }
@@ -121,11 +127,11 @@ export class Harness extends BaseManager {
                 await onActionDone(this.gameState);
                 lastResponseError = null;
                 turnResponseLog.push(response);
-            } else if (response.type == "CHAT") {
+            } else if (response.type === "CHAT") {
                 // TODO
                 lastResponseError = `CHAT not supported yet`;
                 continue;
-            } else if (response.type == "END_TURN") {
+            } else if (response.type === "END_TURN") {
                 this.player.addHistoryEntry(this.gameState.currentRound, { category: 'note', details: response.note });
                 return;
             } else {
@@ -141,7 +147,8 @@ export class Harness extends BaseManager {
      * @returns {string} The formatted system prompt string.
      */
     async buildSystemPrompt() {
-        const manifestJson = JSON.stringify(this.summarizeManifest(this.gameState.manifestData || {}), (key, value) => { return value === null ? undefined : value; }, 2);
+        const manifestEntities = this.gameState.manifestData?.entities || this.gameState.manifestData || [];
+        const manifestMd = manifestToMarkdown(Array.isArray(manifestEntities) ? manifestEntities : Object.values(manifestEntities));
         const absScoreToWin = this.gameState.settings?.winCondition?.absoluteScore || 1000;
         const relScoreToWin = this.gameState.settings?.winCondition?.relativeScore || 2;
 
@@ -155,7 +162,7 @@ export class Harness extends BaseManager {
             .replace('${DESCRIPTION}', this.player.description ? `You are described as: ${this.player.description}` : '')
             .replace('${ABS_SCORE_TO_WIN}', absScoreToWin)
             .replace('${REL_SCORE_TO_WIN}', relScoreToWin)
-            .replace('${MANIFEST}', manifestJson);
+            .replace('${MANIFEST}', manifestMd);
     }
 
     /**
@@ -203,36 +210,17 @@ export class Harness extends BaseManager {
         const summary = {
             id: entity.id,
             name: entity.name,
-            fromStart: {
+            fromStart: entity.cell ? {
                 direction: this.gameState.hexGrid.directionTo(this.player.startCoord, entity.cell, true).fromSource,
                 distance: HexGrid.distance(this.player.startCoord, entity.cell)
-            },
-            terrain: entity.cell.terrain?.name,
+            } : null,
+            terrain: entity.cell?.terrain?.name,
             health: entity.health,
             maxHealth: entity.maxHealth,
             actionPoints: entity.actionPoints,
             damage: entity.damage,
             armor: entity.armor
         };
-        return summary;
-    }
-
-    summarizeManifest(manifest) {
-        const summary = { entities: {}, terrains: {} };
-        const entitiesObj = manifest.entities || {};
-        Object.entries(entitiesObj).forEach(([name, entity]) => {
-            const { damage, movement, spawnCost, maintenance, buildables, repairables, score, yields } = entity;
-            const commands = [];
-            if (movement !== undefined) commands.push("Explore");
-            if (buildables?.length > 0) commands.push("Build");
-            if (repairables?.length > 0) commands.push("Repair");
-            if (damage !== undefined) commands.push("Attack");
-            summary.entities[name] = { commands, damage, movement, spawnCost, maintenance, buildables, repairables, score, yields };
-        });
-        const terrainsList = Array.isArray(manifest.terrains) ? manifest.terrains : Object.values(manifest.terrains || {});
-        terrainsList.forEach(terrain => {
-            summary.terrains[terrain.name] = { movementCost: terrain.movementCost, height: terrain.height };
-        });
         return summary;
     }
 
