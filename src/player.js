@@ -55,7 +55,7 @@ export class Player {
     this.aiManager = null;
     if (this.controller) {
       const llmConfig = gameState?.settings?.llm;
-      if (llmConfig?.apiKey && llmConfig?.orderedModels?.length > 0) {
+      if (llmConfig?.orderedModels?.length > 0) {
         this.aiManager = new Harness(this, gameState, this.controller);
       } else {
         this.aiManager = new SmartManager(this, gameState, this.controller);

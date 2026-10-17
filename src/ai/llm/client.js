@@ -4,10 +4,10 @@ export class LLMClient {
     /**
      * @param {Object} options
      * @param {string} options.systemPrompt - System instructions.
-     * @param {Object} [options.responseSchema] - Expected JSON schema.
-     * @param {string} [options.apiKey=''] - Optional API key.
-     * @param {string} [options.baseUrl='http://localhost:1234/v1/chat/completions'] - Endpoint URL.
-     * @param {string|string[]} [options.orderedModels=['local-model']] - Model ID(s).
+     * @param {Object|null} options.responseSchema - Expected JSON schema.
+     * @param {string|null} options.apiKey - API key.
+     * @param {string} options.baseUrl - Endpoint URL.
+     * @param {string|string[]} options.orderedModels - Model ID(s).
      * @param {number} [options.maxRetries=2] - Schema error feedback retries.
      * @param {number} [options.timeoutMs=15000] - Hard timeout limit in ms.
      * @param {Object} [options.generationConfig] - Hyperparameters (temperature, maxOutputTokens, thinkingBudget).
@@ -15,9 +15,9 @@ export class LLMClient {
     constructor({
         systemPrompt,
         responseSchema = null,
-        apiKey = '',
-        baseUrl = 'http://localhost:1234/v1/chat/completions',
-        orderedModels = ['local-model'],
+        apiKey,
+        baseUrl,
+        orderedModels,
         maxRetries = 2,
         timeoutMs = 15000,
         generationConfig = {}
@@ -25,7 +25,7 @@ export class LLMClient {
         this.systemPrompt = systemPrompt;
         this.responseSchema = responseSchema;
         this.apiKey = apiKey;
-        this.baseUrl = baseUrl;
+        this.baseUrl = baseUrl.trim().replace(/\/+$/, '') + '/chat/completions';
         this.orderedModels = Array.isArray(orderedModels) ? orderedModels : [orderedModels];
         this.maxRetries = maxRetries;
         this.timeoutMs = timeoutMs;
@@ -59,7 +59,14 @@ export class LLMClient {
             };
 
             if (this.responseSchema) {
-                payload.response_format = { type: 'json_object' };
+                payload.response_format = {
+                    type: 'json_schema',
+                    json_schema: {
+                        name: 'game_action_response',
+                        strict: true,
+                        schema: this.responseSchema
+                    }
+                };
             }
 
             if (this.generationConfig.thinkingBudget > 0) {

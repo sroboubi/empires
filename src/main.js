@@ -40,6 +40,7 @@ let pointerDownTime = 0;
 // Local setup state before starting game
 let setupPlayers = [];
 let setupStartingUnits = {};
+let setupLlmBaseUrl = 'https://openrouter.ai/api/v1';
 let setupLlmApiKey = '';
 let setupLlmModels = []; // Array<{ id: string, name: string, enabled: boolean }>
 
@@ -233,10 +234,16 @@ function openSetupModal(canClose = true) {
 
   // Restore LLM configuration from session storage if available
   try {
-    const savedLlm = sessionStorage.getItem('empires_openrouter_config') || sessionStorage.getItem('empires_llm_config');
+    const savedLlm = sessionStorage.getItem('empires_llm_config') || sessionStorage.getItem('empires_openrouter_config');
     if (savedLlm) {
       const parsed = JSON.parse(savedLlm);
-      if (parsed.apiKey) {
+      if (parsed.baseUrl) {
+        setupLlmBaseUrl = parsed.baseUrl;
+      }
+      const baseUrlInput = document.getElementById('setup-llm-base-url');
+      if (baseUrlInput) baseUrlInput.value = setupLlmBaseUrl;
+
+      if (parsed.apiKey !== undefined) {
         setupLlmApiKey = parsed.apiKey;
         const keyInput = document.getElementById('setup-llm-api-key');
         if (keyInput) keyInput.value = setupLlmApiKey;
@@ -529,19 +536,24 @@ function updateAllRangeFills() {
 }
 
 /* --------------------------------------------------------------------------
-   LLM SETUP UI: OpenRouter API Key, fetch models, priority selection & drag-and-drop
+   LLM SETUP UI: OpenAI-Compatible Interface, API Key, fetch models & priority ordering
    -------------------------------------------------------------------------- */
 
-const LLM_MAX_SELECTED = 3;
 let draggedModelIndex = null;
 let llmSearchQuery = '';
 
+function getModelsUrl(baseUrl) {
+  return baseUrl.trim().replace(/\/+$/, '') + `/models`;
+}
+
 function setupLlmUI() {
+  const baseUrlInput = document.getElementById('setup-llm-base-url');
   const keyInput = document.getElementById('setup-llm-api-key');
   const toggleBtn = document.getElementById('btn-toggle-llm-key');
   const fetchBtn = document.getElementById('btn-fetch-llm-models');
   const statusEl = document.getElementById('setup-llm-status');
   const searchInput = document.getElementById('setup-llm-search');
+  const freeOnlyCheckbox = document.getElementById('setup-llm-free-only');
 
   if (!keyInput || !fetchBtn) return;
 
@@ -550,6 +562,13 @@ function setupLlmUI() {
     toggleBtn.addEventListener('click', () => {
       keyInput.type = keyInput.type === 'password' ? 'text' : 'password';
       toggleBtn.textContent = keyInput.type === 'password' ? '👁' : '🔒';
+    });
+  }
+
+  // Update base URL on input
+  if (baseUrlInput) {
+    baseUrlInput.addEventListener('input', (e) => {
+      setupLlmBaseUrl = e.target.value.trim();
     });
   }
 
@@ -566,57 +585,77 @@ function setupLlmUI() {
     });
   }
 
-  // Fetch models sorted by intelligence (conditionally free-only)
+  // Fetch models from OpenAI-compatible endpoint
   fetchBtn.addEventListener('click', async () => {
+    if (baseUrlInput) {
+      setupLlmBaseUrl = baseUrlInput.value.trim() || 'https://openrouter.ai/api/v1';
+    }
     setupLlmApiKey = keyInput.value.trim();
-    const freeOnly = document.getElementById('setup-llm-free-only')?.checked ?? true;
+    const freeOnly = freeOnlyCheckbox?.checked ?? true;
+    const isOpenRouter = setupLlmBaseUrl.toLowerCase().includes('openrouter.ai');
 
     statusEl.style.color = 'var(--text-muted)';
-    statusEl.textContent = freeOnly
-      ? 'Fetching free models from OpenRouter...'
-      : 'Fetching models from OpenRouter...';
+    statusEl.textContent = `Fetching models from ${setupLlmBaseUrl}...`;
     fetchBtn.disabled = true;
 
     try {
       const headers = {
-        'HTTP-Referer': window.location.origin || 'http://localhost:3000',
-        'X-Title': '4X Strategy Game'
+        'Content-Type': 'application/json'
       };
+      if (isOpenRouter) {
+        headers['HTTP-Referer'] = window.location.origin || 'http://localhost:3000';
+        headers['X-Title'] = '4X Strategy Game';
+      }
       if (setupLlmApiKey) {
         headers['Authorization'] = `Bearer ${setupLlmApiKey}`;
       }
 
-      let url = 'https://openrouter.ai/api/v1/models?sort=intelligence-high-to-low';
-      if (freeOnly) {
-        url += '&max_price=0&min_price=0';
+      let url = getModelsUrl(setupLlmBaseUrl);
+      if (isOpenRouter) {
+        url += '?sort=intelligence-high-to-low';
+        if (freeOnly) {
+          url += '&max_price=0&min_price=0';
+        }
       }
 
       const response = await fetch(url, { headers });
 
       if (!response.ok) {
-        throw new Error(`OpenRouter HTTP ${response.status}`);
+        let errDetails = '';
+        try {
+          const errJson = await response.json();
+          errDetails = errJson.error?.message || errJson.message || JSON.stringify(errJson);
+        } catch {
+          errDetails = await response.text().catch(() => '');
+        }
+        throw new Error(`HTTP ${response.status}${errDetails ? `: ${errDetails}` : ''}`);
       }
 
       const json = await response.json();
-      const rawModels = Array.isArray(json.data) ? json.data : [];
+      const rawModels = Array.isArray(json.data)
+        ? json.data
+        : (Array.isArray(json)
+          ? json
+          : (Array.isArray(json.models) ? json.models : []));
 
       if (rawModels.length === 0) {
         statusEl.style.color = '#f1c40f';
-        statusEl.textContent = freeOnly
-          ? 'No free models returned by OpenRouter.'
-          : 'No models returned by OpenRouter.';
+        statusEl.textContent = 'No models returned by server.';
       } else {
         // Preserve prior enabled flags and selection order when re-fetching
         const existingEnabled = new Map(setupLlmModels.map(m => [m.id, m.enabled]));
-        setupLlmModels = rawModels.map(m => ({
-          id: m.id,
-          name: m.name || m.id,
-          enabled: existingEnabled.has(m.id) ? existingEnabled.get(m.id) : false
-        }));
+        setupLlmModels = rawModels.map(m => {
+          const id = m.id || m.name || String(m);
+          const name = m.name || m.id || String(m);
+          return {
+            id,
+            name,
+            enabled: existingEnabled.has(id) ? existingEnabled.get(id) : false
+          };
+        });
 
         statusEl.style.color = '#2ecc71';
-        const label = freeOnly ? 'free models' : 'models';
-        statusEl.textContent = `Successfully fetched ${setupLlmModels.length} ${label} (sorted by intelligence).`;
+        statusEl.textContent = `Successfully fetched ${setupLlmModels.length} models.`;
 
         const picker = document.getElementById('setup-llm-model-picker');
         if (picker) picker.style.display = 'flex';
@@ -628,7 +667,7 @@ function setupLlmUI() {
         renderLlmModelList();
       }
     } catch (err) {
-      console.error('Failed to fetch OpenRouter models:', err);
+      console.error('Failed to fetch LLM models:', err);
       statusEl.style.color = '#ff4d4d';
       statusEl.textContent = `Fetch error: ${err.message || err}`;
     } finally {
@@ -664,8 +703,8 @@ function renderLlmModelList() {
   // Update selection counter
   const selectedCount = setupLlmModels.filter(m => m.enabled).length;
   if (countEl) {
-    countEl.textContent = `${selectedCount} / ${LLM_MAX_SELECTED} selected`;
-    countEl.style.color = selectedCount >= LLM_MAX_SELECTED ? '#2ecc71' : 'var(--accent-color)';
+    countEl.textContent = `${selectedCount} selected`;
+    countEl.style.color = selectedCount > 0 ? '#2ecc71' : 'var(--accent-color)';
   }
 
   if (setupLlmModels.length === 0) {
@@ -743,7 +782,7 @@ function renderLlmModelList() {
     row.innerHTML = `
       ${dragHandleHtml}
       ${badgeHtml}
-      <input type="checkbox" class="llm-model-check" style="cursor: pointer;" ${isEnabled ? 'checked' : ''} title="${isEnabled ? 'Deselect model' : (selectedCount >= LLM_MAX_SELECTED ? 'Max ' + LLM_MAX_SELECTED + ' models selected' : 'Select model')}">
+      <input type="checkbox" class="llm-model-check" style="cursor: pointer;" ${isEnabled ? 'checked' : ''} title="${isEnabled ? 'Deselect model' : 'Select model'}">
       <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
         <span style="font-size: 12px; font-weight: 600; color: ${isEnabled ? '#fff' : 'var(--text-muted)'}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${model.name}</span>
         <span style="font-size: 10px; font-family: monospace; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${model.id}</span>
@@ -751,23 +790,11 @@ function renderLlmModelList() {
       ${upDownHtml}
     `;
 
-    // Checkbox toggle with max-3 enforcement
+    // Checkbox toggle (no max limit)
     const checkbox = row.querySelector('.llm-model-check');
     if (checkbox) {
       checkbox.addEventListener('change', (e) => {
-        if (e.target.checked) {
-          // Enforce max selection: auto-evict the lowest priority selected model
-          const currentlySelected = setupLlmModels.filter(m => m.enabled);
-          if (currentlySelected.length >= LLM_MAX_SELECTED) {
-            // The last enabled model in the array is the lowest priority
-            const selectedInOrder = setupLlmModels.filter(m => m.enabled);
-            const evictTarget = selectedInOrder[selectedInOrder.length - 1];
-            evictTarget.enabled = false;
-          }
-          model.enabled = true;
-        } else {
-          model.enabled = false;
-        }
+        model.enabled = e.target.checked;
         renderLlmModelList();
       });
     }
@@ -944,6 +971,10 @@ function handleStartGameClicked() {
   }
 
   // LLM settings & session storage persistence
+  const baseUrlInput = document.getElementById('setup-llm-base-url');
+  if (baseUrlInput) {
+    setupLlmBaseUrl = baseUrlInput.value.trim() || 'https://openrouter.ai/api/v1';
+  }
   const keyInput = document.getElementById('setup-llm-api-key');
   if (keyInput) {
     setupLlmApiKey = keyInput.value.trim();
@@ -951,7 +982,13 @@ function handleStartGameClicked() {
   const orderedModels = setupLlmModels.filter(m => m.enabled).map(m => m.id);
 
   try {
+    sessionStorage.setItem('empires_llm_config', JSON.stringify({
+      baseUrl: setupLlmBaseUrl,
+      apiKey: setupLlmApiKey,
+      models: setupLlmModels
+    }));
     sessionStorage.setItem('empires_openrouter_config', JSON.stringify({
+      baseUrl: setupLlmBaseUrl,
       apiKey: setupLlmApiKey,
       models: setupLlmModels
     }));
@@ -1006,6 +1043,7 @@ function handleStartGameClicked() {
       : null,
     winCondition: Object.keys(winCondition).length > 0 ? winCondition : null,
     llm: {
+      baseUrl: setupLlmBaseUrl,
       apiKey: setupLlmApiKey,
       orderedModels: orderedModels
     }

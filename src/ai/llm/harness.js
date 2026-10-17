@@ -17,9 +17,10 @@ export class Harness extends BaseManager {
             this.llmClient = new LLMClient({
                 systemPrompt: await this.buildSystemPrompt(),
                 responseSchema: responseSchema,
-                apiKey: this.gameState.settings?.llm?.apiKey || '',
+                baseUrl: this.gameState.settings?.llm?.baseUrl,
+                apiKey: this.gameState.settings?.llm?.apiKey,
                 orderedModels: this.gameState.settings?.llm?.orderedModels,
-                timeoutMs: 40000,
+                timeoutMs: 120000,
                 generationConfig: {
                     temperature: 0.2,
                     maxOutputTokens: 8000,

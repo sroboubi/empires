@@ -1250,20 +1250,28 @@
           </div>
         </div>
 
-        <!-- OpenRouter AI Settings -->
+        <!-- OpenAI-Compatible LLM Settings -->
         <div class="form-group full-width">
-          <label class="form-label">OpenRouter AI Configuration (LLM)</label>
+          <label class="form-label">AI Configuration (OpenAI-compatible LLM)</label>
           <div style="display: flex; flex-direction: column; gap: 10px;">
+            <!-- Base URL Input -->
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <label for="setup-llm-base-url" style="font-size: 11px; color: var(--text-muted); font-weight: 600;">Base URL</label>
+              <input type="text" id="setup-llm-base-url" class="form-input"
+                placeholder="e.g. https://openrouter.ai/api/v1 or http://localhost:1234/v1"
+                value="https://openrouter.ai/api/v1" style="width: 100%;">
+            </div>
+
             <!-- API Key Input and Fetch Button -->
             <div style="display: flex; gap: 8px; align-items: center;">
               <div style="position: relative; flex: 1;">
                 <input type="password" id="setup-llm-api-key" class="form-input"
-                  placeholder="Enter OpenRouter API Key (sk-or-v1-...)" style="width: 100%; padding-right: 32px;">
+                  placeholder="API Key (Optional for local servers, e.g. sk-or-v1-...)" style="width: 100%; padding-right: 32px;">
                 <button type="button" id="btn-toggle-llm-key"
                   style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 14px;"
                   title="Toggle Key Visibility">👁</button>
               </div>
-              <label
+              <label id="setup-llm-free-only-wrapper"
                 style="display: flex; align-items: center; gap: 5px; font-size: 12px; white-space: nowrap; cursor: pointer; color: var(--text-muted);">
                 <input type="checkbox" id="setup-llm-free-only" checked> Free Only
               </label>
@@ -1277,16 +1285,15 @@
             <div id="setup-llm-model-picker" style="display: none; flex-direction: column; gap: 8px;">
               <div style="display: flex; justify-content: space-between; align-items: center;">
                 <span id="setup-llm-picker-title"
-                  style="font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Models
-                  (Sorted by Intelligence)</span>
+                  style="font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Available Models</span>
                 <span id="setup-llm-selection-count"
-                  style="font-size: 11px; font-weight: 600; color: var(--accent-color);">0 / 3 selected</span>
+                  style="font-size: 11px; font-weight: 600; color: var(--accent-color);">0 selected</span>
               </div>
               <!-- Search input -->
               <input type="text" id="setup-llm-search" class="form-input" placeholder="Search models..."
                 style="width: 100%; font-size: 12px; padding: 6px 10px;">
               <div style="font-size: 11px; color: var(--text-muted);">
-                Select up to 3 models. Drag or use ▲/▼ to set priority order among selected models.
+                Select models to enable. Drag or use ▲/▼ to set priority order among selected models.
               </div>
               <div id="setup-llm-priority-list" class="dynamic-list"
                 style="max-height: 280px; overflow-y: auto; padding-right: 4px;"></div>
