@@ -8,6 +8,9 @@
  * - The engine pre-computes; the LLM just decides. Derived insights (runout
  *   warnings, relative positions, per-unit capabilities) are inlined so the
  *   model never does relational lookups or game math.
+ *
+ * Dependency-free: no imports from the game engine (hexGrid.js pulls in URL
+ * imports). Hex distance is inlined below.
  */
 
 const IMPASSABLE = 1e1000;
@@ -19,13 +22,9 @@ const WATER_TERRAINS = ['ShallowWater', 'DeepWater', 'Ocean'];
  * @returns {string} Markdown catalog.
  */
 export function manifestToMarkdown(entities) {
-  // Structures = anything buildable; the rest are units. Data-driven categorization.
-  const buildableNames = new Set();
-  for (const e of entities) {
-    for (const b of e.buildables || []) buildableNames.add(b);
-  }
-  const units = entities.filter(e => !buildableNames.has(e.name));
-  const structures = entities.filter(e => buildableNames.has(e.name));
+  // Units move, structures don't. Data-driven split on movement presence.
+  const units = entities.filter(e => e.movement);
+  const structures = entities.filter(e => !e.movement);
 
   const lines = [];
   if (units.length) {
@@ -107,17 +106,18 @@ function condenseScore(obj) {
 function describeTerrainAccess(movement) {
   if (!movement) return '';
   const scale = movement.terrainCostScale || {};
+  const parts = [];
   const waterBlocked = WATER_TERRAINS.every(t => (scale[t] ?? 1) >= IMPASSABLE);
-  if (waterBlocked && Object.keys(scale).length) return 'Land only (cannot enter water)';
+  if (waterBlocked) parts.push('Land only (cannot enter water)');
 
-  const blocked = Object.keys(scale).filter(t => (scale[t] ?? 1) >= IMPASSABLE);
+  // Non-water restrictions still apply even when water is blocked (no early return).
+  const blocked = Object.keys(scale).filter(t => (scale[t] ?? 1) >= IMPASSABLE && !WATER_TERRAINS.includes(t));
   const slow = Object.entries(scale)
     .filter(([, v]) => v > 1 && v < IMPASSABLE)
     .map(([k, v]) => `${k} ${v}x`);
   const fast = Object.entries(scale)
     .filter(([, v]) => v < 1 && v > 0)
     .map(([k, v]) => `${k} ${v}x`);
-  const parts = [];
   if (blocked.length) parts.push(`cannot enter ${blocked.join(', ')}`);
   if (slow.length) parts.push(`slow on ${slow.join(', ')}`);
   if (fast.length) parts.push(`fast on ${fast.join(', ')}`);
@@ -245,6 +245,11 @@ function capitalize(s) {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 }
 
+/** Axial hex distance (same formula as HexGrid.distance; inlined to keep this module dependency-free). */
+function hexDistance(a, b) {
+  return (Math.abs(a.q - b.q) + Math.abs(a.q + a.r - b.q - b.r) + Math.abs(a.r - b.r)) / 2;
+}
+
 /**
  * Vague terrain/topology summary for the LLM.
  * Groups contiguous explored cells by terrain into regions and describes each
@@ -299,10 +304,11 @@ export function summarizeTerrain(gameState, player) {
   const lines = ['### Terrain Overview (explored)'];
   for (const region of significant) {
     let rel = '';
-    if (start && grid.directionTo) {
+    if (start) {
       try {
-        const dir = grid.directionTo(start, { q: Math.round(region.cq), r: Math.round(region.cr) }, true).fromSource;
-        const dist = Math.round(Math.hypot(region.cq - start.q, region.cr - start.r));
+        const center = { q: Math.round(region.cq), r: Math.round(region.cr) };
+        const dir = grid.directionTo ? grid.directionTo(start, center, true).fromSource : '';
+        const dist = hexDistance(start, center);
         rel = dist === 0 ? 'at your start' : `${dist} ${dir} of start`;
       } catch { /* keep rel empty */ }
     }

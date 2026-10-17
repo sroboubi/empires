@@ -505,7 +505,7 @@
   },
   {
     "name": "settler",
-    "description": "Empire expansion unit. Builds villages ONLY; weak in combat - escort to a good site and found a village.",
+    "description": "Empire expansion unit. Builds villages; weak in combat - escort to a good site and found a village.",
     "modelUrl": "./assets/units/settler.glb",
     "size": 1.5,
     "health": 150,
