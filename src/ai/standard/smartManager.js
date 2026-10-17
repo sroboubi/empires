@@ -624,11 +624,6 @@ export class SmartManager extends BaseManager {
         let actionExecuted = true;
 
         while (player.orders > 0 && maxIterations-- > 0 && actionExecuted) {
-            // DEBUG
-            const llm = new Harness(this.player, this.gameState, this.controller);
-            await llm.processTurn();
-            // DEBUG
-
             actionExecuted = false;
 
             const myEntities = player.getEntities ? player.getEntities(gameState).filter(e => e.active) : [];

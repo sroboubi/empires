@@ -7,8 +7,7 @@
         "type",
         "thoughtProcess",
         "entityId",
-        "actionName",
-        "target"
+        "command"
       ],
       "properties": {
         "type": {
@@ -25,36 +24,19 @@
           "type": "string",
           "description": "ID of your owned entity executing the order."
         },
-        "actionName": {
+        "command": {
           "type": "string",
-          "description": "Action name from catalog (e.g. Move, Attack, Repair, Build)."
+          "enum": [
+            "Attack",
+            "Repair",
+            "Build",
+            "Explore"
+          ],
+          "description": "Command to perform"
         },
         "target": {
-          "description": "Target payload. Must specify exactly ONE target field.",
+          "description": "Target is optional for Explore, required otherwise",
           "anyOf": [
-            {
-              "type": "object",
-              "required": [
-                "cell"
-              ],
-              "properties": {
-                "cell": {
-                  "type": "object",
-                  "required": [
-                    "q",
-                    "r"
-                  ],
-                  "properties": {
-                    "q": {
-                      "type": "integer"
-                    },
-                    "r": {
-                      "type": "integer"
-                    }
-                  }
-                }
-              }
-            },
             {
               "type": "object",
               "required": [
@@ -76,6 +58,28 @@
                 "entityName": {
                   "type": "string",
                   "description": "Target construct or unit type name (for Build)."
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "direction"
+              ],
+              "properties": {
+                "direction": {
+                  "type": "string",
+                  "enum": [
+                    "E",
+                    "NE",
+                    "N",
+                    "NW",
+                    "W",
+                    "SW",
+                    "S",
+                    "SE"
+                  ],
+                  "description": "Direction to explore in, if not provided then explore towards closest unexplored area"
                 }
               }
             }

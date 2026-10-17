@@ -3,19 +3,21 @@ import Ajv from 'ajv';
 export class LLMClient {
     /**
      * @param {Object} options
-     * @param {string} options.systemPrompt - System instructions and persona.
-     * @param {Object} [options.responseSchema] - Expected JSON schema object.
-     * @param {string} options.apiKey - OpenRouter API key.
-     * @param {string[]} [options.orderedModels] - Ordered fallback array of OpenRouter model IDs.
+     * @param {string} options.systemPrompt - System instructions.
+     * @param {Object} [options.responseSchema] - Expected JSON schema.
+     * @param {string} [options.apiKey=''] - Optional API key.
+     * @param {string} [options.baseUrl='http://localhost:1234/v1/chat/completions'] - Endpoint URL.
+     * @param {string|string[]} [options.orderedModels=['local-model']] - Model ID(s).
      * @param {number} [options.maxRetries=2] - Schema error feedback retries.
-     * @param {number} [options.timeoutMs=15000] - Hard timeout limit per request in milliseconds.
+     * @param {number} [options.timeoutMs=15000] - Hard timeout limit in ms.
      * @param {Object} [options.generationConfig] - Hyperparameters (temperature, maxOutputTokens, thinkingBudget).
      */
     constructor({
         systemPrompt,
         responseSchema = null,
-        apiKey,
-        orderedModels = [],
+        apiKey = '',
+        baseUrl = 'http://localhost:1234/v1/chat/completions',
+        orderedModels = ['local-model'],
         maxRetries = 2,
         timeoutMs = 15000,
         generationConfig = {}
@@ -23,7 +25,8 @@ export class LLMClient {
         this.systemPrompt = systemPrompt;
         this.responseSchema = responseSchema;
         this.apiKey = apiKey;
-        this.orderedModels = orderedModels;
+        this.baseUrl = baseUrl;
+        this.orderedModels = Array.isArray(orderedModels) ? orderedModels : [orderedModels];
         this.maxRetries = maxRetries;
         this.timeoutMs = timeoutMs;
         this.generationConfig = generationConfig;
@@ -34,7 +37,6 @@ export class LLMClient {
     async generate(content) {
         const formattedPrompt = typeof content === 'string' ? content : JSON.stringify(content);
 
-        // Append schema directly to system prompt to guarantee adherence on open-source models
         let effectiveSystemPrompt = this.systemPrompt;
         if (this.responseSchema) {
             effectiveSystemPrompt += `\n\nREQUIRED RESPONSE SCHEMA:\nYou MUST respond strictly in raw JSON adhering to this JSON Schema:\n${JSON.stringify(this.responseSchema)}`;
@@ -45,110 +47,102 @@ export class LLMClient {
             { role: 'user', content: formattedPrompt }
         ];
 
-        // Build base payload
-        const payload = {
-            models: this.orderedModels, // OpenRouter handles server-side fallback across this list
-            messages: messages,
-            ...(this.generationConfig.temperature !== undefined && { temperature: this.generationConfig.temperature }),
-            ...(this.generationConfig.maxOutputTokens !== undefined && { max_tokens: this.generationConfig.maxOutputTokens })
-        };
+        // Sequential fallback across models (works identically for local and cloud)
+        for (const model of this.orderedModels) {
+            let attempts = 0;
 
-        // Pass structured output schema to OpenRouter API
-        if (this.responseSchema) {
-            payload.response_format = {
-                type: 'json_schema',
-                json_schema: {
-                    name: 'game_action_response',
-                    strict: true,
-                    schema: this.responseSchema
-                }
+            const payload = {
+                model: model,
+                messages: messages,
+                ...(this.generationConfig.temperature !== undefined && { temperature: this.generationConfig.temperature }),
+                ...(this.generationConfig.maxOutputTokens !== undefined && { max_tokens: this.generationConfig.maxOutputTokens })
             };
-        }
 
-        // Pass reasoning/thinking budget if explicitly positive
-        if (this.generationConfig.thinkingBudget > 0) {
-            payload.reasoning = { max_tokens: this.generationConfig.thinkingBudget };
-        }
+            if (this.responseSchema) {
+                payload.response_format = { type: 'json_object' };
+            }
 
-        let attempts = 0;
+            if (this.generationConfig.thinkingBudget > 0) {
+                payload.reasoning = { max_tokens: this.generationConfig.thinkingBudget };
+            }
 
-        while (attempts <= this.maxRetries) {
-            attempts++;
+            while (attempts <= this.maxRetries) {
+                attempts++;
 
-            try {
-                // Enforce request time limit using AbortSignal.timeout
-                const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${this.apiKey}`,
-                        'HTTP-Referer': window.location.origin || 'http://localhost:3000',
-                        'X-Title': '4X Strategy Game',
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(payload),
-                    signal: AbortSignal.timeout(this.timeoutMs)
-                });
+                try {
+                    const headers = { 'Content-Type': 'application/json' };
+                    if (this.apiKey) headers['Authorization'] = `Bearer ${this.apiKey}`;
 
-                if (!response.ok) {
-                    let errData;
-                    try {
-                        errData = await response.json();
-                    } catch {
-                        const errText = await response.text().catch(() => '');
-                        errData = { message: errText };
-                    }
-                    const errMsg = JSON.stringify(errData);
+                    const response = await fetch(this.baseUrl, {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify(payload),
+                        signal: AbortSignal.timeout(this.timeoutMs)
+                    });
 
-                    // If provider rejects structured response_format or reasoning, strip and retry immediately
-                    if (payload.response_format && (errMsg.includes('response_format') || errMsg.includes('json_schema') || errMsg.includes('schema'))) {
-                        console.warn('[LLMClient] Provider does not support response_format; falling back to prompt-only schema adherence.');
-                        delete payload.response_format;
-                        continue;
-                    }
-                    if (payload.reasoning && errMsg.includes('reasoning')) {
-                        console.warn('[LLMClient] Provider does not support reasoning parameter; stripping reasoning.');
-                        delete payload.reasoning;
-                        continue;
+                    if (!response.ok) {
+                        let errData;
+                        try { errData = await response.json(); }
+                        catch { errData = { message: await response.text().catch(() => '') }; }
+
+                        const errMsg = JSON.stringify(errData);
+
+                        if (payload.response_format && (errMsg.includes('response_format') || errMsg.includes('json_schema') || errMsg.includes('schema'))) {
+                            console.warn('[LLMClient] Provider rejected response_format; falling back to prompt enforcement.');
+                            delete payload.response_format;
+                            continue;
+                        }
+
+                        if (payload.reasoning && errMsg.includes('reasoning')) {
+                            console.warn('[LLMClient] Provider rejected reasoning parameter; stripping.');
+                            delete payload.reasoning;
+                            continue;
+                        }
+
+                        throw new Error(`HTTP ${response.status}: ${errMsg}`);
                     }
 
-                    throw new Error(`OpenRouter HTTP ${response.status}: ${errMsg}`);
+                    const result = await response.json();
+                    let rawText = result.choices[0]?.message?.content || '';
+
+                    rawText = this._cleanTextOutput(rawText);
+
+                    if (!this.responseSchema) return rawText;
+
+                    const validation = this._validateSchema(rawText, this.responseSchema);
+                    if (validation.valid) return validation.data;
+
+                    console.warn(`[Ajv Validation Failed - Model: ${model} - Attempt ${attempts}/${this.maxRetries}]: ${validation.error}`);
+
+                    payload.messages.push({ role: 'assistant', content: rawText });
+                    payload.messages.push({
+                        role: 'user',
+                        content: `Your response failed strict schema validation. Errors: ${validation.error}. Re-generate the full JSON adhering strictly to the schema.`
+                    });
+
+                } catch (error) {
+                    if (error.name === 'TimeoutError' || error.name === 'AbortError') {
+                        console.error(`[LLM Timeout]: Request to ${this.baseUrl} (${model}) exceeded ${this.timeoutMs}ms limit.`);
+                    } else {
+                        console.error(`[LLM Request Error - Model: ${model}]:`, error.message);
+                    }
+
+                    if (attempts > this.maxRetries) break;
                 }
-
-                const result = await response.json();
-                const rawText = result.choices[0]?.message?.content || '';
-
-                if (!this.responseSchema) {
-                    return rawText;
-                }
-
-                // Ajv Schema Validation
-                const validation = this._validateSchema(rawText, this.responseSchema);
-                if (validation.valid) {
-                    return validation.data;
-                }
-
-                console.warn(`[Ajv Validation Failed - Attempt ${attempts}/${this.maxRetries}]: ${validation.error}`);
-
-                // Feed validation error back to LLM for correction turn
-                payload.messages.push({ role: 'assistant', content: rawText });
-                payload.messages.push({
-                    role: 'user',
-                    content: `Your response failed strict schema validation. Errors: ${validation.error}. Please re-generate the entire response adhering strictly to the schema.`
-                });
-
-            } catch (error) {
-                if (error.name === 'TimeoutError' || error.name === 'AbortError') {
-                    console.error(`[LLM Request Timeout]: Request exceeded ${this.timeoutMs}ms limit.`);
-                } else {
-                    console.error(`[LLM Request Error - Attempt ${attempts}]:`, error.message);
-                }
-
-                if (attempts > this.maxRetries) break;
             }
         }
 
-        console.error('All retries and model fallbacks failed to produce a valid response.');
+        console.error('All models and retries failed to produce a valid response.');
         return null;
+    }
+
+    _cleanTextOutput(text) {
+        if (!text) return '';
+        let cleaned = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+        if (cleaned.startsWith('```')) {
+            cleaned = cleaned.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim();
+        }
+        return cleaned;
     }
 
     _validateSchema(jsonString, schema) {

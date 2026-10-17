@@ -1,7 +1,7 @@
 import { BaseManager } from "../baseManager.js";
 import { LLMClient } from "./client.js";
 import responseSchema from './response.schema.json' with { type: 'json' };
-import { attack, support, build, onActionDone } from "../utils.js";
+import { attack, support, build, explore, onActionDone } from "../utils.js";
 import { HexGrid } from '../../hexGrid.js';
 
 export class Harness extends BaseManager {
@@ -35,7 +35,7 @@ export class Harness extends BaseManager {
 
         while (attempts > 0) {
             if (lastResponseError) attempts--;
-            const userContent = `\`\`\`json\n${JSON.stringify({
+            const userContent = `\n\`\`\`json\n${JSON.stringify({
                 state: this.summarizeGameState(),
                 lastResponseError: lastResponseError ? {
                     message: lastResponseError,
@@ -46,9 +46,6 @@ export class Harness extends BaseManager {
 
             console.debug("system prompt:", this.llmClient.systemPrompt);
             console.debug("user content:", userContent);
-
-            // DEBUG
-            return;
 
             response = await this.llmClient.generate(userContent);
             console.debug("response:", response);
@@ -74,72 +71,55 @@ export class Harness extends BaseManager {
                 }
 
                 let target = null;
-                let cell = null;
                 if (response.target?.entityId) {
                     target = this.gameState.getEntityById(response.target.entityId);
                     if (!target) {
                         lastResponseError = `Target entity not found: ${response.target.entityId}`;
                         continue;
                     }
-                    cell = target.cell;
-                } else if (response.target?.cell) {
-                    cell = this.gameState.hexGrid.getCell(response.target.cell.q, response.target.cell.r);
-                    if (!cell) {
-                        lastResponseError = `Target cell not found: ${response.target.cell.q},${response.target.cell.r}`;
-                        continue;
-                    }
-                    target = this.gameState.getEntityAt(cell.q, cell.r);
                 }
 
-                const actionLower = (response.actionName || '').toLowerCase();
+                const command = (response.command || '').toLowerCase();
                 let ordersUsed = 0;
 
-                if (actionLower === "attack") {
+                if (command === "attack") {
                     ordersUsed = attack(this.gameState, entity, target, this.player.orders);
                     if (ordersUsed === 0) {
                         lastResponseError = `Could not initiate attack on target`;
                         continue;
                     }
-                } else if (actionLower === "repair") {
+                } else if (command === "repair") {
                     ordersUsed = support(this.gameState, entity, target, "Repair", this.player.orders);
                     if (ordersUsed === 0) {
                         lastResponseError = `Could not initiate repair on target`;
                         continue;
                     }
-                } else if (actionLower === "build") {
+                } else if (command === "build") {
                     const targetName = response.target?.entityName;
                     if (!targetName) {
                         lastResponseError = `Build action requires target.entityName`;
                         continue;
                     }
-                    ordersUsed = build(this.gameState, entity, targetName, this.player.orders);
+                    ordersUsed = build(this.gameState, entity, targetName);
                     if (ordersUsed === 0) {
                         lastResponseError = `Could not initiate build of ${targetName}`;
                         continue;
                     }
-                } else {  // do actions directly, like move
-                    const actions = entity.getActions ? entity.getActions() : [];
-                    const action = actions.find(a => a.name.toLowerCase() === actionLower);
-                    if (!action) {
-                        lastResponseError = `Action "${response.actionName}" not found on entity ${entity.name}`;
+                } else if (command === "explore") {
+                    ordersUsed = explore(this.gameState, entity, response.target?.direction, true);
+                    if (ordersUsed === 0) {
+                        lastResponseError = `Could not explore`;
                         continue;
                     }
-                    const canAct = action.canDo(cell, target);
-                    if (!canAct.possible) {
-                        lastResponseError = `Action "${response.actionName}" not possible: ${canAct.reason}`;
-                        continue;
-                    }
-                    if (!action.do(cell, target)) {
-                        lastResponseError = `Failed to do action "${response.actionName}" on entity ${response.entityId}`;
-                        continue;
-                    }
+                } else {
+                    lastResponseError = `Command "${command}" not recognized`;
+                    continue;
                 }
 
                 // Action successfully executed: reconcile and render
                 await onActionDone(this.gameState);
                 lastResponseError = null;
                 turnResponseLog.push(response);
-
             } else if (response.type == "CHAT") {
                 // TODO
                 lastResponseError = `CHAT not supported yet`;
@@ -237,18 +217,16 @@ export class Harness extends BaseManager {
     }
 
     summarizeManifest(manifest) {
-        const actionsToExclude = ["Face Direction"]; // these should not be directly used by LLM
         const summary = { entities: {}, terrains: {} };
         const entitiesObj = manifest.entities || {};
         Object.entries(entitiesObj).forEach(([name, entity]) => {
-            const { spawnCost, maintenance, buildables, repairables, score, yields, actions = [] } = entity;
-            const mergedActions = new Set();
-            actions.forEach(({ name }) => {
-                if (actionsToExclude.includes(name)) return;
-                if (name.startsWith("Build")) name = "Build";
-                mergedActions.add(name);
-            });
-            summary.entities[name] = { spawnCost, maintenance, buildables, repairables, score, yields, actions: Array.from(mergedActions) };
+            const { damage, movement, spawnCost, maintenance, buildables, repairables, score, yields } = entity;
+            const commands = [];
+            if (movement !== undefined) commands.push("Explore");
+            if (buildables?.length > 0) commands.push("Build");
+            if (repairables?.length > 0) commands.push("Repair");
+            if (damage !== undefined) commands.push("Attack");
+            summary.entities[name] = { commands, damage, movement, spawnCost, maintenance, buildables, repairables, score, yields };
         });
         const terrainsList = Array.isArray(manifest.terrains) ? manifest.terrains : Object.values(manifest.terrains || {});
         terrainsList.forEach(terrain => {

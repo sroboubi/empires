@@ -3,14 +3,14 @@
   "players": [
     {
       "id": 1,
-      "name": "Red Empire",
+      "name": "English Empire",
       "color": "#ff4d4d",
       "description": "Aggressive expansionist empire",
       "controller": null
     },
     {
       "id": 2,
-      "name": "Blue Alliance",
+      "name": "French Empire",
       "color": "#3399ff",
       "description": "Strategic maritime alliance",
       "controller": {

@@ -85,13 +85,9 @@ function processManifestPayload(rawData) {
 
   for (const entity of rawEntities) {
     const absoluteModelUrl = new URL(entity.modelUrl, window.location.href).href;
-    const tempInstance = new Entity(entity, null, null, null, null);
-    const actions = tempInstance.getActions().map(({ name, description }) => ({ name, description })) || [];
-
     entityMetadata[entity.name] = {
       ...entity,
-      modelUrl: absoluteModelUrl,
-      actions: actions
+      modelUrl: absoluteModelUrl
     };
   }
 

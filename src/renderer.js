@@ -156,7 +156,7 @@ export function initRenderer(canvas) {
   } else {
     console.log(`[shadow] map size: ${CONFIG.SHADOW_MAP_SIZE}`);
   }
-  dirLight.shadow.bias = -0.0001;
+  dirLight.shadow.bias = -0.00001;
   dirLight.shadow.normalBias = 0.02;
 
   scene.add(dirLight);
