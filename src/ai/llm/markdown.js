@@ -122,10 +122,10 @@ function describeCombat(e) {
   const parts = [];
   if (e.damage) {
     const range = e.range ? `, range ${e.range.minCells}-${e.range.maxCells}` : '';
-    parts.push(`${e.damage.value} ${e.damage.type} damage${range}`);
+    parts.push(`${round1(e.damage.value)} ${e.damage.type} damage${range}`);
   }
   if (e.health || e.maxHealth) {
-    parts.push(`${e.health || e.maxHealth} HP`);
+    parts.push(`${round1(e.health || e.maxHealth)} HP`);
   }
   const armor = e.armor || {};
   const notes = [];
@@ -270,8 +270,8 @@ export function serializeStateToMarkdown(summary, manifestEntities = []) {
 
 function entityStateToMarkdown(e, byName, brief = false) {
   const def = byName.get(e.name);
-  const hp = (e.health !== undefined && e.maxHealth !== undefined) ? ` ${e.health}/${e.maxHealth} HP` : '';
-  const ap = e.actionPoints !== undefined ? `, ${e.actionPoints} action points` : '';
+  const hp = (e.health !== undefined && e.maxHealth !== undefined) ? ` ${round1(e.health)}/${round1(e.maxHealth)} HP` : '';
+  const ap = e.actionPoints !== undefined ? `, ${round1(e.actionPoints)} action points` : '';
   const pos = describePosition(e);
   const terrain = e.terrain ? `on ${e.terrain}` : '';
 
@@ -313,7 +313,7 @@ function entityStateToMarkdown(e, byName, brief = false) {
   if (e.damagedRepairables !== undefined) {
     // State-dependent: only damaged, visible repairables
     if (e.damagedRepairables.length) {
-      const list = e.damagedRepairables.map(d => `${d.id} (${d.health}/${d.maxHealth} HP)`).join(', ');
+      const list = e.damagedRepairables.map(d => `${d.id} (${round1(d.health)}/${round1(d.maxHealth)} HP)`).join(', ');
       caps.push(`Can repair (damaged): ${list}`);
     }
     // If empty, omit entirely — nothing to repair right now
@@ -333,10 +333,10 @@ function oppEntityToMarkdown(e, byName) {
   const pos = describePosition(e);
   if (pos) bits.push(pos);
   if (e.terrain) bits.push(`on ${e.terrain}`);
-  if (e.health !== undefined && e.maxHealth !== undefined) bits.push(`${e.health}/${e.maxHealth} HP`);
+  if (e.health !== undefined && e.maxHealth !== undefined) bits.push(`${round1(e.health)}/${round1(e.maxHealth)} HP`);
   // Include combat info so the player can assess the threat
   const def = byName.get(e.name);
-  if (def && def.damage) bits.push(`${def.damage.value} ${def.damage.type} dmg`);
+  if (def && def.damage) bits.push(`${round1(def.damage.value)} ${def.damage.type} dmg`);
   return `  * ${e.id} (${capitalize(e.name)})${bits.length ? ' — ' + bits.join(' | ') : ''}`;
 }
 
@@ -350,6 +350,11 @@ function describePosition(e) {
 
 function capitalize(s) {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
+
+/** Round to 1 decimal place to avoid floating-point noise (0.7000000000000002 -> 0.7). */
+function round1(n) {
+  return Math.round((Number(n) || 0) * 10) / 10;
 }
 
 /** Axial hex distance (same formula as HexGrid.distance; inlined to keep this module dependency-free). */

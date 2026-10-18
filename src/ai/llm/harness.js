@@ -250,8 +250,9 @@ export class Harness extends BaseManager {
                 summary.buildableLater = [];
                 for (const b of buildables) {
                     if (!canBuild) {
-                        // Unit lacks AP to build — list as unavailable with reason
-                        summary.buildableLater.push({ name: b, missing: `insufficient AP (${entity.actionPoints ?? 0} < 1 required)` });
+                        // Unit lacks AP to build — list as unavailable with reason (rounded to 1 decimal)
+                        const ap = Math.round((entity.actionPoints ?? 0) * 10) / 10;
+                        summary.buildableLater.push({ name: b, missing: `insufficient AP (${ap} < 1 required)` });
                         continue;
                     }
                     const bDef = manifestList.find(m => m.name === b);

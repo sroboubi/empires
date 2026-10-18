@@ -229,7 +229,8 @@ export function attack(gameState, sourceEntity, targetEntity, maxOrders = 1) {
     } else if (movedCloser) {
         result = { status: 'partial', message: `Moved closer to ${targetLabel} but could not attack (${lastCheckReason}).` };
     } else {
-        const apInfo = sourceEntity.actionPoints !== undefined ? ` ${sourceEntity.name} has ${sourceEntity.actionPoints} AP remaining.` : '';
+        const apRounded = sourceEntity.actionPoints !== undefined ? Math.round(sourceEntity.actionPoints * 10) / 10 : null;
+        const apInfo = apRounded !== null ? ` ${sourceEntity.name} has ${apRounded} AP remaining.` : '';
         result = { status: 'failed', message: `Could not attack ${targetLabel} (${lastCheckReason}).${apInfo}` };
     }
     return { ordersUsed, result };
@@ -425,25 +426,28 @@ export function build(gameState, sourceEntity, targetName,
     let ordersUsed = 0;
 
     // Move into staging position (adjacent to the build site).
+    // moveAlongPath moves as far as AP allows; partial movement is reported
+    // below, not failed here.
     if (best.stage.path.length > 0) {
-        if (!moveAction || !(sourceEntity.actionPoints > 0)) {
-            return fail(`Insufficient AP for movement. ${sourceEntity.name} has ${sourceEntity.actionPoints ?? 0} AP but needs to move to build ${canonicalName}.`);
+        const availableAP = sourceEntity.actionPoints ?? 0;
+        if (!moveAction || !(availableAP > 0)) {
+            const apRounded = Math.round(availableAP * 10) / 10;
+            return fail(`Insufficient AP for movement. ${sourceEntity.name} has ${apRounded} AP but needs to move to build ${canonicalName}.`);
         }
-        // Calculate required AP for the path
+        // Calculate full path cost for the failure message (if movement fails entirely)
         const pathCost = best.stage.path.reduce((sum, cell) => {
             const baseMc = cell.terrain?.movementCost || 1;
             const tcs = sourceEntity.terrainCostScale;
             const tScale = (tcs && cell.terrain?.name in tcs) ? tcs[cell.terrain.name] : 1;
             return sum + (baseMc * tScale);
         }, 0);
-        const availableAP = sourceEntity.actionPoints ?? 0;
-        if (pathCost > availableAP) {
-            const terrainTypes = [...new Set(best.stage.path.map(c => c.terrain?.name).filter(Boolean))].join(', ');
-            return fail(`Insufficient AP for movement. Path to nearest valid ${canonicalName} site requires ${pathCost.toFixed(1)} AP${terrainTypes ? ` (Terrain: ${terrainTypes})` : ''}, but ${sourceEntity.name} only has ${availableAP} AP remaining.`);
-        }
+        const terrainTypes = [...new Set(best.stage.path.map(c => c.terrain?.name).filter(Boolean))].join(', ');
         const moved = moveAlongPath(owner, sourceEntity, moveAction, best.stage.path, gameState, 'build',
             `moving to build ${canonicalName} at (${best.cell.q},${best.cell.r})`);
-        if (!moved) return fail(`Could not move to build site for ${canonicalName}. Path requires ${pathCost.toFixed(1)} AP, has ${availableAP} AP.`);
+        if (!moved) {
+            const apRounded = Math.round(availableAP * 10) / 10;
+            return fail(`Could not move toward ${canonicalName} site. Full path requires ${pathCost.toFixed(1)} AP${terrainTypes ? ` (Terrain: ${terrainTypes})` : ''}, but ${sourceEntity.name} only has ${apRounded} AP remaining.`);
+        }
         ordersUsed = 1;
     }
 
@@ -550,11 +554,12 @@ export function support(gameState, sourceEntity, targetEntity, actionName = null
                 }
             }
         }
-        const apInfo = ` ${sourceEntity.name} has ${sourceEntity.actionPoints ?? 0} AP remaining.`;
-        return fail(`Could not move adjacent to ${targetEntity.name}.${apInfo}`);
+        const apRounded = Math.round((sourceEntity.actionPoints ?? 0) * 10) / 10;
+        return fail(`Could not move adjacent to ${targetEntity.name}. ${sourceEntity.name} has ${apRounded} AP remaining.`);
     }
 
-    return fail(`Could not reach ${targetEntity.name}. ${sourceEntity.name} has ${sourceEntity.actionPoints ?? 0} AP remaining.`);
+    const apR = Math.round((sourceEntity.actionPoints ?? 0) * 10) / 10;
+    return fail(`Could not reach ${targetEntity.name}. ${sourceEntity.name} has ${apR} AP remaining.`);
 }
 
 /**
@@ -1131,7 +1136,8 @@ export function explore(gameState, unit, direction = null, getTreasure = false, 
             aiLog(player || 'AI', 'explore', `${unit.name} exploring ${reason} -> (${res.targetCell.q},${res.targetCell.r}).`);
             return { ordersUsed: 1, result: { status: 'completed', message: `${unit.name} explored ${reason} towards (${res.targetCell.q},${res.targetCell.r}).` } };
         }
-        return fail(`Could not move along exploration path. ${unit.name} has ${unit.actionPoints ?? 0} AP remaining.`);
+        const apR = Math.round((unit.actionPoints ?? 0) * 10) / 10;
+        return fail(`Could not move along exploration path. ${unit.name} has ${apR} AP remaining.`);
     };
 
     // Treasure mode overrides direction: closest treasure on an explored cell.
