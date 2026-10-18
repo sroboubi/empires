@@ -25,7 +25,7 @@ export class Compass {
     constructor(scene, camera, options = {}) {
         this.scene = scene;
         this.camera = camera;
-        this.size = options.size ?? 1.5;
+        this.size = options.size ?? 0.8;
         this.opacity = options.opacity ?? 0.35;
 
         this.group = new THREE.Group();
@@ -54,35 +54,41 @@ export class Compass {
         this.ring.renderOrder = 1000;
         this.group.add(this.ring);
 
-        // North arrow: a cone pointing +Y in group local space (up on screen
-        // after the billboard lookAt). We rotate it around Z to aim at north.
-        const arrowLen = this.size * 1.1;
-        const coneGeo = new THREE.ConeGeometry(this.size * 0.22, arrowLen, 4);
+        // North arrow: red cone pointing +Y (up on screen). Base sits at the
+        // center so it connects with the tail.
+        const arrowLen = this.size * 0.9;
+        const coneGeo = new THREE.ConeGeometry(this.size * 0.25, arrowLen, 16);
         const coneMat = new THREE.MeshBasicMaterial({
             color: 0xe74c3c, // red = north
             transparent: true,
-            opacity: 0.9,
+            opacity: 0.95,
             depthTest: false,
         });
         this.arrow = new THREE.Mesh(coneGeo, coneMat);
-        // Cone points +Y by default — no rotation needed; offset so base is near center
-        this.arrow.position.y = arrowLen * 0.3;
+        // Cone geometry is centered; shift up by half length so base is at origin
+        this.arrow.position.y = arrowLen / 2;
         this.arrow.renderOrder = 1001;
-        this.group.add(this.arrow);
+        // Wrap in a pivot so we can rotate the arrow around Z without moving its base
+        this.arrowPivot = new THREE.Group();
+        this.arrowPivot.add(this.arrow);
+        this.group.add(this.arrowPivot);
 
-        // South tail: smaller dimmer cone pointing -Y for visual balance
-        const tailGeo = new THREE.ConeGeometry(this.size * 0.14, arrowLen * 0.5, 4);
+        // South tail: smaller dimmer cone pointing -Y, base at center
+        const tailLen = arrowLen * 0.6;
+        const tailGeo = new THREE.ConeGeometry(this.size * 0.18, tailLen, 16);
         const tailMat = new THREE.MeshBasicMaterial({
             color: 0xbbbbbb,
             transparent: true,
-            opacity: 0.5,
+            opacity: 0.6,
             depthTest: false,
         });
         this.tail = new THREE.Mesh(tailGeo, tailMat);
-        this.tail.rotation.z = Math.PI; // point -Y
-        this.tail.position.y = -arrowLen * 0.2;
+        this.tail.rotation.z = Math.PI; // flip to point -Y
+        this.tail.position.y = -tailLen / 2; // base at origin
         this.tail.renderOrder = 1001;
-        this.group.add(this.tail);
+        this.tailPivot = new THREE.Group();
+        this.tailPivot.add(this.tail);
+        this.group.add(this.tailPivot);
 
         // Never culled, always on top
         this.group.traverse(o => { if (o.isMesh) o.frustumCulled = false; });
@@ -109,7 +115,7 @@ export class Compass {
 
         // Place the compass at NDC (-0.85, -0.8) — bottom-left of the view.
         // Unproject from NDC to world space at a fixed depth in front of camera.
-        const dist = 10;
+        const dist = 12;
         this._ndc.set(-0.85, -0.8, 0.5); // NDC: x, y, z (0.5 = midway between near/far)
         this._ndc.unproject(cam);
         // Move it to exactly `dist` units from the camera along the view ray
@@ -126,10 +132,10 @@ export class Compass {
         this._north.applyQuaternion(this._invQuat);
         // We only care about the direction within the screen plane:
         const angle = Math.atan2(this._north.y, this._north.x);
-        // Arrow points +Y (angle PI/2). Rotate around local Z to aim at north.
+        // Arrow points +Y (angle PI/2). Rotate pivots around Z to aim at north.
         const roll = angle - Math.PI / 2;
-        this.arrow.rotation.z = roll;
-        this.tail.rotation.z = Math.PI + roll;
+        this.arrowPivot.rotation.z = roll;
+        this.tailPivot.rotation.z = roll;
     }
 
     /** Remove the compass from the scene and free resources. */
