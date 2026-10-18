@@ -2,8 +2,9 @@
  * 3D compass overlay for the bottom-left of the view.
  *
  * A semi-transparent sphere with a north-pointing arrow (cone). The compass
- * stays fixed in screen space; the arrow rotates to indicate world north
- * relative to the camera's current orientation.
+ * stays fixed in screen space (billboarded to face the camera); the arrow
+ * lies in the screen plane and rotates to indicate world north as the
+ * camera orbits.
  *
  * Usage:
  *   import { Compass } from './compass.js';
@@ -41,7 +42,7 @@ export class Compass {
         this.sphere.renderOrder = 999;
         this.group.add(this.sphere);
 
-        // Thin ring around the equator for style
+        // Thin ring around the face for style (lies in XY plane, facing camera)
         const ringGeo = new THREE.TorusGeometry(this.size * 1.02, 0.02, 8, 48);
         const ringMat = new THREE.MeshBasicMaterial({
             color: 0x888899,
@@ -53,8 +54,8 @@ export class Compass {
         this.ring.renderOrder = 1000;
         this.group.add(this.ring);
 
-        // North arrow: a cone (pyramid-like) pointing +Z in compass local space.
-        // We'll orient the group so local +Z aims at world north.
+        // North arrow: a cone pointing +Y in group local space (up on screen
+        // after the billboard lookAt). We rotate it around Z to aim at north.
         const arrowLen = this.size * 1.1;
         const coneGeo = new THREE.ConeGeometry(this.size * 0.22, arrowLen, 4);
         const coneMat = new THREE.MeshBasicMaterial({
@@ -64,14 +65,12 @@ export class Compass {
             depthTest: false,
         });
         this.arrow = new THREE.Mesh(coneGeo, coneMat);
-        // Cone points +Y by default; rotate to point +Z (north in local space)
-        this.arrow.rotation.x = Math.PI / 2;
-        this.arrow.position.z = arrowLen * 0.35;
+        // Cone points +Y by default — no rotation needed; offset so base is near center
+        this.arrow.position.y = arrowLen * 0.3;
         this.arrow.renderOrder = 1001;
         this.group.add(this.arrow);
 
-        // Small "N" marker: a short white cone opposite the arrow base for
-        // visual balance (points south, smaller, dimmer).
+        // South tail: smaller dimmer cone pointing -Y for visual balance
         const tailGeo = new THREE.ConeGeometry(this.size * 0.14, arrowLen * 0.5, 4);
         const tailMat = new THREE.MeshBasicMaterial({
             color: 0xbbbbbb,
@@ -80,21 +79,21 @@ export class Compass {
             depthTest: false,
         });
         this.tail = new THREE.Mesh(tailGeo, tailMat);
-        this.tail.rotation.x = -Math.PI / 2;
-        this.tail.position.z = -arrowLen * 0.25;
+        this.tail.rotation.z = Math.PI; // point -Y
+        this.tail.position.y = -arrowLen * 0.2;
         this.tail.renderOrder = 1001;
         this.group.add(this.tail);
 
-        // Don't let the compass be occluded or occlude: render on top.
+        // Never culled, always on top
         this.group.traverse(o => { if (o.isMesh) o.frustumCulled = false; });
 
         scene.add(this.group);
 
-        // Scratch vectors (avoid per-frame allocation)
+        // Scratch (avoid per-frame allocation)
         this._offset = new THREE.Vector3();
-        this._camDir = new THREE.Vector3();
         this._north = new THREE.Vector3();
-        this._lookTarget = new THREE.Vector3();
+        this._camPos = new THREE.Vector3();
+        this._invQuat = new THREE.Quaternion();
     }
 
     /**
@@ -108,44 +107,26 @@ export class Compass {
         const cam = this.camera;
         if (!cam) return;
 
-        // Place the compass at a fixed offset in camera space: bottom-left,
-        // slightly in front of the near plane.
+        // Place the compass at a fixed offset in camera space: bottom-left.
         const dist = 8;
-        // NDC (-0.85, -0.8) -> bottom-left
         this._offset.set(-0.85, -0.8, -1).normalize().multiplyScalar(dist);
         this._offset.applyQuaternion(cam.quaternion);
         this.group.position.copy(cam.position).add(this._offset);
 
-        // Orient the arrow toward world north, projected onto the plane
-        // facing the camera. We want the compass to behave like a real
-        // compass held up to the view: the arrow swings as the camera orbits.
-        //
-        // Approach: make the group look at the camera (billboard), then
-        // rotate around the view axis so local +Z points at world north's
-        // screen-projected direction.
-        this._lookTarget.copy(cam.position);
-        this.group.lookAt(this._lookTarget);
+        // Billboard: face the camera so the sphere reads as a circle.
+        this._camPos.copy(cam.position);
+        this.group.lookAt(this._camPos);
 
-        // World north (-Z). Project onto the compass's local XY plane
-        // (the plane facing the camera after lookAt).
-        this._north.set(0, 0, -1);
-        // Transform world north into compass local space
-        const inv = this.group.quaternion.clone().invert();
-        this._north.applyQuaternion(inv);
-        // We want local +Z (arrow direction) to point along the projected north.
-        // Compute the angle in the local XY plane and roll the group.
+        // Project world north onto the screen plane (group local XY after lookAt).
+        this._north.set(0, 0, -1); // world north
+        this._invQuat.copy(this.group.quaternion).invert();
+        this._north.applyQuaternion(this._invQuat);
+        // We only care about the direction within the screen plane:
         const angle = Math.atan2(this._north.y, this._north.x);
-        // Arrow points +Z; after lookAt, +Z faces the camera. We roll around
-        // local Z so that the arrow's "up" (local +Y before roll) aligns with
-        // the projected north direction. Simpler: rotate the arrow mesh itself.
-        this.arrow.rotation.z = 0;
-        this.tail.rotation.z = 0;
-        // Roll the whole group around its local Z (view axis)
-        // Desired: local +Y should point toward projected north.
-        // Current local +Y after lookAt points "up" on screen.
-        // Projected north angle measured from +X axis; +Y is at 90°.
+        // Arrow points +Y (angle PI/2). Rotate around local Z to aim at north.
         const roll = angle - Math.PI / 2;
-        this.group.rotateZ(roll);
+        this.arrow.rotation.z = roll;
+        this.tail.rotation.z = Math.PI + roll;
     }
 
     /** Remove the compass from the scene and free resources. */
