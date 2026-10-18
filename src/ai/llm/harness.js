@@ -57,7 +57,7 @@ export class Harness extends BaseManager {
             }
             if (turnResponseLog.length > 0) {
                 userContent += `\n\n### Actions Taken This Turn (${turnResponseLog.length})\n` +
-                    turnResponseLog.map((r, i) => `${i + 1}. ${describeAction(r)}`).join('\n');
+                    turnResponseLog.map((r, i) => `${i + 1}. ${this.describeAction(r)}`).join('\n');
             }
 
             console.debug("system prompt:", this.llmClient.systemPrompt);
