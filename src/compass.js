@@ -19,7 +19,7 @@ export class Compass {
      * @param {THREE.Scene} scene - Main scene to add the compass to.
      * @param {THREE.PerspectiveCamera} camera - Main camera (for positioning).
      * @param {Object} [options]
-     * @param {number} [options.size=1.2] - Radius of the compass sphere.
+     * @param {number} [options.size=0.4] - Radius of the compass sphere.
      * @param {number} [options.opacity=0.35] - Sphere opacity.
      */
     constructor(scene, camera, options = {}) {
@@ -103,7 +103,7 @@ export class Compass {
     }
 
     /**
-     * Reposition the compass in the bottom-left of the view and rotate the
+     * Reposition the compass in the bottom-right of the view and rotate the
      * arrow to point at world north. Call every frame.
      *
      * World north is -Z in world space (matching hex grid convention where
