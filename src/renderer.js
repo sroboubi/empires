@@ -7,10 +7,12 @@ import Stats from 'three/addons/libs/stats.module.js';
 import { HexGrid } from './hexGrid.js';
 import { CONFIG } from './config.js';
 import { findSpawnDef, findTerrainGroup } from './resources.js';
+import { Compass } from './compass.js';
 
 export let scene, camera, renderer, controls;
 export let dirLight, hemiLight, sky, sunMesh;
 export let stats = null;
+let compass = null;
 let panClampRings = Infinity; // camera-target pan limit in hex rings; set per map by setMapCameraLimits()
 let shadowStaticBound = 600; // pop-free max shadow half-extent; set per map by setMapCameraLimits()
 let shadowFitHalfExtent = -1; // last dynamically fitted half-extent (-1 = not yet fitted)
@@ -247,6 +249,11 @@ export function initRenderer(canvas) {
     stats.dom.style.left = 'auto';
     stats.dom.style.zIndex = '9999';
     document.body.appendChild(stats.dom);
+  }
+
+  // Create the 3D compass overlay (bottom-left, north-pointing)
+  if (CONFIG.SHOW_COMPASS) {
+    compass = new Compass(scene, camera);
   }
 
   // Start Animation Loop
@@ -765,6 +772,9 @@ function animate() {
   if (updateCallback) {
     updateCallback(deltaTime);
   }
+
+  // Update the compass overlay (stays bottom-left, arrow points north)
+  if (compass) compass.update();
 
   if (renderer && scene && camera) {
     renderer.render(scene, camera);

@@ -259,7 +259,7 @@ export class Harness extends BaseManager {
                     const cost = bDef?.spawnCost || {};
                     const missing = Object.entries(cost)
                         .filter(([, amt]) => amt > 0)
-                        .map(([res, amt]) => ({ res, need: amt - (this.player.resources?.[res] || 0) }))
+                        .map(([res, amt]) => ({ res, need: Math.round((amt - (this.player.resources?.[res] || 0)) * 10) / 10 }))
                         .filter(x => x.need > 0);
                     if (missing.length === 0) {
                         summary.buildableNow.push(b);
