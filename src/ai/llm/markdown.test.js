@@ -258,10 +258,14 @@ test('late game with opponents and barbarians', () => {
     assert(md.includes('**Gold**'), 'gold missing');
     assert(md.includes('**Iron**'), 'iron missing');
     assert(md.includes('**Gems**'), 'gems missing');
-    // Opponents shown
+    // Opponents shown with entity details
     assert(md.includes('**Red**'), 'Red opponent missing');
     assert(md.includes('**Barbarians**'), 'Barbarians missing');
-    assert(md.includes('3 visible entities') || md.includes('2 visible entities'), 'opponent count wrong');
+    assert(md.includes('red_knight_1 (Knight)'), 'opponent knight details missing');
+    assert(md.includes('18 W of start'), 'opponent position missing');
+    assert(md.includes('on forest'), 'opponent terrain missing');
+    assert(md.includes('180/250 HP'), 'opponent health missing');
+    assert(md.includes('60 blunt dmg'), 'opponent damage missing (threat assessment)');
     // Score breakdown
     assert(md.includes('Total: 850'), 'late game score missing');
 });

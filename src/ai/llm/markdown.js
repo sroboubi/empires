@@ -248,16 +248,19 @@ export function serializeStateToMarkdown(summary, manifestEntities = []) {
     lines.push('');
   }
 
-  // Opponents (condensed)
+  // Opponents with visible entity details
   const opponents = summary.opponents || {};
   const oppNames = Object.keys(opponents);
   if (oppNames.length) {
     lines.push(`### Opponents (${oppNames.length})`);
     for (const name of oppNames) {
       const opp = opponents[name];
-      const count = (opp.entities || []).length;
-      lines.push(`* **${name}**: ${count} visible entit${count === 1 ? 'y' : 'ies'}` +
-        (opp.score !== undefined ? `, score ${opp.score}` : ''));
+      const oppEntities = opp.entities || [];
+      const scoreStr = opp.score !== undefined ? `, score ${typeof opp.score === 'object' ? opp.score.total ?? '' : opp.score}` : '';
+      lines.push(`* **${name}** (${oppEntities.length} visible entit${oppEntities.length === 1 ? 'y' : 'ies'}${scoreStr})`);
+      for (const e of oppEntities) {
+        lines.push(oppEntityToMarkdown(e, byName));
+      }
     }
     lines.push('');
   }
@@ -314,6 +317,22 @@ function entityStateToMarkdown(e, byName, brief = false) {
   }
   if (caps.length) parts.push(`  * ${caps.join('; ')}`);
   return parts.join('\n');
+}
+
+/**
+ * Compact one-line summary for a visible opponent entity.
+ * "  * red_knight_1 (Knight) — 18 W of start | on forest | 180/250 HP"
+ */
+function oppEntityToMarkdown(e, byName) {
+  const bits = [];
+  const pos = describePosition(e);
+  if (pos) bits.push(pos);
+  if (e.terrain) bits.push(`on ${e.terrain}`);
+  if (e.health !== undefined && e.maxHealth !== undefined) bits.push(`${e.health}/${e.maxHealth} HP`);
+  // Include combat info so the player can assess the threat
+  const def = byName.get(e.name);
+  if (def && def.damage) bits.push(`${def.damage.value} ${def.damage.type} dmg`);
+  return `  * ${e.id} (${capitalize(e.name)})${bits.length ? ' — ' + bits.join(' | ') : ''}`;
 }
 
 /** "3 NE of start", "at start", or "" — relative, no raw coordinates. */
