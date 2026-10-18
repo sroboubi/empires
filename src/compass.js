@@ -1,5 +1,5 @@
 /**
- * 3D compass overlay for the bottom-left of the view.
+ * 3D compass overlay for the bottom-right of the view.
  *
  * A semi-transparent sphere with a north-pointing arrow (cone). The compass
  * stays fixed in screen space (billboarded to face the camera); the arrow
