@@ -25,7 +25,7 @@ export class Compass {
     constructor(scene, camera, options = {}) {
         this.scene = scene;
         this.camera = camera;
-        this.size = options.size ?? 1.2;
+        this.size = options.size ?? 1.5;
         this.opacity = options.opacity ?? 0.35;
 
         this.group = new THREE.Group();
@@ -90,7 +90,7 @@ export class Compass {
         scene.add(this.group);
 
         // Scratch (avoid per-frame allocation)
-        this._offset = new THREE.Vector3();
+        this._ndc = new THREE.Vector3();
         this._north = new THREE.Vector3();
         this._camPos = new THREE.Vector3();
         this._invQuat = new THREE.Quaternion();
@@ -107,11 +107,14 @@ export class Compass {
         const cam = this.camera;
         if (!cam) return;
 
-        // Place the compass at a fixed offset in camera space: bottom-left.
-        const dist = 8;
-        this._offset.set(-0.85, -0.8, -1).normalize().multiplyScalar(dist);
-        this._offset.applyQuaternion(cam.quaternion);
-        this.group.position.copy(cam.position).add(this._offset);
+        // Place the compass at NDC (-0.85, -0.8) — bottom-left of the view.
+        // Unproject from NDC to world space at a fixed depth in front of camera.
+        const dist = 10;
+        this._ndc.set(-0.85, -0.8, 0.5); // NDC: x, y, z (0.5 = midway between near/far)
+        this._ndc.unproject(cam);
+        // Move it to exactly `dist` units from the camera along the view ray
+        const dir = this._ndc.sub(cam.position).normalize();
+        this.group.position.copy(cam.position).addScaledVector(dir, dist);
 
         // Billboard: face the camera so the sphere reads as a circle.
         this._camPos.copy(cam.position);
