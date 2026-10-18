@@ -25,7 +25,7 @@ export class Compass {
     constructor(scene, camera, options = {}) {
         this.scene = scene;
         this.camera = camera;
-        this.size = options.size ?? 0.8;
+        this.size = options.size ?? 0.4;
         this.opacity = options.opacity ?? 0.35;
 
         this.group = new THREE.Group();
@@ -113,10 +113,10 @@ export class Compass {
         const cam = this.camera;
         if (!cam) return;
 
-        // Place the compass at NDC (-0.85, -0.8) — bottom-left of the view.
+        // Place the compass at NDC (0.85, -0.8) — bottom-right of the view.
         // Unproject from NDC to world space at a fixed depth in front of camera.
         const dist = 12;
-        this._ndc.set(-0.85, -0.8, 0.5); // NDC: x, y, z (0.5 = midway between near/far)
+        this._ndc.set(0.85, -0.8, 0.5); // NDC: x, y, z (0.5 = midway between near/far)
         this._ndc.unproject(cam);
         // Move it to exactly `dist` units from the camera along the view ray
         const dir = this._ndc.sub(cam.position).normalize();
