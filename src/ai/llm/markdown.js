@@ -102,9 +102,21 @@ function condenseScore(obj) {
 }
 
 /**
+ * Maps an armor value to a plain-language descriptor.
+ * Derived from effectiveDamage = rawValue / armor.
+ * >=2 very resistant, >1 resistant, <0.5 very weak, <1 weak, else normal (omitted).
+ */
+function armorDescriptor(val) {
+  if (val >= 2) return 'very resistant';
+  if (val > 1) return 'resistant';
+  if (val < 0.5) return 'very weak';
+  if (val < 1) return 'weak';
+  return null;
+}
+
+/**
  * Compressed combat summary: "60 slashing damage, 300 HP; resistant to slashing, weak to piercing".
- * Armor > 1 reduces damage (resistant); armor < 1 increases it (weak). Derived from
- * the damage formula: effectiveDamage = rawValue / armor.
+ * Armor descriptors derived from the damage formula: effectiveDamage = rawValue / armor.
  */
 function describeCombat(e) {
   const parts = [];
@@ -116,17 +128,31 @@ function describeCombat(e) {
     parts.push(`${e.health || e.maxHealth} HP`);
   }
   const armor = e.armor || {};
-  const resistant = Object.entries(armor).filter(([, v]) => v > 1).map(([k]) => k);
-  const weak = Object.entries(armor).filter(([, v]) => v < 1).map(([k]) => k);
-  if (resistant.length) parts.push(`resistant to ${resistant.join(', ')}`);
-  if (weak.length) parts.push(`weak to ${weak.join(', ')}`);
+  const notes = [];
+  for (const [type, val] of Object.entries(armor)) {
+    const desc = armorDescriptor(val);
+    if (desc) notes.push(`${desc} to ${type}`);
+  }
+  if (notes.length) parts.push(notes.join(', '));
   return parts.join('; ');
+}
+
+/**
+ * Maps a movement cost multiplier to a plain-language descriptor.
+ * <0.7 very fast, <0.9 fast, <1.1 normal (omitted), <1.3 slow, else very slow.
+ */
+function movementDescriptor(mult) {
+  if (mult < 0.7) return 'very fast';
+  if (mult < 0.9) return 'fast';
+  if (mult < 1.1) return null; // normal — omit
+  if (mult < 1.3) return 'slow';
+  return 'very slow';
 }
 
 /**
  * Derives a terrain-access summary from movement.terrainCostScale.
  * "Land only" iff all known water terrains are impassable — data-driven,
- * not a hardcoded unit list.
+ * not a hardcoded unit list. Speeds use plain descriptors, not raw numbers.
  */
 function describeTerrainAccess(movement) {
   if (!movement) return '';
@@ -137,15 +163,14 @@ function describeTerrainAccess(movement) {
 
   // Non-water restrictions still apply even when water is blocked (no early return).
   const blocked = Object.keys(scale).filter(t => (scale[t] ?? 1) >= IMPASSABLE && !WATER_TERRAINS.includes(t));
-  const slow = Object.entries(scale)
-    .filter(([, v]) => v > 1 && v < IMPASSABLE)
-    .map(([k, v]) => `${k} ${v}x`);
-  const fast = Object.entries(scale)
-    .filter(([, v]) => v < 1 && v > 0)
-    .map(([k, v]) => `${k} ${v}x`);
+  const speedNotes = [];
+  for (const [terrain, mult] of Object.entries(scale)) {
+    if (mult >= IMPASSABLE || WATER_TERRAINS.includes(terrain)) continue;
+    const desc = movementDescriptor(mult);
+    if (desc) speedNotes.push(`${desc} on ${terrain}`);
+  }
   if (blocked.length) parts.push(`cannot enter ${blocked.join(', ')}`);
-  if (slow.length) parts.push(`slow on ${slow.join(', ')}`);
-  if (fast.length) parts.push(`fast on ${fast.join(', ')}`);
+  if (speedNotes.length) parts.push(speedNotes.join(', '));
   return parts.join('; ');
 }
 
@@ -159,8 +184,12 @@ export function serializeStateToMarkdown(summary, manifestEntities = []) {
   const byName = new Map((manifestEntities || []).map(e => [e.name, e]));
   const lines = [];
 
-  const totalOrders = summary.orders;
-  lines.push(`## Turn ${summary.turn} — ${totalOrders} order${totalOrders === 1 ? '' : 's'} remaining`);
+  const totalOrders = summary.orders ?? 0;
+  const maxOrders = summary.maxOrders;
+  const ordersStr = maxOrders !== undefined && maxOrders !== null
+    ? `${totalOrders} out of ${maxOrders} orders remaining`
+    : `${totalOrders} order${totalOrders === 1 ? '' : 's'} remaining`;
+  lines.push(`## Turn ${summary.turn} — ${ordersStr}`);
   lines.push('');
 
   // Resources: grouped, condensed. Runout warnings only when actually depleting.
@@ -184,12 +213,22 @@ export function serializeStateToMarkdown(summary, manifestEntities = []) {
     lines.push('');
   }
 
-  // Score
+  // Score with breakdown (military, economic, exploration)
   if (summary.score !== undefined && summary.score !== null) {
     const s = summary.score;
-    const scoreStr = typeof s === 'object'
-      ? Object.entries(s).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(', ')
-      : s;
+    let scoreStr = '';
+    if (typeof s === 'object') {
+      const parts = [];
+      if (s.total !== undefined) parts.push(`Total: ${s.total}`);
+      const breakdown = [];
+      if (s.military) breakdown.push(`Military: ${s.military}`);
+      if (s.economic) breakdown.push(`Economic: ${s.economic}`);
+      if (s.exploration) breakdown.push(`Exploration: ${s.exploration}`);
+      if (breakdown.length) parts.push(`(${breakdown.join(', ')})`);
+      scoreStr = parts.join(' ');
+    } else {
+      scoreStr = String(s);
+    }
     if (scoreStr) lines.push(`**Score**: ${scoreStr}\n`);
   }
 
@@ -229,12 +268,14 @@ export function serializeStateToMarkdown(summary, manifestEntities = []) {
 function entityStateToMarkdown(e, byName, brief = false) {
   const def = byName.get(e.name);
   const hp = (e.health !== undefined && e.maxHealth !== undefined) ? ` ${e.health}/${e.maxHealth} HP` : '';
-  const ap = e.actionPoints !== undefined ? `, ${e.actionPoints} AP` : '';
+  const ap = e.actionPoints !== undefined ? `, ${e.actionPoints} action points` : '';
   const pos = describePosition(e);
+  const terrain = e.terrain ? `on ${e.terrain}` : '';
 
   if (brief) {
     const bits = [];
     if (pos) bits.push(`at ${pos}`);
+    if (terrain) bits.push(terrain);
     if (hp) bits.push(hp.trim());
     if (ap) bits.push(ap.trim().replace(/^, /, ''));
     return `* **${e.id}** (${capitalize(e.name)})${bits.length ? ' — ' + bits.join(', ') : ''}`;
@@ -243,6 +284,7 @@ function entityStateToMarkdown(e, byName, brief = false) {
   const parts = [`* **${e.id}** (${capitalize(e.name)})`];
   const details = [];
   if (pos) details.push(pos);
+  if (terrain) details.push(terrain);
   if (hp) details.push(hp.trim());
   if (ap) details.push(ap.trim().replace(/^, /, ''));
   if (details.length) parts.push(`  * ${details.join(' | ')}`);

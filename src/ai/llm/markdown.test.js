@@ -130,6 +130,142 @@ test('fallback to static manifest when state fields absent', () => {
     assert(md.includes('Builds:'), 'should fall back to static builds list');
 });
 
+// --- Descriptor mapping tests ---
+
+console.log('\n## Descriptors');
+
+test('movement descriptors replace raw numbers', () => {
+    const md = manifestToMarkdown(entities);
+    // Should not contain raw multipliers like "1.5x" or "0.8x"
+    assert(!md.includes('1.5x'), 'should not show raw 1.5x');
+    assert(!md.includes('0.8x'), 'should not show raw 0.8x');
+    // Should contain descriptors
+    assert(md.includes('slow on') || md.includes('very slow on'), 'should describe slow terrain');
+});
+
+test('armor descriptors replace raw numbers', () => {
+    const md = manifestToMarkdown(entities);
+    const knightSec = md.split('### KNIGHT')[1].split('###')[0];
+    // Knight has 2.5/2.5/2 armor = "very resistant" (>=2)
+    assert(knightSec.includes('very resistant to'), 'knight should show very resistant');
+    assert(!knightSec.includes(': 2.5'), 'should not show raw armor numbers');
+    // Scout has no armor — should not show armor line
+    const scoutSec = md.split('### SCOUT')[1].split('###')[0];
+    assert(!scoutSec.includes('resistant to'), 'scout has no armor, should omit');
+});
+
+// --- Orders, score, terrain tests ---
+
+console.log('\n## State formatting');
+
+test('orders show as X out of Y', () => {
+    const summary = {
+        turn: 5, orders: 4, maxOrders: 6,
+        resources: { stock: {}, netIncome: {}, turnsRemaining: {} },
+        score: 0, entities: [], opponents: {}
+    };
+    const md = serializeStateToMarkdown(summary, entities);
+    assert(md.includes('4 out of 6 orders remaining'), 'orders format wrong');
+});
+
+test('score shows breakdown', () => {
+    const summary = {
+        turn: 10, orders: 5, maxOrders: 8,
+        resources: { stock: {}, netIncome: {}, turnsRemaining: {} },
+        score: { total: 150, military: 40, economic: 60, exploration: 50 },
+        entities: [], opponents: {}
+    };
+    const md = serializeStateToMarkdown(summary, entities);
+    assert(md.includes('Total: 150'), 'total score missing');
+    assert(md.includes('Military: 40'), 'military breakdown missing');
+    assert(md.includes('Economic: 60'), 'economic breakdown missing');
+    assert(md.includes('Exploration: 50'), 'exploration breakdown missing');
+});
+
+test('entity shows terrain', () => {
+    const summary = {
+        turn: 5, orders: 4, maxOrders: 6,
+        resources: { stock: {}, netIncome: {}, turnsRemaining: {} },
+        score: 0,
+        entities: [{
+            id: 'scout_1', name: 'scout', health: 80, maxHealth: 80, actionPoints: 8,
+            fromStart: { direction: 'NE', distance: 4 }, terrain: 'plains'
+        }],
+        opponents: {}
+    };
+    const md = serializeStateToMarkdown(summary, entities);
+    assert(md.includes('on plains'), 'terrain missing from entity output');
+});
+
+test('AP spelled out as action points', () => {
+    const summary = {
+        turn: 5, orders: 4, maxOrders: 6,
+        resources: { stock: {}, netIncome: {}, turnsRemaining: {} },
+        score: 0,
+        entities: [{
+            id: 'scout_1', name: 'scout', health: 80, maxHealth: 80, actionPoints: 8,
+            fromStart: { direction: 'NE', distance: 4 }
+        }],
+        opponents: {}
+    };
+    const md = serializeStateToMarkdown(summary, entities);
+    assert(md.includes('8 action points'), 'should spell out action points');
+    assert(!md.includes('8 AP'), 'should not use AP abbreviation');
+});
+
+// --- Late game scenario ---
+
+console.log('\n## Late game');
+
+test('late game with opponents and barbarians', () => {
+    const summary = {
+        turn: 80, orders: 10, maxOrders: 12,
+        resources: {
+            stock: { gold: 500, wood: 300, food: 800, iron: 150, gems: 25 },
+            netIncome: { gold: 50, wood: 30, food: 20, iron: 10, gems: 2 },
+            turnsRemaining: {},
+        },
+        score: { total: 850, military: 300, economic: 400, exploration: 150 },
+        entities: [
+            { id: 'knight_1', name: 'knight', health: 200, maxHealth: 250, actionPoints: 6,
+              fromStart: { direction: 'W', distance: 15 }, terrain: 'hills',
+              damage: { value: 60, type: 'blunt' } },
+            { id: 'village_1', name: 'village', health: 500, maxHealth: 500, actionPoints: 0,
+              fromStart: { direction: 'N', distance: 0 }, terrain: 'plains',
+              buildableNow: ['pikeman', 'swordsman'], buildableLater: [] },
+        ],
+        opponents: {
+            'Red': {
+                score: 700,
+                entities: [
+                    { id: 'red_knight_1', name: 'knight', health: 180, maxHealth: 250,
+                      fromStart: { direction: 'W', distance: 18 }, terrain: 'forest' },
+                    { id: 'red_archer_1', name: 'bowman', health: 120, maxHealth: 120,
+                      fromStart: { direction: 'W', distance: 20 }, terrain: 'hills' },
+                ]
+            },
+            'Barbarians': {
+                score: 100,
+                entities: [
+                    { id: 'barb_1', name: 'barbarian', health: 250, maxHealth: 300,
+                      fromStart: { direction: 'E', distance: 12 }, terrain: 'desert' },
+                ]
+            }
+        }
+    };
+    const md = serializeStateToMarkdown(summary, entities);
+    // All 5 resources shown
+    assert(md.includes('**Gold**'), 'gold missing');
+    assert(md.includes('**Iron**'), 'iron missing');
+    assert(md.includes('**Gems**'), 'gems missing');
+    // Opponents shown
+    assert(md.includes('**Red**'), 'Red opponent missing');
+    assert(md.includes('**Barbarians**'), 'Barbarians missing');
+    assert(md.includes('3 visible entities') || md.includes('2 visible entities'), 'opponent count wrong');
+    // Score breakdown
+    assert(md.includes('Total: 850'), 'late game score missing');
+});
+
 // --- summarizeTerrain tests ---
 
 console.log('\n## summarizeTerrain');

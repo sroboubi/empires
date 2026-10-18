@@ -192,6 +192,7 @@ export class Harness extends BaseManager {
         return {
             turn: this.gameState.currentRound,
             orders: this.player.orders,
+            maxOrders: this.player.maxOrders,
             resources: this.player.getResourceProfile(this.gameState),
             score: this.player.score,
             history: history,
