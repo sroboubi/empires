@@ -3,6 +3,7 @@ import { LLMClient } from "./client.js";
 import responseSchema from './response.schema.json' with { type: 'json' };
 import { attack, support, build, explore, onActionDone } from "../utils.js";
 import { HexGrid } from '../../hexGrid.js';
+import { manifestToMarkdown, serializeStateToMarkdown, summarizeTerrain } from "./markdown.js";
 
 export class Harness extends BaseManager {
     constructor(player, gameState, controller) {
@@ -31,19 +32,33 @@ export class Harness extends BaseManager {
 
         let attempts = 10; // Safeguard against infinite loops
         let lastResponseError = null;
+        let lastActionResult = null;
+        let lastFailedCommand = null; // { command, targetDesc, entityId } for structured failure reporting
         let response = null;
         const turnResponseLog = [];
 
         while (attempts > 0) {
             if (lastResponseError) attempts--;
-            const userContent = `\n\`\`\`json\n${JSON.stringify({
-                state: this.summarizeGameState(),
-                lastResponseError: lastResponseError ? {
-                    message: lastResponseError,
-                    failedResponse: response
-                } : null,
-                turnResponseLog: turnResponseLog.length > 0 ? turnResponseLog : null
-            }, (key, value) => { return value === null ? undefined : value; }, 2)}\n\`\`\``;
+            const manifestEntities = this.gameState.manifestData?.entities || this.gameState.manifestData || [];
+            const manifestList = Array.isArray(manifestEntities) ? manifestEntities : Object.values(manifestEntities);
+            const stateMd = serializeStateToMarkdown(this.summarizeGameState(), manifestList);
+            const terrainMd = summarizeTerrain(this.gameState, this.player);
+            let userContent = stateMd;
+            if (terrainMd) userContent += '\n\n' + terrainMd;
+            if (lastResponseError) {
+                if (lastFailedCommand) {
+                    userContent += `\n\n### Last Action Failed\n* **Command Attempted**: ${lastFailedCommand.command} (${lastFailedCommand.target}) using ${lastFailedCommand.entityId}\n* **Failure Reason**: ${lastResponseError}`;
+                } else {
+                    userContent += `\n\n### Last Action Failed\n${lastResponseError}`;
+                }
+                if (response) userContent += `\nFailed response: ${JSON.stringify(response)}`;
+            } else if (lastActionResult) {
+                userContent += `\n\n### Last Action Result\n${lastActionResult}`;
+            }
+            if (turnResponseLog.length > 0) {
+                userContent += `\n\n### Actions Taken This Turn (${turnResponseLog.length})\n` +
+                    turnResponseLog.map((r, i) => `${i + 1}. ${this.describeAction(r)}`).join('\n');
+            }
 
             console.debug("system prompt:", this.llmClient.systemPrompt);
             console.debug("user content:", userContent);
@@ -56,7 +71,7 @@ export class Harness extends BaseManager {
                 return;
             }
 
-            if (response.type == "COMMAND") {
+            if (response.type === "COMMAND") {
                 if (this.player.orders <= 0) {
                     lastResponseError = `You have 0 orders remaining. You cannot execute commands. You must respond with type: "END_TURN" and provide your strategic note.`;
                     continue;
@@ -66,7 +81,7 @@ export class Harness extends BaseManager {
                 if (!entity) {
                     lastResponseError = `Actor entity not found: ${response.entityId}`;
                     continue;
-                } else if (entity.owner != this.player) {
+                } else if (entity.owner !== this.player) {
                     lastResponseError = `Entity ${response.entityId} does not belong to you`;
                     continue;
                 }
@@ -83,49 +98,54 @@ export class Harness extends BaseManager {
                 const command = (response.command || '').toLowerCase();
                 let ordersUsed = 0;
 
+                let actionOutcome = null;
                 if (command === "attack") {
-                    ordersUsed = attack(this.gameState, entity, target, this.player.orders);
-                    if (ordersUsed === 0) {
-                        lastResponseError = `Could not initiate attack on target`;
-                        continue;
-                    }
+                    actionOutcome = attack(this.gameState, entity, target, this.player.orders);
                 } else if (command === "repair") {
-                    ordersUsed = support(this.gameState, entity, target, "Repair", this.player.orders);
-                    if (ordersUsed === 0) {
-                        lastResponseError = `Could not initiate repair on target`;
-                        continue;
-                    }
+                    actionOutcome = support(this.gameState, entity, target, "Repair", this.player.orders);
                 } else if (command === "build") {
                     const targetName = response.target?.entityName;
                     if (!targetName) {
                         lastResponseError = `Build action requires target.entityName`;
                         continue;
                     }
-                    ordersUsed = build(this.gameState, entity, targetName);
-                    if (ordersUsed === 0) {
-                        lastResponseError = `Could not initiate build of ${targetName}`;
-                        continue;
-                    }
+                    actionOutcome = build(this.gameState, entity, targetName);
                 } else if (command === "explore") {
-                    ordersUsed = explore(this.gameState, entity, response.target?.direction, true);
-                    if (ordersUsed === 0) {
-                        lastResponseError = `Could not explore`;
-                        continue;
-                    }
+                    actionOutcome = explore(this.gameState, entity, response.target?.direction, true);
                 } else {
                     lastResponseError = `Command "${command}" not recognized`;
                     continue;
                 }
 
+                ordersUsed = actionOutcome.ordersUsed;
+                if (ordersUsed === 0) {
+                    lastResponseError = actionOutcome.result.message;
+                    // Store structured command info for the enhanced failure format
+                    const targetDesc = command === 'build' ? response.target?.entityName :
+                                     command === 'explore' ? (response.target?.direction || 'unexplored') :
+                                     response.target?.entityId || 'unknown';
+                    lastFailedCommand = {
+                        command: command.charAt(0).toUpperCase() + command.slice(1),
+                        target: targetDesc,
+                        entityId: response.entityId
+                    };
+                    lastActionResult = null;
+                    continue;
+                }
+                lastFailedCommand = null;
+                // Feed the outcome back to the LLM: completed, partial, or the failure reason
+                lastActionResult = `[${actionOutcome.result.status}] ${actionOutcome.result.message}`;
+                lastResponseError = null;
+
                 // Action successfully executed: reconcile and render
                 await onActionDone(this.gameState);
                 lastResponseError = null;
                 turnResponseLog.push(response);
-            } else if (response.type == "CHAT") {
+            } else if (response.type === "CHAT") {
                 // TODO
                 lastResponseError = `CHAT not supported yet`;
                 continue;
-            } else if (response.type == "END_TURN") {
+            } else if (response.type === "END_TURN") {
                 this.player.addHistoryEntry(this.gameState.currentRound, { category: 'note', details: response.note });
                 return;
             } else {
@@ -141,7 +161,8 @@ export class Harness extends BaseManager {
      * @returns {string} The formatted system prompt string.
      */
     async buildSystemPrompt() {
-        const manifestJson = JSON.stringify(this.summarizeManifest(this.gameState.manifestData || {}), (key, value) => { return value === null ? undefined : value; }, 2);
+        const manifestEntities = this.gameState.manifestData?.entities || this.gameState.manifestData || [];
+        const manifestMd = manifestToMarkdown(Array.isArray(manifestEntities) ? manifestEntities : Object.values(manifestEntities));
         const absScoreToWin = this.gameState.settings?.winCondition?.absoluteScore || 1000;
         const relScoreToWin = this.gameState.settings?.winCondition?.relativeScore || 2;
 
@@ -155,7 +176,7 @@ export class Harness extends BaseManager {
             .replace('${DESCRIPTION}', this.player.description ? `You are described as: ${this.player.description}` : '')
             .replace('${ABS_SCORE_TO_WIN}', absScoreToWin)
             .replace('${REL_SCORE_TO_WIN}', relScoreToWin)
-            .replace('${MANIFEST}', manifestJson);
+            .replace('${MANIFEST}', manifestMd);
     }
 
     /**
@@ -187,6 +208,7 @@ export class Harness extends BaseManager {
         return {
             turn: this.gameState.currentRound,
             orders: this.player.orders,
+            maxOrders: this.player.maxOrders,
             resources: this.player.getResourceProfile(this.gameState),
             score: this.player.score,
             history: history,
@@ -203,37 +225,85 @@ export class Harness extends BaseManager {
         const summary = {
             id: entity.id,
             name: entity.name,
-            fromStart: {
+            fromStart: entity.cell ? {
                 direction: this.gameState.hexGrid.directionTo(this.player.startCoord, entity.cell, true).fromSource,
                 distance: HexGrid.distance(this.player.startCoord, entity.cell)
-            },
-            terrain: entity.cell.terrain?.name,
+            } : null,
+            terrain: entity.cell?.terrain?.name,
             health: entity.health,
             maxHealth: entity.maxHealth,
             actionPoints: entity.actionPoints,
             damage: entity.damage,
             armor: entity.armor
         };
+
+        // State-dependent capabilities: what can this unit actually do right now?
+        const manifestEntities = this.gameState.manifestData?.entities || this.gameState.manifestData || {};
+        const manifestList = Array.isArray(manifestEntities) ? manifestEntities : Object.values(manifestEntities);
+        const def = manifestList.find(m => m.name === entity.name);
+        if (def) {
+            // Building requires 1 AP. If the unit has less than 1 AP, it can't build anything.
+            const canBuild = (entity.actionPoints ?? 0) >= 1;
+            const buildables = def.buildables || [];
+            if (buildables.length) {
+                summary.buildableNow = [];
+                summary.buildableLater = [];
+                for (const b of buildables) {
+                    if (!canBuild) {
+                        // Unit lacks AP to build — list as unavailable with reason (rounded to 1 decimal)
+                        const ap = Math.round((entity.actionPoints ?? 0) * 10) / 10;
+                        summary.buildableLater.push({ name: b, missing: `insufficient AP (${ap} < 1 required)` });
+                        continue;
+                    }
+                    const bDef = manifestList.find(m => m.name === b);
+                    const cost = bDef?.spawnCost || {};
+                    const missing = Object.entries(cost)
+                        .filter(([, amt]) => amt > 0)
+                        .map(([res, amt]) => ({ res, need: Math.round((amt - (this.player.resources?.[res] || 0)) * 10) / 10 }))
+                        .filter(x => x.need > 0);
+                    if (missing.length === 0) {
+                        summary.buildableNow.push(b);
+                    } else {
+                        summary.buildableLater.push({ name: b, missing: missing.map(m => `${m.need} ${m.res}`).join(', ') });
+                    }
+                }
+            }
+
+            // Damaged repairables: visible entities of repairable types with health < max
+            const repairables = def.repairables || [];
+            if (repairables.length) {
+                summary.damagedRepairables = [];
+                for (const e of this.gameState.entities || []) {
+                    if (e.destroyed || e.id === entity.id) continue;
+                    if (!repairables.includes(e.name)) continue;
+                    if (e.health === undefined || e.maxHealth === undefined || e.health >= e.maxHealth) continue;
+                    if (e.q === undefined || !this.player.isVisible?.(e.q, e.r)) continue;
+                    summary.damagedRepairables.push({
+                        id: e.id,
+                        name: e.name,
+                        health: Math.round(e.health),
+                        maxHealth: e.maxHealth
+                    });
+                }
+            }
+        }
+
         return summary;
     }
 
-    summarizeManifest(manifest) {
-        const summary = { entities: {}, terrains: {} };
-        const entitiesObj = manifest.entities || {};
-        Object.entries(entitiesObj).forEach(([name, entity]) => {
-            const { damage, movement, spawnCost, maintenance, buildables, repairables, score, yields } = entity;
-            const commands = [];
-            if (movement !== undefined) commands.push("Explore");
-            if (buildables?.length > 0) commands.push("Build");
-            if (repairables?.length > 0) commands.push("Repair");
-            if (damage !== undefined) commands.push("Attack");
-            summary.entities[name] = { commands, damage, movement, spawnCost, maintenance, buildables, repairables, score, yields };
-        });
-        const terrainsList = Array.isArray(manifest.terrains) ? manifest.terrains : Object.values(manifest.terrains || {});
-        terrainsList.forEach(terrain => {
-            summary.terrains[terrain.name] = { movementCost: terrain.movementCost, height: terrain.height };
-        });
-        return summary;
+    /**
+     * Human-readable action description: "Build mine with worker_1",
+     * "Attack red_knight_1 with knight_1", "Explore N with scout_1".
+     */
+    describeAction(r) {
+        const cmd = r.command || r.type || 'Unknown';
+        const actor = r.entityId || 'unknown';
+        const target = r.target || {};
+        let targetDesc = '';
+        if (target.entityName) targetDesc = target.entityName;
+        else if (target.entityId) targetDesc = target.entityId;
+        else if (target.direction) targetDesc = target.direction;
+        return targetDesc ? `${cmd} ${targetDesc} with ${actor}` : `${cmd} with ${actor}`;
     }
 
     getCellInfo(cellCoordStr) {
