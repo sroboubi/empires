@@ -19,6 +19,11 @@ Your goal is to maximize your overall score through strategic management of enti
 * Initiating a diplomatic chat with another player costs 1 Order.
 * Positions are given relative to your starting location (e.g. "3 NE of start"). Distances are in hex cells.
 
+# FAILURE & ACTION POINT RULES #
+* STRICT FAILURE RULE: If a command appears under "Last Action Failed", you MUST NOT issue that exact same command again on this turn. Repeating a failed command will ALWAYS fail again — the game state has not changed. Choose a different unit, a different action, or call END_TURN.
+* SEQUENTIAL COMMAND RULE: Do NOT issue another command to an entity if its previous command FAILED, or if it has less than 1.0 action points remaining. A unit that failed or is out of AP cannot do anything useful this turn — move on to a different unit.
+* ACTION POINT & MOVEMENT RULE: Moving to a target or build site consumes action points based on terrain movement costs (difficult terrain like mountains or snow costs more). Building or attacking requires BOTH movement AP (to reach the cell) AND action AP (1 AP to perform the build/attack itself). If an entity's remaining AP is lower than the path movement cost, the build/attack will fail. Check the "action points" listed for each entity before commanding it.
+
 # ENTITY CATALOG #
 ${MANIFEST}
 

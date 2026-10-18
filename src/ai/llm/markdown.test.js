@@ -270,6 +270,28 @@ test('late game with opponents and barbarians', () => {
     assert(md.includes('Total: 850'), 'late game score missing');
 });
 
+// --- AP-gated buildables ---
+
+console.log('\n## AP gating');
+
+test('unit with <1 AP cannot build', () => {
+    const summary = {
+        turn: 5, orders: 4, maxOrders: 6,
+        resources: { stock: { gold: 100, wood: 100 }, netIncome: {}, turnsRemaining: {} },
+        score: 0,
+        entities: [{
+            id: 'worker_1', name: 'worker', health: 100, maxHealth: 100, actionPoints: 0.5,
+            fromStart: { direction: 'E', distance: 2 },
+            buildableNow: [],
+            buildableLater: [{ name: 'mine', missing: 'insufficient AP (0.5 < 1 required)' }]
+        }],
+        opponents: {}
+    };
+    const md = serializeStateToMarkdown(summary, entities);
+    assert(md.includes('Cannot build mine (insufficient AP'), 'should show AP reason, not affordability');
+    assert(!md.includes('Can build now'), 'should not show buildable when AP < 1');
+});
+
 // --- summarizeTerrain tests ---
 
 console.log('\n## summarizeTerrain');

@@ -425,10 +425,24 @@ export function build(gameState, sourceEntity, targetName,
 
     // Move into staging position (adjacent to the build site).
     if (best.stage.path.length > 0) {
-        if (!moveAction || !(sourceEntity.actionPoints > 0)) return fail(`${sourceEntity.name} cannot move to build site.`);
+        if (!moveAction || !(sourceEntity.actionPoints > 0)) {
+            return fail(`Insufficient AP for movement. ${sourceEntity.name} has ${sourceEntity.actionPoints ?? 0} AP but needs to move to build ${canonicalName}.`);
+        }
+        // Calculate required AP for the path
+        const pathCost = best.stage.path.reduce((sum, cell) => {
+            const baseMc = cell.terrain?.movementCost || 1;
+            const tcs = sourceEntity.terrainCostScale;
+            const tScale = (tcs && cell.terrain?.name in tcs) ? tcs[cell.terrain.name] : 1;
+            return sum + (baseMc * tScale);
+        }, 0);
+        const availableAP = sourceEntity.actionPoints ?? 0;
+        if (pathCost > availableAP) {
+            const terrainTypes = [...new Set(best.stage.path.map(c => c.terrain?.name).filter(Boolean))].join(', ');
+            return fail(`Insufficient AP for movement. Path to nearest valid ${canonicalName} site requires ${pathCost.toFixed(1)} AP${terrainTypes ? ` (Terrain: ${terrainTypes})` : ''}, but ${sourceEntity.name} only has ${availableAP} AP remaining.`);
+        }
         const moved = moveAlongPath(owner, sourceEntity, moveAction, best.stage.path, gameState, 'build',
             `moving to build ${canonicalName} at (${best.cell.q},${best.cell.r})`);
-        if (!moved) return fail(`Could not move to build site for ${canonicalName}.`);
+        if (!moved) return fail(`Could not move to build site for ${canonicalName}. Path requires ${pathCost.toFixed(1)} AP, has ${availableAP} AP.`);
         ordersUsed = 1;
     }
 

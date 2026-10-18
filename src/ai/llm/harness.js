@@ -33,6 +33,7 @@ export class Harness extends BaseManager {
         let attempts = 10; // Safeguard against infinite loops
         let lastResponseError = null;
         let lastActionResult = null;
+        let lastFailedCommand = null; // { command, targetDesc, entityId } for structured failure reporting
         let response = null;
         const turnResponseLog = [];
 
@@ -45,7 +46,12 @@ export class Harness extends BaseManager {
             let userContent = stateMd;
             if (terrainMd) userContent += '\n\n' + terrainMd;
             if (lastResponseError) {
-                userContent += `\n\n### Last Action Failed\n${lastResponseError}` + (response ? `\nFailed response: ${JSON.stringify(response)}` : '');
+                if (lastFailedCommand) {
+                    userContent += `\n\n### Last Action Failed\n* **Command Attempted**: ${lastFailedCommand.command} (${lastFailedCommand.target}) using ${lastFailedCommand.entityId}\n* **Failure Reason**: ${lastResponseError}`;
+                } else {
+                    userContent += `\n\n### Last Action Failed\n${lastResponseError}`;
+                }
+                if (response) userContent += `\nFailed response: ${JSON.stringify(response)}`;
             } else if (lastActionResult) {
                 userContent += `\n\n### Last Action Result\n${lastActionResult}`;
             }
@@ -114,9 +120,19 @@ export class Harness extends BaseManager {
                 ordersUsed = actionOutcome.ordersUsed;
                 if (ordersUsed === 0) {
                     lastResponseError = actionOutcome.result.message;
+                    // Store structured command info for the enhanced failure format
+                    const targetDesc = command === 'build' ? response.target?.entityName :
+                                     command === 'explore' ? (response.target?.direction || 'unexplored') :
+                                     response.target?.entityId || 'unknown';
+                    lastFailedCommand = {
+                        command: command.charAt(0).toUpperCase() + command.slice(1),
+                        target: targetDesc,
+                        entityId: response.entityId
+                    };
                     lastActionResult = null;
                     continue;
                 }
+                lastFailedCommand = null;
                 // Feed the outcome back to the LLM: completed, partial, or the failure reason
                 lastActionResult = `[${actionOutcome.result.status}] ${actionOutcome.result.message}`;
                 lastResponseError = null;
@@ -226,12 +242,18 @@ export class Harness extends BaseManager {
         const manifestList = Array.isArray(manifestEntities) ? manifestEntities : Object.values(manifestEntities);
         const def = manifestList.find(m => m.name === entity.name);
         if (def) {
-            // Split buildables by affordability (spawnCost vs player resources)
+            // Building requires 1 AP. If the unit has less than 1 AP, it can't build anything.
+            const canBuild = (entity.actionPoints ?? 0) >= 1;
             const buildables = def.buildables || [];
             if (buildables.length) {
                 summary.buildableNow = [];
                 summary.buildableLater = [];
                 for (const b of buildables) {
+                    if (!canBuild) {
+                        // Unit lacks AP to build — list as unavailable with reason
+                        summary.buildableLater.push({ name: b, missing: `insufficient AP (${entity.actionPoints ?? 0} < 1 required)` });
+                        continue;
+                    }
                     const bDef = manifestList.find(m => m.name === b);
                     const cost = bDef?.spawnCost || {};
                     const missing = Object.entries(cost)

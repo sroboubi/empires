@@ -297,10 +297,15 @@ function entityStateToMarkdown(e, byName, brief = false) {
   // hallucination: the model sees exactly what this unit can do right now.
   const caps = [];
   if (e.buildableNow !== undefined || e.buildableLater !== undefined) {
-    // State-dependent: split by affordability
+    // State-dependent: split by affordability and AP
     if ((e.buildableNow || []).length) caps.push(`Can build now: ${e.buildableNow.join(', ')}`);
     for (const b of e.buildableLater || []) {
-      caps.push(`Cannot afford ${b.name} (need ${b.missing})`);
+      // Distinguish AP issues from resource issues
+      if (b.missing && b.missing.includes('insufficient AP')) {
+        caps.push(`Cannot build ${b.name} (${b.missing})`);
+      } else {
+        caps.push(`Cannot afford ${b.name} (need ${b.missing})`);
+      }
     }
   } else if (def && (def.buildables || []).length) {
     caps.push(`Builds: ${(def.buildables || []).join(', ')}`);
