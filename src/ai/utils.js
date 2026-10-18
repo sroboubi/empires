@@ -229,7 +229,8 @@ export function attack(gameState, sourceEntity, targetEntity, maxOrders = 1) {
     } else if (movedCloser) {
         result = { status: 'partial', message: `Moved closer to ${targetLabel} but could not attack (${lastCheckReason}).` };
     } else {
-        result = { status: 'failed', message: `Could not attack ${targetLabel} (${lastCheckReason}).` };
+        const apInfo = sourceEntity.actionPoints !== undefined ? ` ${sourceEntity.name} has ${sourceEntity.actionPoints} AP remaining.` : '';
+        result = { status: 'failed', message: `Could not attack ${targetLabel} (${lastCheckReason}).${apInfo}` };
     }
     return { ordersUsed, result };
 }
@@ -549,10 +550,11 @@ export function support(gameState, sourceEntity, targetEntity, actionName = null
                 }
             }
         }
-        return fail(`Could not move adjacent to ${targetEntity.name}.`);
+        const apInfo = ` ${sourceEntity.name} has ${sourceEntity.actionPoints ?? 0} AP remaining.`;
+        return fail(`Could not move adjacent to ${targetEntity.name}.${apInfo}`);
     }
 
-    return fail(`Could not reach ${targetEntity.name}.`);
+    return fail(`Could not reach ${targetEntity.name}. ${sourceEntity.name} has ${sourceEntity.actionPoints ?? 0} AP remaining.`);
 }
 
 /**
@@ -1129,7 +1131,7 @@ export function explore(gameState, unit, direction = null, getTreasure = false, 
             aiLog(player || 'AI', 'explore', `${unit.name} exploring ${reason} -> (${res.targetCell.q},${res.targetCell.r}).`);
             return { ordersUsed: 1, result: { status: 'completed', message: `${unit.name} explored ${reason} towards (${res.targetCell.q},${res.targetCell.r}).` } };
         }
-        return fail('Could not move along exploration path.');
+        return fail(`Could not move along exploration path. ${unit.name} has ${unit.actionPoints ?? 0} AP remaining.`);
     };
 
     // Treasure mode overrides direction: closest treasure on an explored cell.

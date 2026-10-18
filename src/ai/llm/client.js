@@ -110,7 +110,27 @@ export class LLMClient {
                     }
 
                     const result = await response.json();
-                    let rawText = result.choices[0]?.message?.content || '';
+
+                    // Debug: log the full response (includes reasoning_content, finish_reason, usage)
+                    console.debug(`[LLMClient] Full response from ${model}:`, JSON.stringify(result, null, 2));
+
+                    const choice = result.choices?.[0];
+                    const finishReason = choice?.finish_reason;
+
+                    // Check for abnormal termination before attempting to parse
+                    if (finishReason && finishReason !== 'stop' && finishReason !== 'tool_calls') {
+                        const reasonMsg = {
+                            'length': 'LLM hit max output token limit — response is truncated and JSON will be malformed.',
+                            'content_filter': 'LLM response was blocked by content filter.',
+                            'function_call': 'Unexpected function_call finish reason.'
+                        }[finishReason] || `LLM finished with reason: ${finishReason}`;
+                        console.error(`[LLMClient] Abnormal finish_reason from ${model}: ${reasonMsg}`);
+                        // Don't retry on content_filter; do retry on length (might succeed with different phrasing)
+                        if (finishReason === 'content_filter') break;
+                        continue;
+                    }
+
+                    let rawText = choice?.message?.content || '';
 
                     rawText = this._cleanTextOutput(rawText);
 

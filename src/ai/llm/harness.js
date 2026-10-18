@@ -57,7 +57,7 @@ export class Harness extends BaseManager {
             }
             if (turnResponseLog.length > 0) {
                 userContent += `\n\n### Actions Taken This Turn (${turnResponseLog.length})\n` +
-                    turnResponseLog.map((r, i) => `${i + 1}. ${r.command || r.type} (${r.entityId || ''})`).join('\n');
+                    turnResponseLog.map((r, i) => `${i + 1}. ${describeAction(r)}`).join('\n');
             }
 
             console.debug("system prompt:", this.llmClient.systemPrompt);
@@ -288,6 +288,21 @@ export class Harness extends BaseManager {
         }
 
         return summary;
+    }
+
+    /**
+     * Human-readable action description: "Build mine with worker_1",
+     * "Attack red_knight_1 with knight_1", "Explore N with scout_1".
+     */
+    describeAction(r) {
+        const cmd = r.command || r.type || 'Unknown';
+        const actor = r.entityId || 'unknown';
+        const target = r.target || {};
+        let targetDesc = '';
+        if (target.entityName) targetDesc = target.entityName;
+        else if (target.entityId) targetDesc = target.entityId;
+        else if (target.direction) targetDesc = target.direction;
+        return targetDesc ? `${cmd} ${targetDesc} with ${actor}` : `${cmd} with ${actor}`;
     }
 
     getCellInfo(cellCoordStr) {
