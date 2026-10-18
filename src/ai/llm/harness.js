@@ -32,6 +32,7 @@ export class Harness extends BaseManager {
 
         let attempts = 10; // Safeguard against infinite loops
         let lastResponseError = null;
+        let lastActionResult = null;
         let response = null;
         const turnResponseLog = [];
 
@@ -45,6 +46,8 @@ export class Harness extends BaseManager {
             if (terrainMd) userContent += '\n\n' + terrainMd;
             if (lastResponseError) {
                 userContent += `\n\n### Last Action Failed\n${lastResponseError}` + (response ? `\nFailed response: ${JSON.stringify(response)}` : '');
+            } else if (lastActionResult) {
+                userContent += `\n\n### Last Action Result\n${lastActionResult}`;
             }
             if (turnResponseLog.length > 0) {
                 userContent += `\n\n### Actions Taken This Turn (${turnResponseLog.length})\n` +
@@ -89,39 +92,34 @@ export class Harness extends BaseManager {
                 const command = (response.command || '').toLowerCase();
                 let ordersUsed = 0;
 
+                let actionOutcome = null;
                 if (command === "attack") {
-                    ordersUsed = attack(this.gameState, entity, target, this.player.orders);
-                    if (ordersUsed === 0) {
-                        lastResponseError = `Could not initiate attack on target`;
-                        continue;
-                    }
+                    actionOutcome = attack(this.gameState, entity, target, this.player.orders);
                 } else if (command === "repair") {
-                    ordersUsed = support(this.gameState, entity, target, "Repair", this.player.orders);
-                    if (ordersUsed === 0) {
-                        lastResponseError = `Could not initiate repair on target`;
-                        continue;
-                    }
+                    actionOutcome = support(this.gameState, entity, target, "Repair", this.player.orders);
                 } else if (command === "build") {
                     const targetName = response.target?.entityName;
                     if (!targetName) {
                         lastResponseError = `Build action requires target.entityName`;
                         continue;
                     }
-                    ordersUsed = build(this.gameState, entity, targetName);
-                    if (ordersUsed === 0) {
-                        lastResponseError = `Could not initiate build of ${targetName}`;
-                        continue;
-                    }
+                    actionOutcome = build(this.gameState, entity, targetName);
                 } else if (command === "explore") {
-                    ordersUsed = explore(this.gameState, entity, response.target?.direction, true);
-                    if (ordersUsed === 0) {
-                        lastResponseError = `Could not explore`;
-                        continue;
-                    }
+                    actionOutcome = explore(this.gameState, entity, response.target?.direction, true);
                 } else {
                     lastResponseError = `Command "${command}" not recognized`;
                     continue;
                 }
+
+                ordersUsed = actionOutcome.ordersUsed;
+                if (ordersUsed === 0) {
+                    lastResponseError = actionOutcome.result.message;
+                    lastActionResult = null;
+                    continue;
+                }
+                // Feed the outcome back to the LLM: completed, partial, or the failure reason
+                lastActionResult = `[${actionOutcome.result.status}] ${actionOutcome.result.message}`;
+                lastResponseError = null;
 
                 // Action successfully executed: reconcile and render
                 await onActionDone(this.gameState);
@@ -221,6 +219,51 @@ export class Harness extends BaseManager {
             damage: entity.damage,
             armor: entity.armor
         };
+
+        // State-dependent capabilities: what can this unit actually do right now?
+        const manifestEntities = this.gameState.manifestData?.entities || this.gameState.manifestData || {};
+        const manifestList = Array.isArray(manifestEntities) ? manifestEntities : Object.values(manifestEntities);
+        const def = manifestList.find(m => m.name === entity.name);
+        if (def) {
+            // Split buildables by affordability (spawnCost vs player resources)
+            const buildables = def.buildables || [];
+            if (buildables.length) {
+                summary.buildableNow = [];
+                summary.buildableLater = [];
+                for (const b of buildables) {
+                    const bDef = manifestList.find(m => m.name === b);
+                    const cost = bDef?.spawnCost || {};
+                    const missing = Object.entries(cost)
+                        .filter(([, amt]) => amt > 0)
+                        .map(([res, amt]) => ({ res, need: amt - (this.player.resources?.[res] || 0) }))
+                        .filter(x => x.need > 0);
+                    if (missing.length === 0) {
+                        summary.buildableNow.push(b);
+                    } else {
+                        summary.buildableLater.push({ name: b, missing: missing.map(m => `${m.need} ${m.res}`).join(', ') });
+                    }
+                }
+            }
+
+            // Damaged repairables: visible entities of repairable types with health < max
+            const repairables = def.repairables || [];
+            if (repairables.length) {
+                summary.damagedRepairables = [];
+                for (const e of this.gameState.entities || []) {
+                    if (e.destroyed || e.id === entity.id) continue;
+                    if (!repairables.includes(e.name)) continue;
+                    if (e.health === undefined || e.maxHealth === undefined || e.health >= e.maxHealth) continue;
+                    if (e.q === undefined || !this.player.isVisible?.(e.q, e.r)) continue;
+                    summary.damagedRepairables.push({
+                        id: e.id,
+                        name: e.name,
+                        health: Math.round(e.health),
+                        maxHealth: e.maxHealth
+                    });
+                }
+            }
+        }
+
         return summary;
     }
 

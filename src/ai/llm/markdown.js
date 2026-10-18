@@ -53,6 +53,9 @@ function entityToMarkdown(e) {
   }
   if (commands.length) lines.push(`* **Commands**: ${commands.join(', ')}`);
 
+  const combat = describeCombat(e);
+  if (combat) lines.push(`* **Combat**: ${combat}`);
+
   if ((e.buildables || []).length) lines.push(`* **Builds**: ${(e.buildables || []).join(', ')}`);
   if ((e.repairables || []).length) lines.push(`* **Repairs**: ${(e.repairables || []).join(', ')}`);
 
@@ -96,6 +99,28 @@ function condenseScore(obj) {
     .filter(([, v]) => v)
     .map(([k, v]) => `+${v} ${k}`);
   return parts.join(', ');
+}
+
+/**
+ * Compressed combat summary: "60 slashing damage, 300 HP; resistant to slashing, weak to piercing".
+ * Armor > 1 reduces damage (resistant); armor < 1 increases it (weak). Derived from
+ * the damage formula: effectiveDamage = rawValue / armor.
+ */
+function describeCombat(e) {
+  const parts = [];
+  if (e.damage) {
+    const range = e.range ? `, range ${e.range.minCells}-${e.range.maxCells}` : '';
+    parts.push(`${e.damage.value} ${e.damage.type} damage${range}`);
+  }
+  if (e.health || e.maxHealth) {
+    parts.push(`${e.health || e.maxHealth} HP`);
+  }
+  const armor = e.armor || {};
+  const resistant = Object.entries(armor).filter(([, v]) => v > 1).map(([k]) => k);
+  const weak = Object.entries(armor).filter(([, v]) => v < 1).map(([k]) => k);
+  if (resistant.length) parts.push(`resistant to ${resistant.join(', ')}`);
+  if (weak.length) parts.push(`weak to ${weak.join(', ')}`);
+  return parts.join('; ');
 }
 
 /**
@@ -222,14 +247,30 @@ function entityStateToMarkdown(e, byName, brief = false) {
   if (ap) details.push(ap.trim().replace(/^, /, ''));
   if (details.length) parts.push(`  * ${details.join(' | ')}`);
 
-  // Inline capabilities — data-driven from the manifest. This is what stops
-  // the settler/farm hallucination: the model sees "Builds: village" directly.
-  if (def) {
-    const caps = [];
-    if ((def.buildables || []).length) caps.push(`Builds: ${(def.buildables || []).join(', ')}`);
-    if ((def.repairables || []).length) caps.push(`Repairs: ${(def.repairables || []).join(', ')}`);
-    if (caps.length) parts.push(`  * ${caps.join('; ')}`);
+  // Inline capabilities — state-dependent when available (from summarizeEntity),
+  // falling back to static manifest lists. This is what stops the settler/farm
+  // hallucination: the model sees exactly what this unit can do right now.
+  const caps = [];
+  if (e.buildableNow !== undefined || e.buildableLater !== undefined) {
+    // State-dependent: split by affordability
+    if ((e.buildableNow || []).length) caps.push(`Can build now: ${e.buildableNow.join(', ')}`);
+    for (const b of e.buildableLater || []) {
+      caps.push(`Cannot afford ${b.name} (need ${b.missing})`);
+    }
+  } else if (def && (def.buildables || []).length) {
+    caps.push(`Builds: ${(def.buildables || []).join(', ')}`);
   }
+  if (e.damagedRepairables !== undefined) {
+    // State-dependent: only damaged, visible repairables
+    if (e.damagedRepairables.length) {
+      const list = e.damagedRepairables.map(d => `${d.id} (${d.health}/${d.maxHealth} HP)`).join(', ');
+      caps.push(`Can repair (damaged): ${list}`);
+    }
+    // If empty, omit entirely — nothing to repair right now
+  } else if (def && (def.repairables || []).length) {
+    caps.push(`Repairs: ${(def.repairables || []).join(', ')}`);
+  }
+  if (caps.length) parts.push(`  * ${caps.join('; ')}`);
   return parts.join('\n');
 }
 

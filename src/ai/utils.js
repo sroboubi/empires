@@ -21,23 +21,27 @@ import { CONFIG } from '../config.js';
  * @param {BaseEntity} sourceEntity
  * @param {BaseEntity} targetEntity
  * @param {number} maxOrders
- * @returns {number} Number of orders used
+ * @returns {{ordersUsed: number, result: {status: string, message: string}}} Result with orders used and outcome.
  */
 export function attack(gameState, sourceEntity, targetEntity, maxOrders = 1) {
-    if (!gameState || !sourceEntity || !targetEntity || maxOrders <= 0) return 0;
-    if (!sourceEntity.active) return 0;
+    const fail = (message) => ({ ordersUsed: 0, result: { status: 'failed', message } });
+    if (!gameState || !sourceEntity || !targetEntity || maxOrders <= 0) return fail('Invalid attack parameters.');
+    if (!sourceEntity.active) return fail(`${sourceEntity.name} is not active.`);
 
     const availableOrders = Math.min(maxOrders, sourceEntity.owner ? sourceEntity.owner.orders : maxOrders);
-    if (availableOrders <= 0) return 0;
+    if (availableOrders <= 0) return fail('No orders available.');
 
     const actions = sourceEntity.getActions ? sourceEntity.getActions() : [];
     const attackAction = actions.find(a => a.name === "Attack");
-    if (!attackAction) return 0;
+    if (!attackAction) return fail(`${sourceEntity.name} cannot attack.`);
 
     const moveAction = actions.find(a => a.name === "Move");
 
     const targetCell = targetEntity.cell;
     let ordersUsed = 0;
+    let totalDamage = 0;
+    let attacksLanded = 0;
+    let movedCloser = false;
 
     const attackerPlayer = sourceEntity.owner || { name: 'Barbarian' };
     const targetPlayer = targetEntity.owner || { name: 'Neutral' };
@@ -63,6 +67,8 @@ export function attack(gameState, sourceEntity, targetEntity, maxOrders = 1) {
             if (didAttack) {
                 ordersUsed++;
                 const damageDealt = Math.max(0, prevHealth - targetEntity.health);
+                totalDamage += damageDealt;
+                attacksLanded++;
                 const isDestroyed = targetEntity.destroyed || targetEntity.health <= 0;
                 const statusMsg = isDestroyed
                     ? `TARGET DESTROYED!`
@@ -138,6 +144,7 @@ export function attack(gameState, sourceEntity, targetEntity, maxOrders = 1) {
                 const fromCoord = `(${sourceEntity.q},${sourceEntity.r})`;
                 if (moveAction.do(bestMoveCell, null)) {
                     ordersUsed++;
+                    movedCloser = true;
                     aiLog(attackerPlayer, 'combat', `Repositioning: ${sourceEntity.name} moved from ${fromCoord} to (${bestMoveCell.q},${bestMoveCell.r}) for better attack multiplier (${bestMoveMult.toFixed(2)}x vs ${currentMult.toFixed(2)}x). AP left: ${sourceEntity.actionPoints}. Order used: ${ordersUsed}/${availableOrders}.`);
                     moved = true;
                 }
@@ -168,6 +175,7 @@ export function attack(gameState, sourceEntity, targetEntity, maxOrders = 1) {
                     const fromCoord = `(${sourceEntity.q},${sourceEntity.r})`;
                     if (moveAction.do(closestCell, null)) {
                         ordersUsed++;
+                        movedCloser = true;
                         aiLog(attackerPlayer, 'combat', `Repositioning: ${sourceEntity.name} moved from ${fromCoord} to (${closestCell.q},${closestCell.r}) to close distance on ${targetEntity.name} (dist: ${closestDist}). AP left: ${sourceEntity.actionPoints}. Order used: ${ordersUsed}/${availableOrders}.`);
                         moved = true;
                     }
@@ -183,6 +191,8 @@ export function attack(gameState, sourceEntity, targetEntity, maxOrders = 1) {
             if (didAttack) {
                 ordersUsed++;
                 const damageDealt = Math.max(0, prevHealth - targetEntity.health);
+                totalDamage += damageDealt;
+                attacksLanded++;
                 const isDestroyed = targetEntity.destroyed || targetEntity.health <= 0;
                 const statusMsg = isDestroyed
                     ? `TARGET DESTROYED!`
@@ -199,8 +209,9 @@ export function attack(gameState, sourceEntity, targetEntity, maxOrders = 1) {
         break;
     }
 
+    const targetDead = targetEntity.destroyed || targetEntity.health <= 0;
     if (ordersUsed > 0) {
-        const finalStatus = (targetEntity.destroyed || targetEntity.health <= 0)
+        const finalStatus = targetDead
             ? 'TARGET DESTROYED'
             : `Target survived (HP: ${Math.round(targetEntity.health)}/${targetEntity.maxHealth})`;
         aiLog(attackerPlayer, 'combat', `Attack Sequence Complete: ${sourceEntity.name} used ${ordersUsed} order(s) against ${targetPlayer.name}'s ${targetEntity.name}. Result: ${finalStatus}. Attacker AP left: ${sourceEntity.actionPoints}.`);
@@ -208,7 +219,19 @@ export function attack(gameState, sourceEntity, targetEntity, maxOrders = 1) {
         aiLog(attackerPlayer, 'detail', `Attack Sequence Incomplete (0 orders used): ${sourceEntity.name} could not attack ${targetEntity.name} (${lastCheckReason}).`);
     }
 
-    return ordersUsed;
+    // Build the result summary for the caller (e.g. the LLM)
+    let result;
+    const targetLabel = `${targetPlayer.name}'s ${targetEntity.name}`;
+    if (attacksLanded > 0 && targetDead) {
+        result = { status: 'completed', message: `Destroyed ${targetLabel} (${attacksLanded} attack(s), ${totalDamage.toFixed(0)} total damage).` };
+    } else if (attacksLanded > 0) {
+        result = { status: 'completed', message: `Attacked ${targetLabel} ${attacksLanded} time(s) for ${totalDamage.toFixed(0)} total damage; target at ${Math.round(targetEntity.health)}/${targetEntity.maxHealth} HP.` };
+    } else if (movedCloser) {
+        result = { status: 'partial', message: `Moved closer to ${targetLabel} but could not attack (${lastCheckReason}).` };
+    } else {
+        result = { status: 'failed', message: `Could not attack ${targetLabel} (${lastCheckReason}).` };
+    }
+    return { ordersUsed, result };
 }
 
 /**
@@ -290,24 +313,24 @@ function expectedYieldAt(gameState, cell, canonicalName, baseYields) {
  * @param {string} targetName
  * @param {number} [maxDistance] furthest cell from the builder to consider
  * @param {number} [distancePenalty] weighting of extra travel vs. yield gain
- * @returns {number} Number of orders used
+ * @returns {{ordersUsed: number, result: {status: string, message: string}}} Result with orders used and outcome.
  */
 export function build(gameState, sourceEntity, targetName,
     maxDistance = CONFIG.AI_BUILD_MAX_DISTANCE ?? 10,
     distancePenalty = CONFIG.AI_BUILD_DISTANCE_PENALTY ?? 0.2) {
-    if (!gameState || !sourceEntity || !targetName || !sourceEntity.active) return 0;
-
+    const fail = (message) => ({ ordersUsed: 0, result: { status: 'failed', message } });
+    if (!gameState || !sourceEntity || !targetName || !sourceEntity.active) return fail('Invalid builder or target.');
     const grid = gameState.hexGrid;
-    if (!grid) return 0;
+    if (!grid) return fail('No hex grid.');
 
     const owner = sourceEntity.owner;
     const availableOrders = owner ? owner.orders : 1;
-    if (availableOrders <= 0) return 0;
+    if (availableOrders <= 0) return fail('No orders available.');
 
     const actions = sourceEntity.getActions ? sourceEntity.getActions() : [];
     const expectedActionName = `Build ${camelToTitle(targetName)}`;
     const buildAction = actions.find(a => a.name.toLowerCase() === expectedActionName.toLowerCase() || a.name.toLowerCase() === `build ${targetName.toLowerCase()}`);
-    if (!buildAction) return 0;
+    if (!buildAction) return fail(`${sourceEntity.name} cannot build ${targetName}.`);
 
     const moveAction = actions.find(a => a.name === "Move");
 
@@ -381,7 +404,7 @@ export function build(gameState, sourceEntity, targetName,
         });
     }
 
-    if (candidates.length === 0) return 0;
+    if (candidates.length === 0) return fail(`No valid site to build ${canonicalName}.`);
 
     // Closest first; a farther site wins only if its relative yield gain
     // justifies the extra travel: each extra hex must buy at least
@@ -402,28 +425,34 @@ export function build(gameState, sourceEntity, targetName,
 
     // Move into staging position (adjacent to the build site).
     if (best.stage.path.length > 0) {
-        if (!moveAction || !(sourceEntity.actionPoints > 0)) return 0;
+        if (!moveAction || !(sourceEntity.actionPoints > 0)) return fail(`${sourceEntity.name} cannot move to build site.`);
         const moved = moveAlongPath(owner, sourceEntity, moveAction, best.stage.path, gameState, 'build',
             `moving to build ${canonicalName} at (${best.cell.q},${best.cell.r})`);
-        if (!moved) return 0;
+        if (!moved) return fail(`Could not move to build site for ${canonicalName}.`);
         ordersUsed = 1;
     }
 
     // Out of orders: stop here without re-targeting; the same build command
     // next turn will re-select this site and continue.
-    if (ordersUsed >= availableOrders) return ordersUsed;
-    if (HexGrid.distance(sourceEntity, best.cell) !== 1) return ordersUsed;
+    if (ordersUsed >= availableOrders) {
+        return { ordersUsed, result: { status: 'partial', message: `${sourceEntity.name} moved toward build site for ${canonicalName} but ran out of orders.` } };
+    }
+    if (HexGrid.distance(sourceEntity, best.cell) !== 1) {
+        return { ordersUsed, result: { status: 'partial', message: `${sourceEntity.name} moved toward build site for ${canonicalName} but is not yet in position.` } };
+    }
 
     const checkBuild = buildAction.canDo(best.cell, null);
     if (checkBuild && checkBuild.possible) {
         if (buildAction.do(best.cell, null)) {
             aiLog(owner || 'AI', 'build', `Built ${canonicalName} at (${best.cell.q},${best.cell.r}).`);
-            return ordersUsed + 1;
+            return { ordersUsed: ordersUsed + 1, result: { status: 'completed', message: `Built ${canonicalName} at (${best.cell.q},${best.cell.r}).` } };
         }
+        return { ordersUsed, result: { status: 'failed', message: `Build action failed for ${canonicalName}.` } };
     } else {
-        aiLog(owner || 'AI', 'warn', `Build ${canonicalName} at (${best.cell.q},${best.cell.r}) failed check: ${checkBuild ? checkBuild.reason : 'unknown'}`);
+        const reason = checkBuild ? checkBuild.reason : 'unknown';
+        aiLog(owner || 'AI', 'warn', `Build ${canonicalName} at (${best.cell.q},${best.cell.r}) failed check: ${reason}`);
+        return { ordersUsed, result: { status: 'failed', message: `Cannot build ${canonicalName}: ${reason}.` } };
     }
-    return ordersUsed;
 }
 
 
@@ -442,16 +471,17 @@ export function build(gameState, sourceEntity, targetName,
  * @param {BaseEntity} targetEntity
  * @param {string|null} [actionName] action to perform once adjacent (case-insensitive); null = just move up
  * @param {number} [maxOrders] max orders to spend
- * @returns {number} Number of orders used
+ * @returns {{ordersUsed: number, result: {status: string, message: string}}} Result with orders used and outcome.
  */
 export function support(gameState, sourceEntity, targetEntity, actionName = null, maxOrders = 1) {
-    if (!gameState || !sourceEntity || !targetEntity || !sourceEntity.active) return 0;
-    if (targetEntity.destroyed) return 0;
-    if (maxOrders <= 0) return 0;
+    const fail = (message) => ({ ordersUsed: 0, result: { status: 'failed', message } });
+    if (!gameState || !sourceEntity || !targetEntity || !sourceEntity.active) return fail('Invalid entities or source not active.');
+    if (targetEntity.destroyed) return fail('Target is destroyed.');
+    if (maxOrders <= 0) return fail('No orders available.');
 
     const owner = sourceEntity.owner;
     const availableOrders = Math.min(maxOrders, owner ? owner.orders : maxOrders);
-    if (availableOrders <= 0) return 0;
+    if (availableOrders <= 0) return fail('No orders available.');
 
     const actions = sourceEntity.getActions ? sourceEntity.getActions() : [];
     let supportAction = null;
@@ -459,7 +489,7 @@ export function support(gameState, sourceEntity, targetEntity, actionName = null
         supportAction = actions.find(a => a.name && a.name.toLowerCase() === String(actionName).toLowerCase());
         if (!supportAction) {
             aiLog(owner || 'AI', 'warn', `${sourceEntity.name} has no "${actionName}" action to support ${targetEntity.name} with.`);
-            return 0;
+            return fail(`${sourceEntity.name} cannot perform "${actionName}".`);
         }
     }
 
@@ -467,13 +497,14 @@ export function support(gameState, sourceEntity, targetEntity, actionName = null
     const targetCell = targetEntity.cell;
 
     const tryAct = () => {
-        if (!supportAction) return 0;
+        if (!supportAction) return { ordersUsed: 0, result: { status: 'completed', message: `${sourceEntity.name} moved adjacent to ${targetEntity.name}.` } };
         const check = supportAction.canDo(targetCell, targetEntity);
         if (check && check.possible && supportAction.do(targetCell, targetEntity)) {
             aiLog(owner || 'AI', 'detail', `${sourceEntity.name} used ${supportAction.name} on ${targetEntity.name}.`);
-            return 1;
+            return { ordersUsed: 1, result: { status: 'completed', message: `${sourceEntity.name} used ${supportAction.name} on ${targetEntity.name}.` } };
         }
-        return 0;
+        const reason = check && !check.possible ? ` (${check.reason})` : '';
+        return fail(`Could not use ${supportAction?.name || actionName} on ${targetEntity.name}${reason}.`);
     };
 
     // 1. If adjacent, act directly (nothing to do when merely moving along)
@@ -492,17 +523,22 @@ export function support(gameState, sourceEntity, targetEntity, actionName = null
             const checkMove = moveAction.canDo(adjCell, null);
             if (checkMove && checkMove.possible) {
                 if (moveAction.do(adjCell, null)) {
-                    let ordersUsed = 1;
                     if (supportAction && availableOrders > 1) {
-                        ordersUsed += tryAct();
+                        const actResult = tryAct();
+                        const totalOrders = 1 + actResult.ordersUsed;
+                        if (actResult.result.status === 'completed') {
+                            return { ordersUsed: totalOrders, result: { status: 'completed', message: `${sourceEntity.name} moved adjacent to ${targetEntity.name} and used ${supportAction.name}.` } };
+                        }
+                        return { ordersUsed: totalOrders, result: { status: 'partial', message: `${sourceEntity.name} moved adjacent to ${targetEntity.name} but could not use ${supportAction.name}: ${actResult.result.message}` } };
                     }
-                    return ordersUsed;
+                    return { ordersUsed: 1, result: { status: 'partial', message: `${sourceEntity.name} moved adjacent to ${targetEntity.name} but ran out of orders.` } };
                 }
             }
         }
+        return fail(`Could not move adjacent to ${targetEntity.name}.`);
     }
 
-    return 0;
+    return fail(`Could not reach ${targetEntity.name}.`);
 }
 
 /**
@@ -1049,16 +1085,17 @@ export function findPathTowardsUnexplored(explorer, gameState, player, targetedC
  * @param {string|null} [direction]
  * @param {boolean} [getTreasure]
  * @param {Set<string>|Array|null} [targetedCells]
- * @returns {number} 1 if the unit moved, 0 otherwise
+ * @returns {{ordersUsed: number, result: {status: string, message: string}}} Result with orders used and outcome.
  */
 export function explore(gameState, unit, direction = null, getTreasure = false, targetedCells = null) {
-    if (!gameState || !unit || !unit.active) return 0;
+    const fail = (message) => ({ ordersUsed: 0, result: { status: 'failed', message } });
+    if (!gameState || !unit || !unit.active) return fail('Unit is not active or game state missing.');
     const grid = gameState.hexGrid;
-    if (!grid) return 0;
+    if (!grid) return fail('No hex grid.');
     const player = unit.owner;
     const moveAction = unit.getActions ? unit.getActions().find(a => a.name === "Move") : null;
-    if (!moveAction) return 0;
-    if (unit.actionPoints !== undefined && unit.actionPoints <= 0) return 0;
+    if (!moveAction) return fail(`${unit.name} cannot move.`);
+    if (unit.actionPoints !== undefined && unit.actionPoints <= 0) return fail(`${unit.name} has no action points.`);
 
     const claim = (targetCell) => {
         if (targetedCells instanceof Set) targetedCells.add(`${targetCell.q},${targetCell.r}`);
@@ -1069,16 +1106,16 @@ export function explore(gameState, unit, direction = null, getTreasure = false, 
         const res = findPathTowardsUnexplored(unit, gameState, player, targetedCells, targetCells);
         if (res.fullyExplored) {
             aiLog(player || 'AI', 'explore', `All map territory is fully explored.`);
-            return 0;
+            return fail('Map is fully explored.');
         }
-        if (!res.targetCell || !res.path || res.path.length === 0) return 0;
+        if (!res.targetCell || !res.path || res.path.length === 0) return fail('No reachable unexplored cell.');
         const used = moveAlongPath(player, unit, moveAction, res.path, gameState, 'explore', reason);
         if (used > 0) {
             claim(res.targetCell);
             aiLog(player || 'AI', 'explore', `${unit.name} exploring ${reason} -> (${res.targetCell.q},${res.targetCell.r}).`);
-            return 1;
+            return { ordersUsed: 1, result: { status: 'completed', message: `${unit.name} explored ${reason} towards (${res.targetCell.q},${res.targetCell.r}).` } };
         }
-        return 0;
+        return fail('Could not move along exploration path.');
     };
 
     // Treasure mode overrides direction: closest treasure on an explored cell.
@@ -1090,7 +1127,10 @@ export function explore(gameState, unit, direction = null, getTreasure = false, 
             if (!player.isExplored(cell.q, cell.r)) continue;
             treasures.push(cell);
         }
-        if (treasures.length > 0 && doExplore(treasures, 'towards treasure')) return 1;
+        if (treasures.length > 0) {
+            const treasureResult = doExplore(treasures, 'towards treasure');
+            if (treasureResult.ordersUsed > 0) return treasureResult;
+        }
         // Fall back to normal exploration (direction stays overridden).
         return explore(gameState, unit, null, false, targetedCells);
     }
@@ -1098,7 +1138,7 @@ export function explore(gameState, unit, direction = null, getTreasure = false, 
     if (direction) {
         if (!DIRECTIONS_8.includes(direction)) {
             aiLog(player || 'AI', 'warn', `explore: unknown direction "${direction}" (expected one of ${DIRECTIONS_8.join(', ')}).`);
-            return 0;
+            return fail(`Unknown direction "${direction}".`);
         }
         const fromCell = unit.cell || grid.getCell(unit.q, unit.r);
         const targets = [];
