@@ -1,0 +1,21 @@
+{
+  "name": "empires-res",
+  "version": "1.0.0",
+  "description": "We are building a modular, data-driven 4X strategy game using vanilla JavaScript (ESModules) and Three.js.",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "node --import ./stubs.mjs --loader ./loader.mjs ./headless.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "simplex-noise": "^4.0.3",
+    "three": "^0.186.1"
+  },
+  "type": "module"
+}
