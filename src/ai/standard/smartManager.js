@@ -437,7 +437,7 @@ async function handleCombatAndThreats(player, gameState, manifest, myEntities, i
  * 3. MAINTENANCE & REPAIR:
  * Repairs heavily damaged friendly structures/units (<50% HP).
  */
-async function handleHeavyRepairs(player, gameState, myEntities) {
+async function handleHeavyRepairs(player, gameState, myEntities, involvedCells) {
     const heavilyDamaged = myEntities.filter(e => e.active && e.health < (e.maxHealth * 0.5));
     if (heavilyDamaged.length === 0) return false;
 
