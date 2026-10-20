@@ -1341,7 +1341,7 @@ function checkWinConditions() {
         }
       }
       const threshold = winCondition.relativeScore * nextHighest;
-      if (player.score.total >= threshold) {
+      if (nextHighest > 0 && player.score.total >= threshold) {
         reasons.push(`Relative Score: ${player.score.total} >= ${winCondition.relativeScore} × ${nextHighest} (next highest)`);
       }
     }
