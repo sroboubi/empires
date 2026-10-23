@@ -24,14 +24,17 @@ export class GameState {
 
   /**
    * Helper to compute sorted pair key for chat history between two players.
-   * @param {Player|string} player1
-   * @param {Player|string} player2
+   * Keyed by player ID (unique by construction) so two players who share a
+   * display name still get separate histories. Accepts Player objects or raw
+   * IDs. The message objects themselves keep the sender's name for display.
+   * @param {Player|string|number} player1
+   * @param {Player|string|number} player2
    * @returns {string}
    */
   getChatKey(player1, player2) {
-    const name1 = typeof player1 === 'string' ? player1 : player1.name;
-    const name2 = typeof player2 === 'string' ? player2 : player2.name;
-    return [name1, name2].sort().join(':');
+    const id1 = (player1 && typeof player1 === 'object') ? player1.id : player1;
+    const id2 = (player2 && typeof player2 === 'object') ? player2.id : player2;
+    return [String(id1), String(id2)].sort().join(':');
   }
 
   /**
@@ -59,8 +62,7 @@ export class GameState {
   addChatMessage(sender, receiver, content) {
     if (!this.chatHistory) this.chatHistory = {};
     const senderName = typeof sender === 'string' ? sender : sender.name;
-    const receiverName = typeof receiver === 'string' ? receiver : receiver.name;
-    const key = this.getChatKey(senderName, receiverName);
+    const key = this.getChatKey(sender, receiver);
     if (!this.chatHistory[key]) {
       this.chatHistory[key] = [];
     }
