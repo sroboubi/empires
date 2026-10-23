@@ -57,3 +57,11 @@ This file documents mistakes made during development, reasons why they occurred,
 - **Description**: In `index.html`, range-slider widgets were hardcoded for `barbarian` and `barbarianChief` units. In `src/main.js`, `RANGE_SLIDER_IDS`, the `setRange` calls in `openSetupModal`, and the `horde` object construction in `handleStartGameClicked` all referenced those two names explicitly. Adding a new unit (e.g. `barbarianPrincess`) to `defaultSettings.json` had no effect on the UI.
 - **Why it was made**: The initial implementation assumed only the two predefined horde unit types would ever exist.
 - **What to avoid in the future**: Never hardcode entity/unit names when the authoritative source is a config file. Always iterate over `Object.keys(config)` / `Object.entries(config)` to generate UI widgets dynamically, so the UI automatically reflects any additions or removals in the config.
+
+---
+
+### Mistake 9: Coupling prompt configuration to LLM client construction instead of invocation
+- **Description**: In `src/ai/llm/client.js` and `src/ai/llm/harness.js`, `systemPrompt` and `responseSchema` were strictly bound to the `LLMClient` constructor. This led to creating ad-hoc `_chatHarness` objects and proliferating `LLMClient` instances per opponent/pair to handle different prompt modes (structured turn commands vs. roleplay dialogue vs. internal summary notes).
+- **Why it was made**: Assumed that an `LLMClient` should be statically configured per persona and task rather than being a single versatile invocation client that accepts dynamic prompts and options per `generate()` call.
+- **What to avoid in the future**: Keep client wrappers stateless with respect to dynamic prompts and task schemas. Pass `systemPrompt` and task-specific schema/config options into the execution function (`generate(content, systemPrompt, options)`). Maintain a single AI harness and client instance per player stored in the Player class (`player.aiManager`).
+

@@ -8,16 +8,17 @@ import { manifestToMarkdown, serializeStateToMarkdown, summarizeTerrain } from "
 export class Harness extends BaseManager {
     constructor(player, gameState, controller) {
         super(player, gameState, controller);
+        this.llmClient = null;
+        this.cachedCommandSystemPrompt = null;
     }
 
     /**
-     * Processes a player's turn by summarizing the game state and interacting with the AI controller.     
+     * Retrieves or instantiates the single LLMClient for this AI player.
+     * @returns {LLMClient}
      */
-    async processTurn() {
+    getLLMClient() {
         if (!this.llmClient) {
             this.llmClient = new LLMClient({
-                systemPrompt: await this.buildSystemPrompt(),
-                responseSchema: responseSchema,
                 baseUrl: this.gameState.settings?.llm?.baseUrl,
                 apiKey: this.gameState.settings?.llm?.apiKey,
                 orderedModels: this.gameState.settings?.llm?.orderedModels,
@@ -29,6 +30,15 @@ export class Harness extends BaseManager {
                 }
             });
         }
+        return this.llmClient;
+    }
+
+    /**
+     * Processes a player's turn by summarizing the game state and interacting with the AI controller.     
+     */
+    async processTurn() {
+        const client = this.getLLMClient();
+        const commandSystemPrompt = await this.getCommandSystemPrompt();
 
         let attempts = 10; // Safeguard against infinite loops
         let lastResponseError = null;
@@ -60,10 +70,10 @@ export class Harness extends BaseManager {
                     turnResponseLog.map((r, i) => `${i + 1}. ${this.describeAction(r)}`).join('\n');
             }
 
-            console.debug("system prompt:", this.llmClient.systemPrompt);
+            console.debug("system prompt:", commandSystemPrompt);
             console.debug("user content:", userContent);
 
-            response = await this.llmClient.generate(userContent);
+            response = await client.generate(userContent, commandSystemPrompt, { responseSchema });
             console.debug("response:", response);
 
             if (!response) {
@@ -122,8 +132,8 @@ export class Harness extends BaseManager {
                     lastResponseError = actionOutcome.result.message;
                     // Store structured command info for the enhanced failure format
                     const targetDesc = command === 'build' ? response.target?.entityName :
-                                     command === 'explore' ? (response.target?.direction || 'unexplored') :
-                                     response.target?.entityId || 'unknown';
+                        command === 'explore' ? (response.target?.direction || 'unexplored') :
+                            response.target?.entityId || 'unknown';
                     lastFailedCommand = {
                         command: command.charAt(0).toUpperCase() + command.slice(1),
                         target: targetDesc,
@@ -142,9 +152,40 @@ export class Harness extends BaseManager {
                 lastResponseError = null;
                 turnResponseLog.push(response);
             } else if (response.type === "CHAT") {
-                // TODO
-                lastResponseError = `CHAT not supported yet`;
-                continue;
+                if (this.player.orders <= 0) {
+                    lastResponseError = `You have 0 orders remaining. You cannot initiate diplomacy. Call END_TURN.`;
+                    continue;
+                }
+
+                const targetPlayer = this.gameState.players.find(p =>
+                    String(p.id) === String(response.targetPlayerId) ||
+                    p.name.toLowerCase() === String(response.targetPlayerId || '').toLowerCase()
+                );
+
+                if (!targetPlayer) {
+                    lastResponseError = `Target player not found: "${response.targetPlayerId}". Check opponent list for valid IDs or names.`;
+                    continue;
+                }
+
+                if (targetPlayer.id === this.player.id) {
+                    lastResponseError = `Cannot initiate diplomacy with yourself.`;
+                    continue;
+                }
+
+                // Initiating chat costs 1 order
+                this.player.orders -= 1;
+                this.player.addHistoryEntry(this.gameState.currentRound, {
+                    category: 'action',
+                    details: `Initiated diplomatic chat with ${targetPlayer.name} (costs 1 order)`
+                });
+
+                console.log(`[Harness] ${this.player.name} initiated diplomatic chat with ${targetPlayer.name}`);
+                await this.chat(this.player, targetPlayer, response.message || response.thoughtProcess);
+
+                await onActionDone(this.gameState);
+                lastActionResult = `[completed] Concluded diplomatic session with ${targetPlayer.name}`;
+                lastResponseError = null;
+                turnResponseLog.push(response);
             } else if (response.type === "END_TURN") {
                 this.player.addHistoryEntry(this.gameState.currentRound, { category: 'note', details: response.note });
                 return;
@@ -156,38 +197,238 @@ export class Harness extends BaseManager {
     }
 
     /**
+     * Returns the cached command system prompt or builds it dynamically if not cached.
+     * @returns {Promise<string>}
+     */
+    async getCommandSystemPrompt() {
+        if (!this.cachedCommandSystemPrompt) {
+            this.cachedCommandSystemPrompt = await this.buildCommandSystemPrompt();
+        }
+        return this.cachedCommandSystemPrompt;
+    }
+
+    /**
      * Builds a structured, hybrid system prompt combining Markdown rules 
      * and stringified JSON manifest data.
-     * @returns {string} The formatted system prompt string.
+     * @returns {Promise<string>} The formatted system prompt string.
      */
-    async buildSystemPrompt() {
+    async buildCommandSystemPrompt() {
         const manifestEntities = this.gameState.manifestData?.entities || this.gameState.manifestData || [];
-        const manifestMd = manifestToMarkdown(Array.isArray(manifestEntities) ? manifestEntities : Object.values(manifestEntities));
-        const absScoreToWin = this.gameState.settings?.winCondition?.absoluteScore || 1000;
-        const relScoreToWin = this.gameState.settings?.winCondition?.relativeScore || 2;
+        const manifestList = Array.isArray(manifestEntities) ? manifestEntities : Object.values(manifestEntities);
+        const manifestMd = manifestToMarkdown(manifestList);
+        const absScoreToWin = this.gameState.settings?.winCondition?.absoluteScore;
+        const relScoreToWin = this.gameState.settings?.winCondition?.relativeScore;
 
-        const response = await fetch('./src/ai/llm/systemPrompt.md');  // TODO configure filepath
+        const response = await fetch('./src/ai/llm/systemPrompt.command.md');  // TODO configure filepath
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         const systemPromptMarkdown = await response.text();
         return systemPromptMarkdown
-            .replace('${NAME}', this.player.name)
-            .replace('${DESCRIPTION}', this.player.description ? `You are described as: ${this.player.description}` : '')
-            .replace('${ABS_SCORE_TO_WIN}', absScoreToWin)
-            .replace('${REL_SCORE_TO_WIN}', relScoreToWin)
-            .replace('${MANIFEST}', manifestMd);
+            .replace('{NAME}', this.player.name)
+            .replace('{DESCRIPTION}', this.player.description ? `You are described as: ${this.player.description}` : '')
+            .replace('{ABS_SCORE_TO_WIN}', absScoreToWin)
+            .replace('{REL_SCORE_TO_WIN}', relScoreToWin)
+            .replace('{MANIFEST}', manifestMd);
     }
 
     /**
      * Initiates a chat between two players.
+     * Handles both AI-to-AI background chat (capped at 20 exchanges)
+     * and AI-to-Human interactive chat (opens chat modal overlay).
      * @param {Player} initiator
      * @param {Player} receiver
+     * @param {string} [initialMessage]
      */
-    chat(initiator, receiver) {
-        // TODO
-        // if one of the players is NOT AI, then create chat window
-        // if both AI, then perform chat in the background
+    async chat(initiator, receiver, initialMessage = null) {
+        console.log(`[Harness] chat() started between ${initiator.name} and ${receiver.name}`);
+
+        // Case 1: Both players are AI -> background chat loop (invisible to human)
+        if (initiator.isAI && receiver.isAI) {
+            const initiatorHarness = initiator.aiManager;
+            const receiverHarness = receiver.aiManager;
+
+            let firstMsg = initialMessage;
+            if (!firstMsg) {
+                const opening = await initiatorHarness.generateChatReply(receiver, "Open diplomatic dialogue with an initial statement or proposal.");
+                firstMsg = opening.content;
+            }
+            this.gameState.addChatMessage(initiator, receiver, firstMsg);
+
+            let currentSpeaker = receiver;
+            let currentHarness = receiverHarness;
+            let otherPlayer = initiator;
+            const maxExchanges = 20;
+
+            for (let i = 0; i < maxExchanges; i++) {
+                const reply = await currentHarness.generateChatReply(otherPlayer);
+                this.gameState.addChatMessage(currentSpeaker, otherPlayer, reply.content);
+
+                if (reply.ended) {
+                    console.log(`[Harness] AI-to-AI chat terminated by ${currentSpeaker.name} at exchange ${i + 1}`);
+                    break;
+                }
+
+                // Alternate speakers
+                const tempP = currentSpeaker;
+                currentSpeaker = otherPlayer;
+                otherPlayer = tempP;
+                currentHarness = (currentSpeaker === initiator) ? initiatorHarness : receiverHarness;
+            }
+
+            // Both AI players add summary note to their history
+            await initiatorHarness.summarizeChatAndAddNote(receiver);
+            if (receiverHarness && receiverHarness !== initiatorHarness) {
+                await receiverHarness.summarizeChatAndAddNote(initiator);
+            }
+            return;
+        }
+
+        // Case 2: One player is human -> open chat window
+        const aiPlayer = initiator.isAI ? initiator : receiver;
+        const humanPlayer = initiator.isAI ? receiver : initiator;
+        const aiHarness = aiPlayer.aiManager;
+
+        if (initiator.isAI) {
+            // AI opening statement
+            const opening = initialMessage || (await aiHarness.generateChatReply(humanPlayer, "Open diplomatic dialogue with an initial statement or proposition to the human leader.")).content;
+            this.gameState.addChatMessage(aiPlayer, humanPlayer, opening);
+        }
+
+        // Bring up chat window and await until closed/ended
+        if (typeof window !== 'undefined' && typeof window.openChatModal === 'function') {
+            await window.openChatModal(humanPlayer, aiPlayer);
+        }
+
+        // Post-chat note summary for the AI player
+        await aiHarness.summarizeChatAndAddNote(humanPlayer);
+    }
+
+    /**
+     * Builds diplomatic system instructions for chat with a specific opponent.
+     * @param {Player} otherPlayer
+     * @returns {Promise<string>}
+     */
+    async buildChatSystemPrompt(otherPlayer) {
+        const myScore = this.player.score;
+        const otherScore = otherPlayer.score;
+
+        const response = await fetch('./src/ai/llm/systemPrompt.chat.md');  // TODO configure filepath
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const systemPromptMarkdown = await response.text();
+        return systemPromptMarkdown
+            .replace('{NAME}', this.player.name)
+            .replace('{DESCRIPTION}', this.player.description ? `You are described as: ${this.player.description}` : '')
+            .replace('{OPPONENT_NAME}', otherPlayer.name)
+            .replace('{OPPONENT_DESCRIPTION}', otherPlayer.description ? ` (${otherPlayer.description})` : '')
+            .replace('{ROUND}', this.gameState.currentRound)
+            .replace('{MY_MIL}', myScore.military)
+            .replace('{MY_ECON}', myScore.economic)
+            .replace('{MY_EXP}', myScore.exploration)
+            .replace('{MY_TOTAL}', myScore.total)
+            .replace('{OTHER_MIL}', otherScore.military)
+            .replace('{OTHER_ECON}', otherScore.economic)
+            .replace('{OTHER_EXP}', otherScore.exploration)
+            .replace('{OTHER_TOTAL}', otherScore.total);
+    }
+
+    /**
+     * Generates a diplomatic chat reply based on conversation history using the single client.
+     * @param {Player} otherPlayer
+     * @param {string} [contextPrompt]
+     * @returns {Promise<{ content: string, ended: boolean }>}
+     */
+    async generateChatReply(otherPlayer, contextPrompt = null) {
+        const client = this.getLLMClient();
+        const systemPrompt = await this.buildChatSystemPrompt(otherPlayer);
+        const history = this.gameState.getChatHistory(this.player, otherPlayer);
+
+        const messages = [];
+        if (history && history.length > 0) {
+            for (const msg of history) {
+                if (msg.sender === this.player.name) {
+                    messages.push({ role: 'assistant', content: msg.content });
+                } else {
+                    messages.push({ role: 'user', content: `${msg.sender}: ${msg.content}` });
+                }
+            }
+        }
+
+        if (contextPrompt) {
+            messages.push({ role: 'user', content: `[Context]: ${contextPrompt}` });
+        } else if (messages.length === 0) {
+            messages.push({ role: 'user', content: `[Diplomatic channel opened by ${otherPlayer.name}. State your opening position or greeting.]` });
+        }
+
+        console.log(`[Harness] ${this.player.name} generating chat reply to ${otherPlayer.name}...`);
+        const rawResponse = await client.generate(messages, systemPrompt, {
+            temperature: 0.7,
+            maxOutputTokens: 1000
+        });
+
+        if (!rawResponse) {
+            return {
+                content: "... (The leader deliberates silently)",
+                ended: false
+            };
+        }
+
+        const rawText = typeof rawResponse === 'string' ? rawResponse : JSON.stringify(rawResponse);
+        const ended = rawText.includes('[END_CHAT]');
+        const cleanContent = rawText.replace(/\[END_CHAT\]/gi, '').trim();
+
+        return {
+            content: cleanContent || "... (no further comment)",
+            ended: ended
+        };
+    }
+
+    /**
+     * Summarizes the diplomatic conversation and saves a note to player history using the single client.
+     * @param {Player} otherPlayer
+     */
+    async summarizeChatAndAddNote(otherPlayer) {
+        const history = this.gameState.getChatHistory(this.player, otherPlayer);
+        if (!history || history.length === 0) return;
+
+        const recent = history.filter(m => m.round === this.gameState.currentRound).map(m => `${m.sender}: ${m.content}`).join('\n');
+        const summaryPrompt = `You just finished a diplomatic conversation with ${otherPlayer.name}.
+Transcript:
+${recent}
+
+Write a concise 1-2 sentence private strategic note to yourself:
+1. Any agreements, trade, threats, or commitments made?
+2. What should you remember or watch out for regarding ${otherPlayer.name}?
+Respond with ONLY the brief note.`; // TODO: use an md file for this as well
+
+        try {
+            const client = this.getLLMClient();
+            const noteSystemPrompt = `You are a strategic advisor for ${this.player.name}. Summarize diplomacy with ${otherPlayer.name} into concise internal notes.`;
+            const summary = await client.generate(summaryPrompt, noteSystemPrompt, {
+                temperature: 0.3,
+                maxOutputTokens: 300
+            });
+            const cleanSummary = (typeof summary === 'string' ? summary : JSON.stringify(summary))     // TODO: why do we need this cleanup? The client should do it
+                .replace(/<think>[\s\S]*?<\/think>/gi, '')
+                .replace(/^```[a-z]*\n?/i, '')
+                .replace(/\n?```$/i, '')
+                .trim();
+
+            if (cleanSummary) {
+                this.player.addHistoryEntry(this.gameState.currentRound, {
+                    category: 'note',
+                    details: `Diplomacy with ${otherPlayer.name}: ${cleanSummary}`,
+                    extra: {
+                        chatWith: otherPlayer.name
+                    }
+                });
+                console.log(`[Harness] Saved diplomatic note for ${this.player.name} regarding ${otherPlayer.name}: ${cleanSummary}`);
+            }
+        } catch (err) {
+            console.error(`[Harness] Failed to summarize chat for ${this.player.name}:`, err);
+        }
     }
 
     summarizeGameState() {

@@ -362,6 +362,75 @@
       transform: translateX(3px);
     }
 
+    /* Chat Modal & Messages */
+    .chat-msg {
+      padding: 10px 14px;
+      border-radius: 8px;
+      max-width: 82%;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      animation: chatFadeIn 0.2s ease;
+    }
+
+    @keyframes chatFadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .chat-msg-sent {
+      align-self: flex-end;
+      background: rgba(52, 152, 219, 0.18);
+      border: 1px solid rgba(52, 152, 219, 0.35);
+      border-bottom-right-radius: 2px;
+    }
+
+    .chat-msg-received {
+      align-self: flex-start;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-bottom-left-radius: 2px;
+    }
+
+    .chat-msg-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 11px;
+    }
+
+    .chat-msg-author {
+      font-weight: 700;
+      letter-spacing: 0.3px;
+    }
+
+    .chat-msg-time {
+      color: var(--text-muted);
+      font-size: 10px;
+    }
+
+    .chat-msg-body {
+      font-size: 13px;
+      line-height: 1.5;
+      color: var(--text-main);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .chat-msg-system {
+      align-self: center;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px dashed rgba(255, 255, 255, 0.2);
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 11px;
+      color: var(--accent-color);
+      font-style: italic;
+      text-align: center;
+      max-width: 90%;
+    }
+
     /* Resource Profile Tooltip */
     .profile-tooltip {
       position: fixed;
@@ -1067,6 +1136,17 @@
     <div id="context-menu-actions" style="display: flex; flex-direction: column; gap: 6px;"></div>
   </div>
 
+  <!-- Player Context Menu Popup -->
+  <div id="player-context-menu" class="glass-panel context-menu" style="display: none; width: 170px; padding: 8px;">
+    <button id="btn-player-context-chat" class="context-action-btn" style="width: 100%; padding: 8px 12px; border-radius: 4px; display: flex; align-items: center; justify-content: space-between; cursor: pointer;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 14px;">💬</span>
+        <strong style="font-size: 12px; color: #ffffff;">Chat</strong>
+      </div>
+      <span style="font-size: 10px; color: var(--accent-color); font-weight: 600;">1 Order</span>
+    </button>
+  </div>
+
   <!-- Setup Game Modal -->
   <div id="setup-modal-overlay" class="modal-overlay">
     <div class="glass-panel modal-card">
@@ -1347,6 +1427,27 @@
       </div>
       <div class="divider"></div>
       <div id="profile-modal-content"></div>
+    </div>
+  </div>
+
+  <!-- Diplomatic Chat Modal -->
+  <div id="chat-modal-overlay" class="modal-overlay">
+    <div class="glass-panel modal-card" style="width: 640px; height: 650px; max-height: 90vh; display: flex; flex-direction: column;">
+      <div class="modal-header">
+        <div class="modal-title" style="display: flex; align-items: center; gap: 10px;">
+          <span class="player-color-dot" id="chat-modal-color" style="width: 14px; height: 14px;"></span>
+          <span id="chat-modal-title">DIPLOMATIC CHANNEL</span>
+        </div>
+        <button id="btn-close-chat" class="modal-close-btn">✕</button>
+      </div>
+      <div class="divider"></div>
+      <div id="chat-messages-container" style="flex: 1; min-height: 250px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 14px; background: rgba(10, 14, 23, 0.6); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.08);">
+      </div>
+      <div id="chat-status-indicator" style="font-size: 11px; color: var(--accent-color); min-height: 16px; margin-top: 4px; display: flex; align-items: center; gap: 6px;"></div>
+      <div id="chat-input-row" style="display: flex; gap: 10px; margin-top: 8px; align-items: center;">
+        <input type="text" id="chat-message-input" placeholder="Draft diplomatic message..." style="flex: 1; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 6px; color: #fff; padding: 10px 14px; font-family: inherit; font-size: 13px;" />
+        <button id="btn-send-chat" class="btn" style="width: auto; padding: 0 20px; height: 38px;">Send</button>
+      </div>
     </div>
   </div>
 

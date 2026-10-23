@@ -26,6 +26,7 @@ import { HexGrid } from './hexGrid.js';
 import { collectResourceModelEntries } from './resources.js';
 import { audio } from './audio.js';
 import { saveGame, loadGame, listSaves, deleteSave, pruneAutoSaves } from './saveManager.js';
+import { Harness } from './ai/llm/harness.js';
 
 let gameState;
 let manifestData;
@@ -95,6 +96,9 @@ async function init() {
       if (!e.target.closest('#entity-context-menu')) {
         hideContextMenu();
       }
+      if (!e.target.closest('#player-context-menu')) {
+        hidePlayerContextMenu();
+      }
     });
 
     // UI click sound for every button press (config-driven file, manifest sfx.ui.click).
@@ -107,10 +111,12 @@ async function init() {
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         hideContextMenu();
+        hidePlayerContextMenu();
         deselectEntity();
         closeSaveLoadModal();
         closeProfileModal();
         closeVictoryModal();
+        closeChatModal();
         if (gameState) {
           closeSetupModal();
         }
@@ -141,6 +147,65 @@ async function init() {
     document.getElementById('btn-close-profile').addEventListener('click', closeProfileModal);
     document.getElementById('btn-do-manual-save').addEventListener('click', handleManualSaveClicked);
     document.getElementById('btn-victory-close').addEventListener('click', closeVictoryModal);
+
+    // Diplomatic Chat & Player Context Menu UI listeners
+    const btnPlayerChat = document.getElementById('btn-player-context-chat');
+    if (btnPlayerChat) {
+      btnPlayerChat.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const targetAi = playerContextMenuTarget;
+        hidePlayerContextMenu();
+
+        if (!targetAi) return;
+
+        const activeP = gameState.activePlayer;
+        if (!activeP || activeP.isAI) {
+          showToast('You can only initiate chat during your turn.', true);
+          return;
+        }
+
+        if (activeP.orders < 1) {
+          showToast('Not enough orders to initiate chat (costs 1 order).', true);
+          return;
+        }
+
+        const llmSettings = gameState.settings?.llm;
+        if (!llmSettings || !llmSettings.orderedModels || llmSettings.orderedModels.length === 0) {
+          showToast('LLM is not configured. Please configure LLM in Game Setup to enable chat.', true);
+          return;
+        }
+
+        // Deduct 1 order
+        activeP.orders -= 1;
+        activeP.addHistoryEntry(gameState.currentRound, {
+          category: 'action',
+          details: `Initiated diplomatic chat with ${targetAi.name} (costs 1 order)`
+        });
+
+        updatePlayersUI();
+        openChatModal(activeP, targetAi);
+      });
+    }
+
+    const btnCloseChat = document.getElementById('btn-close-chat');
+    if (btnCloseChat) {
+      btnCloseChat.addEventListener('click', () => closeChatModal());
+    }
+
+    const btnSendChat = document.getElementById('btn-send-chat');
+    if (btnSendChat) {
+      btnSendChat.addEventListener('click', () => sendChatMessage());
+    }
+
+    const chatInput = document.getElementById('chat-message-input');
+    if (chatInput) {
+      chatInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          sendChatMessage();
+        }
+      });
+    }
 
     // Barbarian setup UI bindings
     setupBarbarianUI();
@@ -1599,6 +1664,34 @@ function hideContextMenu() {
   clearPathHighlight();
 }
 
+let playerContextMenuTarget = null;
+
+export function showPlayerContextMenu(x, y, targetPlayer) {
+  hideContextMenu();
+  const menu = document.getElementById('player-context-menu');
+  if (!menu) return;
+
+  playerContextMenuTarget = targetPlayer;
+
+  menu.style.display = 'flex';
+  menu.style.visibility = 'hidden';
+  const menuWidth = menu.offsetWidth || 170;
+  const menuHeight = menu.offsetHeight || 50;
+
+  const posX = Math.max(10, Math.min(x, window.innerWidth - menuWidth - 10));
+  const posY = Math.max(10, Math.min(y, window.innerHeight - menuHeight - 10));
+
+  menu.style.left = `${posX}px`;
+  menu.style.top = `${posY}px`;
+  menu.style.visibility = 'visible';
+}
+
+export function hidePlayerContextMenu() {
+  const menu = document.getElementById('player-context-menu');
+  if (menu) menu.style.display = 'none';
+  playerContextMenuTarget = null;
+}
+
 let playerHoverTimer = null;
 
 export function updatePlayersUI() {
@@ -1702,8 +1795,197 @@ export function updatePlayersUI() {
       openProfileModal(player);
     });
 
+    // Right-Click -> Player Context Menu with "Chat" option
+    li.addEventListener('contextmenu', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      clearTimeout(playerHoverTimer);
+      hideResourceTooltip();
+
+      const activeP = gameState.activePlayer;
+      // Requirement 2: Context menu when right-clicking an AI player
+      if (!player.isAI) return;
+      if (activeP && activeP.id === player.id) return;
+
+      showPlayerContextMenu(ev.clientX, ev.clientY, player);
+    });
+
     container.appendChild(li);
   });
+}
+
+/* ==========================================================================
+   DIPLOMATIC CHAT SYSTEM (MODAL & MESSAGING)
+   ========================================================================== */
+
+let currentChatSession = {
+  humanPlayer: null,
+  aiPlayer: null,
+  resolvePromise: null,
+  isWaitingForAi: false
+};
+
+function escapeHTML(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+export function renderChatMessages() {
+  const container = document.getElementById('chat-messages-container');
+  if (!container || !currentChatSession.humanPlayer || !currentChatSession.aiPlayer) return;
+
+  const history = gameState.getChatHistory(currentChatSession.humanPlayer, currentChatSession.aiPlayer);
+  if (!history || history.length === 0) {
+    container.innerHTML = `
+      <div style="color: var(--text-muted); font-size: 13px; text-align: center; margin: auto; padding: 20px;">
+        No diplomatic correspondence on record. Send a message to open negotiations with ${currentChatSession.aiPlayer.name}.
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = history.map(msg => {
+    const isHuman = msg.sender === currentChatSession.humanPlayer.name;
+    const authorColor = isHuman ? 'var(--accent-color)' : currentChatSession.aiPlayer.color;
+    const timeStr = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : '';
+    const bubbleClass = isHuman ? 'chat-msg chat-msg-sent' : 'chat-msg chat-msg-received';
+    const borderStyle = isHuman ? '' : `border-left: 3px solid ${currentChatSession.aiPlayer.color};`;
+
+    return `
+      <div class="${bubbleClass}" style="${borderStyle}">
+        <div class="chat-msg-header">
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <span class="player-color-dot" style="background-color: ${authorColor}; width: 8px; height: 8px;"></span>
+            <span class="chat-msg-author" style="color: ${authorColor};">${escapeHTML(msg.sender)}</span>
+          </div>
+          <span class="chat-msg-time">${timeStr}</span>
+        </div>
+        <div class="chat-msg-body">${escapeHTML(msg.content)}</div>
+      </div>
+    `;
+  }).join('');
+
+  container.scrollTop = container.scrollHeight;
+}
+
+export function openChatModal(humanPlayer, aiPlayer, options = {}) {
+  if (!gameState || !humanPlayer || !aiPlayer) return Promise.resolve();
+
+  const overlay = document.getElementById('chat-modal-overlay');
+  const colorDot = document.getElementById('chat-modal-color');
+  const title = document.getElementById('chat-modal-title');
+  const input = document.getElementById('chat-message-input');
+  const sendBtn = document.getElementById('btn-send-chat');
+  const statusIndicator = document.getElementById('chat-status-indicator');
+
+  colorDot.style.backgroundColor = aiPlayer.color;
+  title.textContent = `DIPLOMACY: ${aiPlayer.name.toUpperCase()}`;
+  statusIndicator.innerHTML = '';
+  input.value = '';
+  input.disabled = false;
+  sendBtn.disabled = false;
+
+  return new Promise((resolve) => {
+    currentChatSession = {
+      humanPlayer,
+      aiPlayer,
+      resolvePromise: resolve,
+      isWaitingForAi: false
+    };
+
+    renderChatMessages();
+    overlay.classList.add('active');
+    setTimeout(() => input.focus(), 100);
+  });
+}
+
+export async function closeChatModal() {
+  const overlay = document.getElementById('chat-modal-overlay');
+  if (!overlay || !overlay.classList.contains('active')) return;
+
+  overlay.classList.remove('active');
+
+  const { humanPlayer, aiPlayer, resolvePromise } = currentChatSession;
+  if (aiPlayer && humanPlayer) {
+    // Requirement 7: When human exits chat, allow the AI player to add a note to summarize the chat
+    await aiPlayer.aiManager.summarizeChatAndAddNote(humanPlayer);
+  }
+
+  updatePlayersUI();
+
+  if (resolvePromise) {
+    resolvePromise();
+  }
+  currentChatSession = {
+    humanPlayer: null,
+    aiPlayer: null,
+    resolvePromise: null,
+    isWaitingForAi: false
+  };
+}
+
+export async function sendChatMessage() {
+  if (currentChatSession.isWaitingForAi) return;
+
+  const input = document.getElementById('chat-message-input');
+  const sendBtn = document.getElementById('btn-send-chat');
+  const statusIndicator = document.getElementById('chat-status-indicator');
+  const text = input.value.trim();
+  if (!text) return;
+
+  const { humanPlayer, aiPlayer } = currentChatSession;
+  if (!humanPlayer || !aiPlayer) return;
+
+  // Add human message to gameState
+  gameState.addChatMessage(humanPlayer, aiPlayer, text);
+  input.value = '';
+  renderChatMessages();
+
+  // Show thinking indicator & disable input
+  currentChatSession.isWaitingForAi = true;
+  input.disabled = true;
+  sendBtn.disabled = true;
+  statusIndicator.innerHTML = `
+    <span style="display: inline-block; animation: pulse 1.5s infinite;">⏳</span>
+    <span>${aiPlayer.name} is formulating a response...</span>
+  `;
+
+  try {
+    const reply = await aiPlayer.aiManager.generateChatReply(humanPlayer);
+
+    // Add AI message to gameState
+    gameState.addChatMessage(aiPlayer, humanPlayer, reply.content);
+    renderChatMessages();
+
+    if (reply.ended) {
+      statusIndicator.innerHTML = `<span style="color: #f1c40f;">[ ${aiPlayer.name} has concluded the negotiations. ]</span>`;
+      await aiPlayer.aiManager.summarizeChatAndAddNote(humanPlayer);
+      updatePlayersUI();
+    } else {
+      statusIndicator.innerHTML = '';
+      input.disabled = false;
+      sendBtn.disabled = false;
+      input.focus();
+    }
+  } catch (err) {
+    console.error('Error generating AI chat reply:', err);
+    statusIndicator.innerHTML = `<span style="color: #e74c3c;">Failed to get response from ${aiPlayer.name}.</span>`;
+    input.disabled = false;
+    sendBtn.disabled = false;
+  } finally {
+    currentChatSession.isWaitingForAi = false;
+  }
+}
+
+// Expose on window for harness access
+if (typeof window !== 'undefined') {
+  window.openChatModal = openChatModal;
+  window.closeChatModal = closeChatModal;
 }
 
 /* ==========================================================================
@@ -1954,7 +2236,8 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
             'damage': '#e74c3c',
             'spawn': '#2ecc71',
             'destroy': '#e67e22',
-            'orders': '#f1c40f'
+            'orders': '#f1c40f',
+            'note': '#38bdf8'
           };
           const categoryColor = categoryColors[entry.category] || 'var(--text-main)';
 
