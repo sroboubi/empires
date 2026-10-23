@@ -295,13 +295,13 @@ export class Harness extends BaseManager {
             this.gameState.addChatMessage(aiPlayer, humanPlayer, opening);
         }
 
-        // Bring up chat window and await until closed/ended
+        // Bring up chat window and await until closed/ended.
+        // The summary note is added by closeChatModal() in main.js when the
+        // modal closes — do not summarize here as well (would double the note
+        // and the LLM call).
         if (typeof window !== 'undefined' && typeof window.openChatModal === 'function') {
             await window.openChatModal(humanPlayer, aiPlayer);
         }
-
-        // Post-chat note summary for the AI player
-        await aiHarness.summarizeChatAndAddNote(humanPlayer);
     }
 
     /**

@@ -1406,7 +1406,7 @@ function checkWinConditions() {
         }
       }
       const threshold = winCondition.relativeScore * nextHighest;
-      if (player.score.total >= threshold) {
+      if (nextHighest > 0 && player.score.total >= threshold) {
         reasons.push(`Relative Score: ${player.score.total} >= ${winCondition.relativeScore} × ${nextHighest} (next highest)`);
       }
     }
@@ -1963,8 +1963,9 @@ export async function sendChatMessage() {
     renderChatMessages();
 
     if (reply.ended) {
+      // Summary note is added by closeChatModal() when the human closes the
+      // modal — summarizing here too would double the note and the LLM call.
       statusIndicator.innerHTML = `<span style="color: #f1c40f;">[ ${aiPlayer.name} has concluded the negotiations. ]</span>`;
-      await aiPlayer.aiManager.summarizeChatAndAddNote(humanPlayer);
       updatePlayersUI();
     } else {
       statusIndicator.innerHTML = '';

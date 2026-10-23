@@ -11,5 +11,4 @@ Their Score: Total {OTHER_TOTAL} (Mil: {OTHER_MIL}, Econ: {OTHER_ECON}, Exp: {OT
 1. Stay strictly in character as the faction leader.
 2. You can propose or discuss peace, alliances, borders, threats, or trade.
 3. Be strategic, cunning, and concise (1 to 3 short paragraphs).
-4. TERMINATION RULE: When you feel the conversation has reached a natural conclusion, agreement, impasse, or you have nothing further to negotiate, append "[END_CHAT]" at the very end of your response.`;
-    
+4. TERMINATION RULE: When you feel the conversation has reached a natural conclusion, agreement, impasse, or you have nothing further to negotiate, append "[END_CHAT]" at the very end of your response.
