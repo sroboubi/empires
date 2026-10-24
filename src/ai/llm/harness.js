@@ -394,28 +394,34 @@ export class Harness extends BaseManager {
         const history = this.gameState.getChatHistory(this.player, otherPlayer);
         if (!history || history.length === 0) return;
 
-        const recent = history.filter(m => m.round === this.gameState.currentRound).map(m => `${m.sender}: ${m.content}`).join('\n');
-        const response = await fetch(CONFIG.CHAT_SUMMATION_PROMPT_URL);
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        let summaryPrompt = await response.text();
-        summaryPrompt = summaryPrompt.replace("{OPPONENT_NAME}", otherPlayer.name).replace("{RECENT_CHAT}", recent);
-        const noteSystemPrompt = `You are a strategic advisor for ${this.player.name}. Summarize diplomacy with ${otherPlayer.name} into concise internal notes.`;
-        const summary = await this.llmClient.generate(summaryPrompt, noteSystemPrompt, {
-            temperature: 0.3,
-            maxOutputTokens: 1000
-        });
-
-        if (summary) {
-            this.player.addHistoryEntry(this.gameState.currentRound, {
-                category: 'note',
-                details: `Diplomacy with ${otherPlayer.name}: ${summary}`,
-                extra: {
-                    chatWith: otherPlayer.name
-                }
+        // Best-effort note: a failed summary must never break the turn flow
+        // (closeChatModal awaits this before resolving the chat promise).
+        try {
+            const recent = history.filter(m => m.round === this.gameState.currentRound).map(m => `${m.sender}: ${m.content}`).join('\n');
+            const response = await fetch(CONFIG.CHAT_SUMMATION_PROMPT_URL);
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            let summaryPrompt = await response.text();
+            summaryPrompt = summaryPrompt.replace("{OPPONENT_NAME}", otherPlayer.name).replace("{RECENT_CHAT}", recent);
+            const noteSystemPrompt = `You are a strategic advisor for ${this.player.name}. Summarize diplomacy with ${otherPlayer.name} into concise internal notes.`;
+            const summary = await this.getLLMClient().generate(summaryPrompt, noteSystemPrompt, {
+                temperature: 0.3,
+                maxOutputTokens: 1000
             });
-            console.log(`[Harness] Saved diplomatic note for ${this.player.name} regarding ${otherPlayer.name}: ${summary}`);
+
+            if (summary) {
+                this.player.addHistoryEntry(this.gameState.currentRound, {
+                    category: 'note',
+                    details: `Diplomacy with ${otherPlayer.name}: ${summary}`,
+                    extra: {
+                        chatWith: otherPlayer.name
+                    }
+                });
+                console.log(`[Harness] Saved diplomatic note for ${this.player.name} regarding ${otherPlayer.name}: ${summary}`);
+            }
+        } catch (err) {
+            console.error(`[Harness] Failed to summarize chat for ${this.player.name}:`, err);
         }
     }
 
