@@ -673,5 +673,16 @@ export class SmartManager extends BaseManager {
 
         aiLog(player, 'turn', `=== Turn Ended | Remaining Orders: ${player.orders} ===`);
     }
+
+    async summarizeChatAndAddNote(otherPlayer) {
+        // no-op
+    }
+
+    async generateChatReply(otherPlayer, contextPrompt = null) {
+        return {
+            content: "There is no time for words!",
+            ended: true
+        };
+    }
 }
 

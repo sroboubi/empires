@@ -33,6 +33,9 @@ export var CONFIG = {
   TERRAINS_URL: './definitions/terrains.json',
   AUDIO_URL: './definitions/audio.json',
   DEFAULT_SETTINGS_URL: './definitions/defaultSettings.json',
+  COMMAND_PROMPT_URL: './src/ai/llm/systemPrompt.command.md',
+  CHAT_PROMPT_URL: './src/ai/llm/systemPrompt.chat.md',
+  CHAT_SUMMATION_PROMPT_URL: './src/ai/llm/systemPrompt.chatSummation.md',
 };
 
 // Parse the current URL parameters

@@ -109,6 +109,10 @@
         "targetPlayerId": {
           "type": "string",
           "description": "ID of opponent player to open chat with."
+        },
+        "message": {
+          "type": "string",
+          "description": "Optional opening message or proposition to send."
         }
       }
     },

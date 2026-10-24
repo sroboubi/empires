@@ -3,8 +3,8 @@ import Ajv from 'ajv';
 export class LLMClient {
     /**
      * @param {Object} options
-     * @param {string} options.systemPrompt - System instructions.
-     * @param {Object|null} options.responseSchema - Expected JSON schema.
+     * @param {string|null} [options.systemPrompt=null] - Default system instructions (optional fallback).
+     * @param {Object|null} [options.responseSchema=null] - Expected JSON schema (optional fallback).
      * @param {string|null} options.apiKey - API key.
      * @param {string} options.baseUrl - Endpoint URL.
      * @param {string|string[]} options.orderedModels - Model ID(s).
@@ -13,7 +13,7 @@ export class LLMClient {
      * @param {Object} [options.generationConfig] - Hyperparameters (temperature, maxOutputTokens, thinkingBudget).
      */
     constructor({
-        systemPrompt,
+        systemPrompt = null,
         responseSchema = null,
         apiKey,
         baseUrl,
@@ -21,7 +21,7 @@ export class LLMClient {
         maxRetries = 2,
         timeoutMs = 15000,
         generationConfig = {}
-    }) {
+    } = {}) {
         this.systemPrompt = systemPrompt;
         this.responseSchema = responseSchema;
         this.apiKey = apiKey;
@@ -30,22 +30,64 @@ export class LLMClient {
         this.maxRetries = maxRetries;
         this.timeoutMs = timeoutMs;
         this.generationConfig = generationConfig;
-
+        this.allowSchema = true;   // these are generally per provider (per base URL, not per model)
+        this.allowReasoning = true;
         this.ajv = new Ajv({ allErrors: true, strict: false });
     }
 
-    async generate(content) {
-        const formattedPrompt = typeof content === 'string' ? content : JSON.stringify(content);
+    /**
+     * Generates a response from the LLM using a dynamic system prompt and options.
+     * @param {string|Array<Object>} content - Prompt text or array of messages.
+     * @param {string|null} [systemPrompt=null] - Dynamic system instructions for this call.
+     * @param {Object|null} [options=null] - Call options: { responseSchema, temperature, maxOutputTokens, thinkingBudget, generationConfig }.
+     * @returns {Promise<Object|string|null>} Parsed JSON object if schema validated, otherwise raw string.
+     */
+    async generate(content, systemPrompt = null, options = null) {
+        const activeSystemPrompt = systemPrompt !== null && systemPrompt !== undefined
+            ? systemPrompt
+            : (this.systemPrompt || '');
 
-        let effectiveSystemPrompt = this.systemPrompt;
-        if (this.responseSchema) {
-            effectiveSystemPrompt += `\n\nREQUIRED RESPONSE SCHEMA:\nYou MUST respond strictly in raw JSON adhering to this JSON Schema:\n${JSON.stringify(this.responseSchema)}`;
+        let activeSchema = this.responseSchema;
+        let configOverrides = {};
+
+        if (options) {
+            if (options.responseSchema !== undefined) {
+                activeSchema = options.responseSchema;
+            } else if (options.properties || options.anyOf || options.type) {
+                activeSchema = options;
+            }
+
+            if (options.generationConfig) {
+                configOverrides = options.generationConfig;
+            } else {
+                if (options.temperature !== undefined) configOverrides.temperature = options.temperature;
+                if (options.maxOutputTokens !== undefined) configOverrides.maxOutputTokens = options.maxOutputTokens;
+                if (options.thinkingBudget !== undefined) configOverrides.thinkingBudget = options.thinkingBudget;
+            }
         }
 
-        const messages = [
-            { role: 'system', content: effectiveSystemPrompt },
-            { role: 'user', content: formattedPrompt }
-        ];
+        const effectiveGenConfig = {
+            ...this.generationConfig,
+            ...configOverrides
+        };
+
+        let effectiveSystemPrompt = activeSystemPrompt;
+        if (activeSchema) {
+            effectiveSystemPrompt += `\n\nREQUIRED RESPONSE SCHEMA:\nYou MUST respond strictly in raw JSON adhering to this JSON Schema:\n${JSON.stringify(activeSchema)}`;
+        }
+
+        let messages;
+        if (Array.isArray(content)) {
+            messages = effectiveSystemPrompt
+                ? [{ role: 'system', content: effectiveSystemPrompt }, ...content]
+                : [...content];
+        } else {
+            const formattedPrompt = typeof content === 'string' ? content : JSON.stringify(content);
+            messages = [
+                { role: 'system', content: effectiveSystemPrompt },
+                { role: 'user', content: formattedPrompt }
+            ];
+        }
 
         // Sequential fallback across models (works identically for local and cloud)
         for (const model of this.orderedModels) {
@@ -53,24 +95,24 @@ export class LLMClient {
 
             const payload = {
                 model: model,
-                messages: messages,
-                ...(this.generationConfig.temperature !== undefined && { temperature: this.generationConfig.temperature }),
-                ...(this.generationConfig.maxOutputTokens !== undefined && { max_tokens: this.generationConfig.maxOutputTokens })
+                messages: [...messages],
+                ...(effectiveGenConfig.temperature !== undefined && { temperature: effectiveGenConfig.temperature }),
+                ...(effectiveGenConfig.maxOutputTokens !== undefined && { max_tokens: effectiveGenConfig.maxOutputTokens })
             };
 
-            if (this.responseSchema) {
+            if (activeSchema && this.allowSchema) {
                 payload.response_format = {
                     type: 'json_schema',
                     json_schema: {
                         name: 'game_action_response',
                         strict: true,
-                        schema: this.responseSchema
+                        schema: activeSchema
                     }
                 };
             }
 
-            if (this.generationConfig.thinkingBudget > 0) {
-                payload.reasoning = { max_tokens: this.generationConfig.thinkingBudget };
+            if (effectiveGenConfig.thinkingBudget > 0 && this.allowReasoning) {
+                payload.reasoning = { max_tokens: effectiveGenConfig.thinkingBudget };
             }
 
             while (attempts <= this.maxRetries) {
@@ -97,12 +139,14 @@ export class LLMClient {
                         if (payload.response_format && (errMsg.includes('response_format') || errMsg.includes('json_schema') || errMsg.includes('schema'))) {
                             console.warn('[LLMClient] Provider rejected response_format; falling back to prompt enforcement.');
                             delete payload.response_format;
+                            this.allowSchema = false;    // one time fix for provider - if we hit this once, we won't try again.
                             continue;
                         }
 
                         if (payload.reasoning && errMsg.includes('reasoning')) {
                             console.warn('[LLMClient] Provider rejected reasoning parameter; stripping.');
                             delete payload.reasoning;
+                            this.allowReasoning = false;    // one time fix for provider - if we hit this once, we won't try again.
                             continue;
                         }
 
@@ -134,9 +178,9 @@ export class LLMClient {
 
                     rawText = this._cleanTextOutput(rawText);
 
-                    if (!this.responseSchema) return rawText;
+                    if (!activeSchema) return rawText;
 
-                    const validation = this._validateSchema(rawText, this.responseSchema);
+                    const validation = this._validateSchema(rawText, activeSchema);
                     if (validation.valid) return validation.data;
 
                     console.warn(`[Ajv Validation Failed - Model: ${model} - Attempt ${attempts}/${this.maxRetries}]: ${validation.error}`);

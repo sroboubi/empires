@@ -256,3 +256,13 @@ Implement the game configuration loading system using the provided JSON architec
    - isConstruct if it can't move (has no movement object in the entity definition) 
    - add move/attack actions if it has movement/damage defined
 4. Move this entity.js into the src folder and delete controllers folder.
+
+## Task: Phase 22 - Chat with Other Players ##
+
+1. Implement the chat() function in ai/llm/harness.js to allow other players to chat with the LLM.
+2. When a player right clicks in an AI player in the empires panel, give them a context menu with a single option: "Chat". The chat costs 1 order.
+3. If "Chat" is selected, then open the chat panel and display all previous messages. The chat panel should include a text input box for typing messages, and a send button. It should look clean and use the same styling as other panels. It should be scrollable and clearly indicate who sent which message and when. Each message entry should have a timestamp, the name of the player who sent it, and the message content.
+4. Add chat history to gameState. This should be keyed by pair of players (order them by name) and contain the messages in an array.
+5. When an AI player wants to chat with the human using the CHAT command, then follow the same procedure and bring up the chat window. 
+6. When an AI player wants to chat with another AI player using the CHAT command, allow them to chat in the background as part of the initiators turn. The human can not see the content.
+7. In all cases, when an AI player finishes chat either by the AI player triggering a chat termination, or by the human exiting the chat, allow the AI player to add a note to it's history to summarize the chat and any information it needs to remember.

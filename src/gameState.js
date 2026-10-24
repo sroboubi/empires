@@ -19,6 +19,61 @@ export class GameState {
     this.manifestData = null;
     this.settings = null;
     this.gameOver = false;
+    this.chatHistory = {};
+  }
+
+  /**
+   * Helper to compute sorted pair key for chat history between two players.
+   * Keyed by player ID (unique by construction) so two players who share a
+   * display name still get separate histories. Accepts Player objects or raw
+   * IDs. The message objects themselves keep the sender's name for display.
+   * @param {Player|string|number} player1
+   * @param {Player|string|number} player2
+   * @returns {string}
+   */
+  getChatKey(player1, player2) {
+    const id1 = (player1 && typeof player1 === 'object') ? player1.id : player1;
+    const id2 = (player2 && typeof player2 === 'object') ? player2.id : player2;
+    return [String(id1), String(id2)].sort().join(':');
+  }
+
+  /**
+   * Returns chat history array between two players.
+   * @param {Player|string} player1
+   * @param {Player|string} player2
+   * @returns {Array<Object>}
+   */
+  getChatHistory(player1, player2) {
+    if (!this.chatHistory) this.chatHistory = {};
+    const key = this.getChatKey(player1, player2);
+    if (!this.chatHistory[key]) {
+      this.chatHistory[key] = [];
+    }
+    return this.chatHistory[key];
+  }
+
+  /**
+   * Appends a chat message to history between sender and receiver.
+   * @param {Player|string} sender
+   * @param {Player|string} receiver
+   * @param {string} content
+   * @returns {Object} Added message object
+   */
+  addChatMessage(sender, receiver, content) {
+    if (!this.chatHistory) this.chatHistory = {};
+    const senderName = typeof sender === 'string' ? sender : sender.name;
+    const key = this.getChatKey(sender, receiver);
+    if (!this.chatHistory[key]) {
+      this.chatHistory[key] = [];
+    }
+    const message = {
+      sender: senderName,
+      content: content,
+      round: this.currentRound,
+      timestamp: new Date().toISOString()
+    };
+    this.chatHistory[key].push(message);
+    return message;
   }
 
   /**
@@ -45,6 +100,7 @@ export class GameState {
     this.entities = [];
     this.activePlayerIndex = 0;
     this.currentRound = 1;
+    this.chatHistory = {};
 
     // Default placeholder players if manifest not initialized yet
     this.players = [];
@@ -313,7 +369,8 @@ export class GameState {
       players: this.players.map(p => p.toJSON()),
       entities: this.entities.map(e => e.toJSON()),
       cells: this.hexGrid ? this.hexGrid.getCellsObject() : {},
-      settings: this.settings
+      settings: this.settings,
+      chatHistory: this.chatHistory || {}
     });
   }
 
@@ -328,6 +385,8 @@ export class GameState {
       if (data.settings) {
         this.settings = data.settings;
       }
+
+      this.chatHistory = data.chatHistory || {};
 
       if (data.activePlayerIndex !== undefined) {
         this.activePlayerIndex = data.activePlayerIndex;
