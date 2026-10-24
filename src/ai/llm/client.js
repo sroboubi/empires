@@ -30,7 +30,8 @@ export class LLMClient {
         this.maxRetries = maxRetries;
         this.timeoutMs = timeoutMs;
         this.generationConfig = generationConfig;
-
+        this.allowSchema = true;   // these are generally per provider (per base URL, not per model)
+        this.allowReasoning = true;
         this.ajv = new Ajv({ allErrors: true, strict: false });
     }
 
@@ -99,7 +100,7 @@ export class LLMClient {
                 ...(effectiveGenConfig.maxOutputTokens !== undefined && { max_tokens: effectiveGenConfig.maxOutputTokens })
             };
 
-            if (activeSchema) {
+            if (activeSchema && this.allowSchema) {
                 payload.response_format = {
                     type: 'json_schema',
                     json_schema: {
@@ -110,7 +111,7 @@ export class LLMClient {
                 };
             }
 
-            if (effectiveGenConfig.thinkingBudget > 0) {
+            if (effectiveGenConfig.thinkingBudget > 0 && this.allowReasoning) {
                 payload.reasoning = { max_tokens: effectiveGenConfig.thinkingBudget };
             }
 
@@ -138,12 +139,14 @@ export class LLMClient {
                         if (payload.response_format && (errMsg.includes('response_format') || errMsg.includes('json_schema') || errMsg.includes('schema'))) {
                             console.warn('[LLMClient] Provider rejected response_format; falling back to prompt enforcement.');
                             delete payload.response_format;
+                            this.allowSchema = false;    // one time fix for provider - if we hit this once, we won't try again.
                             continue;
                         }
 
                         if (payload.reasoning && errMsg.includes('reasoning')) {
                             console.warn('[LLMClient] Provider rejected reasoning parameter; stripping.');
                             delete payload.reasoning;
+                            this.allowReasoning = false;    // one time fix for provider - if we hit this once, we won't try again.
                             continue;
                         }
 

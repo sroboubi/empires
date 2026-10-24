@@ -4,6 +4,7 @@ import responseSchema from './response.schema.json' with { type: 'json' };
 import { attack, support, build, explore, onActionDone } from "../utils.js";
 import { HexGrid } from '../../hexGrid.js';
 import { manifestToMarkdown, serializeStateToMarkdown, summarizeTerrain } from "./markdown.js";
+import { CONFIG } from "../../config.js";
 
 export class Harness extends BaseManager {
     constructor(player, gameState, controller) {
@@ -22,11 +23,11 @@ export class Harness extends BaseManager {
                 baseUrl: this.gameState.settings?.llm?.baseUrl,
                 apiKey: this.gameState.settings?.llm?.apiKey,
                 orderedModels: this.gameState.settings?.llm?.orderedModels,
-                timeoutMs: 120000,
+                timeoutMs: 30000,
                 generationConfig: {
-                    temperature: 0.2,
-                    maxOutputTokens: 8000,
-                    thinkingBudget: 8000
+                    temperature: 0.1,
+                    maxOutputTokens: 4000,
+                    thinkingBudget: 1000
                 }
             });
         }
@@ -40,7 +41,7 @@ export class Harness extends BaseManager {
         const client = this.getLLMClient();
         const commandSystemPrompt = await this.getCommandSystemPrompt();
 
-        let attempts = 10; // Safeguard against infinite loops
+        let attempts = 4; // Safeguard against infinite loops
         let lastResponseError = null;
         let lastActionResult = null;
         let lastFailedCommand = null; // { command, targetDesc, entityId } for structured failure reporting
@@ -219,7 +220,7 @@ export class Harness extends BaseManager {
         const absScoreToWin = this.gameState.settings?.winCondition?.absoluteScore;
         const relScoreToWin = this.gameState.settings?.winCondition?.relativeScore;
 
-        const response = await fetch('./src/ai/llm/systemPrompt.command.md');  // TODO configure filepath
+        const response = await fetch(CONFIG.COMMAND_PROMPT_URL);
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -313,7 +314,7 @@ export class Harness extends BaseManager {
         const myScore = this.player.score;
         const otherScore = otherPlayer.score;
 
-        const response = await fetch('./src/ai/llm/systemPrompt.chat.md');  // TODO configure filepath
+        const response = await fetch(CONFIG.CHAT_PROMPT_URL);
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -394,40 +395,27 @@ export class Harness extends BaseManager {
         if (!history || history.length === 0) return;
 
         const recent = history.filter(m => m.round === this.gameState.currentRound).map(m => `${m.sender}: ${m.content}`).join('\n');
-        const summaryPrompt = `You just finished a diplomatic conversation with ${otherPlayer.name}.
-Transcript:
-${recent}
+        const response = await fetch(CONFIG.CHAT_SUMMATION_PROMPT_URL);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        let summaryPrompt = await response.text();
+        summaryPrompt = summaryPrompt.replace("{OPPONENT_NAME}", otherPlayer.name).replace("{RECENT_CHAT}", recent);
+        const noteSystemPrompt = `You are a strategic advisor for ${this.player.name}. Summarize diplomacy with ${otherPlayer.name} into concise internal notes.`;
+        const summary = await this.llmClient.generate(summaryPrompt, noteSystemPrompt, {
+            temperature: 0.3,
+            maxOutputTokens: 1000
+        });
 
-Write a concise 1-2 sentence private strategic note to yourself:
-1. Any agreements, trade, threats, or commitments made?
-2. What should you remember or watch out for regarding ${otherPlayer.name}?
-Respond with ONLY the brief note.`; // TODO: use an md file for this as well
-
-        try {
-            const client = this.getLLMClient();
-            const noteSystemPrompt = `You are a strategic advisor for ${this.player.name}. Summarize diplomacy with ${otherPlayer.name} into concise internal notes.`;
-            const summary = await client.generate(summaryPrompt, noteSystemPrompt, {
-                temperature: 0.3,
-                maxOutputTokens: 300
+        if (summary) {
+            this.player.addHistoryEntry(this.gameState.currentRound, {
+                category: 'note',
+                details: `Diplomacy with ${otherPlayer.name}: ${summary}`,
+                extra: {
+                    chatWith: otherPlayer.name
+                }
             });
-            const cleanSummary = (typeof summary === 'string' ? summary : JSON.stringify(summary))     // TODO: why do we need this cleanup? The client should do it
-                .replace(/<think>[\s\S]*?<\/think>/gi, '')
-                .replace(/^```[a-z]*\n?/i, '')
-                .replace(/\n?```$/i, '')
-                .trim();
-
-            if (cleanSummary) {
-                this.player.addHistoryEntry(this.gameState.currentRound, {
-                    category: 'note',
-                    details: `Diplomacy with ${otherPlayer.name}: ${cleanSummary}`,
-                    extra: {
-                        chatWith: otherPlayer.name
-                    }
-                });
-                console.log(`[Harness] Saved diplomatic note for ${this.player.name} regarding ${otherPlayer.name}: ${cleanSummary}`);
-            }
-        } catch (err) {
-            console.error(`[Harness] Failed to summarize chat for ${this.player.name}:`, err);
+            console.log(`[Harness] Saved diplomatic note for ${this.player.name} regarding ${otherPlayer.name}: ${summary}`);
         }
     }
 
