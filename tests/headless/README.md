@@ -108,7 +108,7 @@ with fallback (`orderedModels`).
 **What runs is the real game.** `headless.mjs` imports the actual modules:
 `GameState`, entities, `src/ai/utils.js` (`attack`/`support`/`build`/`explore`),
 both AI managers (`SmartManager`, LLM `Harness`), and the LLM Markdown serializers.
-No game logic is reimplemented in the harness — except the two seams listed below.
+No game logic is reimplemented in the harness.
 
 **What is stubbed.** The loader (`loader.mjs`) replaces `renderer.js`, `audio.js`,
 and `main.js` with no-ops, and `stubs.mjs` fakes the browser APIs (window,
@@ -116,37 +116,47 @@ document, navigator, rAF, AudioContext, fetch served from disk, IndexedDB,
 localStorage). Bare imports (`three`, `ajv`, `simplex-noise`) resolve to
 `tests/headless/node_modules`; the `esm.sh` simplex-noise import is redirected
 there too. Rendering, sound, and UI never execute headless — those need the
-Modal browser runs.
+Modal browser runs. Note `main.js` is stubbed only for its UI functions
+(e.g. `updatePlayersUI`, imported by `src/ai/utils.js`): turn flow and the
+win check no longer depend on it (see below).
 
 **Inputs.** A `--config` JSON file (`turns`, `mapSize`, `players` with per-player
 `controller`, `winCondition`, `barbarians`, `llm` with `apiKey`/`baseUrl`/
 `orderedModels`, `initialization`) plus an optional CLI turn count.
 
 **Turn loop — the exact points game logic is invoked, per player per turn:**
-1. `player.refillOrders()`, `entity.step()` for each owned entity,
-   `player.updateVisibility()`, `player.recalculateScore()` — the synchronous
-   parts of `Player.step()`, replayed manually (see drift point 1).
-2. `player.aiManager.processTurn()` — SmartManager or LLM Harness, driven directly.
-3. Per-player assertions (orders ≥ 0, no NaN in resources/scores).
-4. After all players: `gameState.onRoundEnd()` (barbarians etc. when enabled).
-5. Win check (see drift point 2), only from round 5.
-6. Global entity assertions; at the end, a save/load round-trip check.
+1. `player.step(() => {})` — the real `Player.step()`: refill, entity steps,
+   visibility, scores, then the AI turn (awaited). The no-op continuation
+   means step() does not chain into the browser's `nextTurn()`; the harness
+   drives advancement itself. Setup passes no continuation, so no background
+   AI turn fires at game creation.
+2. Per-player assertions (orders ≥ 0, no NaN in resources/scores).
+3. After the last player: `gameState.onRoundEnd()` (barbarians etc. when enabled).
+4. `gameState.checkWinConditions()` after each player's turn, exactly as the
+   browser checks after each `endTurn()`; only from round 5 (`MIN_GAME_ROUNDS`).
+5. Global entity assertions; at the end, a save/load round-trip check.
 
 **Outputs.** Stdout log (turn headers, `[AI ...]` action lines, scores,
 game-over line), process exit code, and the save/load result.
 
-**Where headless can drift from the game (check these first on any divergence):**
-1. **Turn driving bypasses `Player.step()`'s `nextTurn()` chain** (DOM-bound via
-   `main.js`). Headless replays only its synchronous parts. If `Player.step()`
-   gains new synchronous behavior, headless must mirror it — this is how scores
-   froze at turn 1 until `recalculateScore()` was extracted and called here.
-2. **The win check duplicates `main.js` `checkWinConditions`** (absolute +
-   relative with the `nextHighest > 0` guard). It must mirror `main.js` changes;
-   the ai-chat branch once silently dropped that guard.
-3. **Map generation arguments:** headless must pass `manifest.terrains`
+**Where headless can still drift from the game (check these first on any divergence):**
+1. **Map generation arguments:** headless must pass `manifest.terrains`
    explicitly to `generateMap()`. Passing null once produced an all-Default
    world where nothing was buildable (the real game passes
    `manifestData.terrains`).
-4. **Per-player controller override** swaps `aiManager` in the harness only;
+2. **Per-player controller override** swaps `aiManager` in the harness only;
    the game itself picks LLM vs SmartManager globally via `settings.llm`.
-5. **autoSave is disabled** in headless; save/load is only asserted at the end.
+3. **autoSave is disabled** in headless; save/load is only asserted at the end.
+4. **Turn-advance structure:** the browser advances via the
+   `nextTurn` → `endTurn` → `startTurn` → `step` chain after each player's
+   turn, while headless sets `activePlayerIndex` directly and calls
+   `onRoundEnd` after the last player. The per-player actions and the
+   round-end effects are the same; only the driver differs.
+
+**Retired seams (fixed by the step/win-check refactor):**
+- Turn driving used to replay `Player.step()`'s synchronous parts manually
+  because `step()` hardcoded a `nextTurn()` import from `main.js`. `step()`
+  now takes the continuation as a parameter, so headless calls the real thing.
+- The win check used to duplicate `main.js` `checkWinConditions`
+  (absolute + relative with the `nextHighest > 0` guard). It is now the
+  single pure `GameState.checkWinConditions()` used by both drivers.

@@ -112,7 +112,7 @@ export class GameState {
    * @param {Object} manifestData - Loaded game manifest metadata
    * @param {Object} [settings=null] - Loaded or configured game settings
    */
-  initializeManifest(manifestData, settings = null) {
+  initializeManifest(manifestData, settings = null, onTurnEnd) {
     if (!manifestData) return;
     this.manifestData = manifestData;
     this.settings = settings || {};
@@ -228,16 +228,23 @@ export class GameState {
       });
     }
 
-    // Start turn for the initial player
-    this.startTurn();
+    // Start turn for the initial player. The driver supplies onTurnEnd
+    // when it wants AI turns to run and chain (the browser passes its
+    // nextTurn); without one, only the synchronous bookkeeping runs.
+    this.startTurn(onTurnEnd);
   }
 
   /**
    * Starts turn for the active player.
+   * @param {Function} [onTurnEnd] - Continuation called when an AI
+   *   player's turn settles; AI turns run only when it is provided.
+   *   AI errors are already logged in Player.step() and swallowed here
+   *   so they don't surface as unhandled rejections in the browser.
    */
-  startTurn() {
+  startTurn(onTurnEnd) {
     if (this.activePlayer) {
-      this.activePlayer.step(this);
+      const turn = this.activePlayer.step(onTurnEnd);
+      if (turn) turn.catch(() => {});
     }
   }
 
@@ -245,7 +252,7 @@ export class GameState {
    * Advances game turn to the next player.
    * If all players have taken a turn, increments currentRound.
    */
-  async endTurn() {
+  async endTurn(onTurnEnd) {
     if (this.players.length === 0 || this.gameOver) return;
     this.activePlayerIndex = (this.activePlayerIndex + 1) % this.players.length;
     if (this.activePlayerIndex === 0) {
@@ -254,7 +261,54 @@ export class GameState {
       await this.onRoundEnd();
       this.activePlayerIndex = 0;
     }
-    this.startTurn();
+    this.startTurn(onTurnEnd);
+  }
+
+  /**
+   * Checks if any player has met the win conditions.
+   * Pure: returns { winner, reasons } or null, and never touches the
+   * UI — the browser renders the victory modal from the result, and
+   * headless harnesses log it and set gameOver from it. This is the
+   * single win check for both drivers; it used to live in main.js
+   * (modal-bound) with a duplicated copy in the headless harness.
+   */
+  checkWinConditions() {
+    if (!this.settings?.winCondition) return null;
+
+    // Don't check win conditions before MIN_GAME_ROUNDS
+    if (this.currentRound < CONFIG.MIN_GAME_ROUNDS) return null;
+
+    const winCondition = this.settings.winCondition;
+
+    for (const player of this.players) {
+      const reasons = [];
+
+      // Check absolute score
+      if (winCondition.absoluteScore && player.score.total >= winCondition.absoluteScore) {
+        reasons.push(`Absolute Score: ${player.score.total} >= ${winCondition.absoluteScore}`);
+      }
+
+      // Check relative score
+      if (winCondition.relativeScore) {
+        // Find the next highest score among other players
+        let nextHighest = 0;
+        for (const other of this.players) {
+          if (other.id !== player.id && other.score.total > nextHighest) {
+            nextHighest = other.score.total;
+          }
+        }
+        const threshold = winCondition.relativeScore * nextHighest;
+        if (nextHighest > 0 && player.score.total >= threshold) {
+          reasons.push(`Relative Score: ${player.score.total} >= ${winCondition.relativeScore} × ${nextHighest} (next highest)`);
+        }
+      }
+
+      if (reasons.length > 0) {
+        return { winner: player, reasons };
+      }
+    }
+
+    return null;
   }
 
   /**

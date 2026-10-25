@@ -55,14 +55,9 @@ async function stepTurns(n) {
     for (let pi = 0; pi < gameState.players.length; pi++) {
       const p = gameState.players[pi];
       gameState.activePlayerIndex = pi;
-      p.refillOrders();
-      for (const e of p.getEntities()) e.step();
-      p.updateVisibility();
-      p.recalculateScore();
-      if (p.aiManager) {
-        try { await p.aiManager.processTurn(); }
-        catch (e) { console.log(`AI error (${p.name}): ${e.message}`); }
-      }
+      // Real Player.step() with a no-op continuation (see headless.mjs).
+      try { await p.step(() => {}); }
+      catch (e) { console.log(`AI error (${p.name}): ${e.message}`); }
     }
     await gameState.onRoundEnd();
     console.log(`Round ${gameState.currentRound} complete (${gameState.entities.length} entities)`);
