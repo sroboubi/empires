@@ -91,7 +91,7 @@ async function main() {
   // Build full game settings: config file overrides defaultSettings.json
   const gameState = new GameState();
   const mapSize = cfg.mapSize || ds.mapSize || 12;
-  gameState.generateMap(mapSize, null, manifest);
+  gameState.generateMap(mapSize, manifest.terrains, manifest);
 
   const players = cfg.players || ds.players || [
     { id: 1, name: 'Blue', color: '#0000ff', controller: 'ai', description: '' },

@@ -32,7 +32,7 @@ async function setup(configPath) {
   manifest = await loadGameManifest();
   const ds = manifest.defaultSettings || {};
   gameState = new GameState();
-  gameState.generateMap(cfg.mapSize || ds.mapSize || 12, null, manifest);
+  gameState.generateMap(cfg.mapSize || ds.mapSize || 12, manifest.terrains, manifest);
   const players = cfg.players || ds.players || [
     { id: 1, name: 'Blue', color: '#0000ff', controller: 'ai' },
     { id: 2, name: 'Red', color: '#ff0000', controller: 'ai' },
