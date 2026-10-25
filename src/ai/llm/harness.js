@@ -1,7 +1,7 @@
 import { BaseManager } from "../baseManager.js";
 import { LLMClient } from "./client.js";
 import responseSchema from './response.schema.json' with { type: 'json' };
-import { attack, support, build, explore, onActionDone } from "../utils.js";
+import { attack, support, build, explore, onActionDone, findBuildCandidates } from "../utils.js";
 import { HexGrid } from '../../hexGrid.js';
 import { manifestToMarkdown, serializeStateToMarkdown, summarizeTerrain } from "./markdown.js";
 import { CONFIG } from "../../config.js";
@@ -497,7 +497,16 @@ export class Harness extends BaseManager {
                         .map(([res, amt]) => ({ res, need: Math.round((amt - (this.player.resources?.[res] || 0)) * 10) / 10 }))
                         .filter(x => x.need > 0);
                     if (missing.length === 0) {
-                        summary.buildableNow.push(b);
+                        // Affordable is not placeable: only list as buildable
+                        // now when the engine finds at least one valid site.
+                        // Otherwise the model burns orders discovering this
+                        // through failed Build commands.
+                        const { candidates } = findBuildCandidates(this.gameState, entity, b);
+                        if (candidates.length > 0) {
+                            summary.buildableNow.push(b);
+                        } else {
+                            summary.buildableLater.push({ name: b, missing: 'no valid site nearby' });
+                        }
                     } else {
                         summary.buildableLater.push({ name: b, missing: missing.map(m => `${m.need} ${m.res}`).join(', ') });
                     }

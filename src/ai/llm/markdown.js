@@ -300,9 +300,11 @@ function entityStateToMarkdown(e, byName, brief = false) {
     // State-dependent: split by affordability and AP
     if ((e.buildableNow || []).length) caps.push(`Can build now: ${e.buildableNow.join(', ')}`);
     for (const b of e.buildableLater || []) {
-      // Distinguish AP issues from resource issues
+      // Distinguish AP issues and site issues from resource issues
       if (b.missing && b.missing.includes('insufficient AP')) {
         caps.push(`Cannot build ${b.name} (${b.missing})`);
+      } else if (b.missing && b.missing.includes('no valid site')) {
+        caps.push(`Cannot build ${b.name} (no valid site nearby)`);
       } else {
         caps.push(`Cannot afford ${b.name} (need ${b.missing})`);
       }
