@@ -12,7 +12,8 @@
       "properties": {
         "thoughtProcess": {
           "type": "string",
-          "description": "Brief strategic reasoning behind this decision."
+          "description": "Brief strategic reasoning behind this decision. At most 2 sentences and under 50 words (max 500 characters).",
+          "maxLength": 500
         },
         "attackerId": {
           "type": "string",
@@ -43,7 +44,8 @@
       "properties": {
         "thoughtProcess": {
           "type": "string",
-          "description": "Brief strategic reasoning behind this decision."
+          "description": "Brief strategic reasoning behind this decision. At most 2 sentences and under 50 words (max 500 characters).",
+          "maxLength": 500
         },
         "repairerId": {
           "type": "string",
@@ -74,7 +76,8 @@
       "properties": {
         "thoughtProcess": {
           "type": "string",
-          "description": "Brief strategic reasoning behind this decision."
+          "description": "Brief strategic reasoning behind this decision. At most 2 sentences and under 50 words (max 500 characters).",
+          "maxLength": 500
         },
         "builderId": {
           "type": "string",
@@ -104,7 +107,8 @@
       "properties": {
         "thoughtProcess": {
           "type": "string",
-          "description": "Brief strategic reasoning behind this decision."
+          "description": "Brief strategic reasoning behind this decision. At most 2 sentences and under 50 words (max 500 characters).",
+          "maxLength": 500
         },
         "explorerId": {
           "type": "string",
@@ -144,7 +148,8 @@
       "properties": {
         "thoughtProcess": {
           "type": "string",
-          "description": "Brief strategic reasoning behind this decision."
+          "description": "Brief strategic reasoning behind this decision. At most 2 sentences and under 50 words (max 500 characters).",
+          "maxLength": 500
         },
         "targetPlayerId": {
           "type": "string",
@@ -174,7 +179,8 @@
       "properties": {
         "thoughtProcess": {
           "type": "string",
-          "description": "Brief strategic reasoning behind this decision."
+          "description": "Brief strategic reasoning behind this decision. At most 2 sentences and under 50 words (max 500 characters).",
+          "maxLength": 500
         },
         "note": {
           "type": "string",

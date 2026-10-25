@@ -171,6 +171,15 @@ export class LLMClient {
                         console.error(`[LLMClient] Abnormal finish_reason from ${model}: ${reasonMsg}`);
                         // Don't retry on content_filter; do retry on length (might succeed with different phrasing)
                         if (finishReason === 'content_filter') break;
+                        if (finishReason === 'length') {
+                            // A verbatim retry often rambles again, so
+                            // escalate with a brevity instruction (once
+                            // per model — the guard stops duplicates).
+                            const brevityNote = 'Your previous response was cut off because it exceeded the maximum output length. Reply again with the full JSON, keeping thoughtProcess to at most 20 words.';
+                            if (!payload.messages.some(m => m.content === brevityNote)) {
+                                payload.messages.push({ role: 'user', content: brevityNote });
+                            }
+                        }
                         continue;
                     }
 

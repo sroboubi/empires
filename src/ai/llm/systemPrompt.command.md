@@ -27,11 +27,11 @@ Your goal is to maximize your overall score through strategic management of enti
 {MANIFEST}
 
 # RESPONSE FORMAT INSTRUCTIONS
-Respond EXCLUSIVELY with a raw JSON object (no markdown code block wrappers). Every response carries a command field naming which command it performs; the command determines which other fields are required. The note field appears ONLY on END_TURN, never on actions.
+Respond EXCLUSIVELY with a raw JSON object (no markdown code block wrappers). Every response carries a command field naming which command it performs; the command determines which other fields are required. The note field appears ONLY on END_TURN, never on actions. thoughtProcess is at most 2 sentences and under 50 words — it must never crowd out the command fields.
 
 1. ATTACK:
 {
-"thoughtProcess": "Brief strategic reasoning",
+"thoughtProcess": "Brief reason, max 2 sentences",
 "command": "ATTACK",
 "attackerId": "<YOUR_UNIT_ID>",
 "targetId": "<VISIBLE_ENEMY_ENTITY_ID>"
@@ -39,7 +39,7 @@ Respond EXCLUSIVELY with a raw JSON object (no markdown code block wrappers). Ev
 
 2. REPAIR:
 {
-"thoughtProcess": "Brief strategic reasoning",
+"thoughtProcess": "Brief reason, max 2 sentences",
 "command": "REPAIR",
 "repairerId": "<YOUR_UNIT_ID>",
 "targetId": "<DAMAGED_ENTITY_ID>"
@@ -47,7 +47,7 @@ Respond EXCLUSIVELY with a raw JSON object (no markdown code block wrappers). Ev
 
 3. BUILD:
 {
-"thoughtProcess": "Brief strategic reasoning",
+"thoughtProcess": "Brief reason, max 2 sentences",
 "command": "BUILD",
 "builderId": "<YOUR_BUILDER_ID>",
 "entityName": "<TYPE_TO_BUILD>"
@@ -55,7 +55,7 @@ Respond EXCLUSIVELY with a raw JSON object (no markdown code block wrappers). Ev
 
 4. EXPLORE:
 {
-"thoughtProcess": "Brief strategic reasoning",
+"thoughtProcess": "Brief reason, max 2 sentences",
 "command": "EXPLORE",
 "explorerId": "<YOUR_UNIT_ID>",
 "direction": "<DIRECTION>"
@@ -63,7 +63,7 @@ Respond EXCLUSIVELY with a raw JSON object (no markdown code block wrappers). Ev
 
 5. CHAT (Costs 1 order):
 {
-"thoughtProcess": "Brief strategic reasoning",
+"thoughtProcess": "Brief reason, max 2 sentences",
 "command": "CHAT",
 "targetPlayerId": "<OPPONENT_PLAYER_ID>",
 "message": "<OPTIONAL_OPENING_MESSAGE>"
@@ -71,7 +71,7 @@ Respond EXCLUSIVELY with a raw JSON object (no markdown code block wrappers). Ev
 
 6. END_TURN (Always use when out of orders or finished):
 {
-"thoughtProcess": "Brief strategic reasoning",
+"thoughtProcess": "Brief reason, max 2 sentences",
 "command": "END_TURN",
 "note": "Reminder to myself for next turn"
 }

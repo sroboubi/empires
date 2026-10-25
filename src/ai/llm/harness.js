@@ -26,7 +26,7 @@ export class Harness extends BaseManager {
                 timeoutMs: 30000,
                 generationConfig: {
                     temperature: 0.1,
-                    maxOutputTokens: 4000,
+                    maxOutputTokens: 8000,
                     thinkingBudget: 1000
                 }
             });
