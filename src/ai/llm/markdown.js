@@ -261,10 +261,16 @@ export function serializeStateToMarkdown(summary, manifestEntities = []) {
       // "**null**" or a bare id in every opponent section of the 50-turn
       // game. Prefer opp.name; fall back to a name-like key (test data is
       // keyed by name without a .name field); ownerless maps to Barbarians.
+      // But DO show the key as an id attribute when it is a real player
+      // id: the CHAT command's targetPlayerId must be a value the model
+      // was actually shown (lite left it blank when only names were
+      // shown, so no chat ever started). Skipped for name-keyed test
+      // data (key === display name) and for the ownerless 'null' key.
       let displayName = (opp.name && opp.name !== 'None') ? opp.name : name;
       if (displayName === 'null') displayName = 'Barbarians';
+      const idStr = (name !== displayName && name !== 'null' && name !== 'None') ? `id ${name}, ` : '';
       const scoreStr = opp.score !== undefined ? `, score ${typeof opp.score === 'object' ? opp.score.total ?? '' : opp.score}` : '';
-      lines.push(`* **${displayName}** (${oppEntities.length} visible entit${oppEntities.length === 1 ? 'y' : 'ies'}${scoreStr})`);
+      lines.push(`* **${displayName}** (${idStr}${oppEntities.length} visible entit${oppEntities.length === 1 ? 'y' : 'ies'}${scoreStr})`);
       for (const e of oppEntities) {
         lines.push(oppEntityToMarkdown(e, byName));
       }
