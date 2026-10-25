@@ -243,8 +243,10 @@ export class GameState {
    */
   startTurn(onTurnEnd) {
     if (this.activePlayer) {
-      const turn = this.activePlayer.step(onTurnEnd);
-      if (turn) turn.catch(() => {});
+      // step() is async and always returns a promise; AI errors are
+      // already logged in Player.step(), so swallow here to keep them
+      // from surfacing as unhandled rejections in the browser.
+      this.activePlayer.step(onTurnEnd).catch(() => {});
     }
   }
 

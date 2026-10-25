@@ -157,18 +157,20 @@ export class Player {
    * Turn lifecycle step called at the start of this player's turn.
    * Steps all entities owned by this player.
    *
-   * The AI turn runs only when the driver supplies an onTurnEnd
-   * continuation: the driver owns turn advancement, so step() never
-   * imports nextTurn() from main.js (that import is what forced
-   * headless harnesses to bypass step() entirely). The browser passes
-   * nextTurn; harnesses that drive AI turns explicitly pass a no-op
-   * and await the returned promise; setup paths that pass nothing get
-   * the synchronous bookkeeping only, with no background AI turn.
-   * Returns the AI turn promise for AI players, undefined otherwise.
-   * AI errors are logged here and then rethrown, so the driver can
-   * count them; the turn still advances via the finally callback.
+   * Async: the caller decides how to handle the returned promise —
+   * the harness awaits it, the browser fire-and-forgets it (see
+   * GameState.startTurn). The driver owns turn advancement, so step()
+   * never imports nextTurn() from main.js (that import is what forced
+   * headless harnesses to bypass step() entirely). The driver passes
+   * its continuation as onTurnEnd: the browser passes nextTurn, and
+   * harnesses that drive turns explicitly pass a no-op. The AI turn
+   * runs only when a continuation is provided, so setup paths that
+   * pass nothing get the synchronous bookkeeping only, with no
+   * background AI turn. AI errors are logged here and then rethrown,
+   * so the awaiting driver can count them; the turn still advances
+   * via the finally callback.
    */
-  step(onTurnEnd) {
+  async step(onTurnEnd) {
     this.refillOrders();
     const ownedEntities = this.getEntities();
     for (const entity of ownedEntities) {
@@ -179,16 +181,15 @@ export class Player {
     this.recalculateScore();
 
     if (this.aiManager && typeof onTurnEnd === 'function') {
-      return this.aiManager.processTurn()
-        .catch(err => {
-          console.error(`Error during AI turn for player ${this.name}:`, err);
-          throw err;
-        })
-        .finally(() => {
-          onTurnEnd();
-        });
+      try {
+        await this.aiManager.processTurn();
+      } catch (err) {
+        console.error(`Error during AI turn for player ${this.name}:`, err);
+        throw err;
+      } finally {
+        onTurnEnd();
+      }
     }
-    return undefined;
   }
 
   /**
