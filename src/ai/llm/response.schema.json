@@ -1,110 +1,117 @@
 {
-  "anyOf": [
+  "oneOf": [
     {
       "type": "object",
-      "description": "Execute a game action (Move, Attack, Repair, Build).",
+      "description": "Attack a visible enemy entity with one of your units.",
       "required": [
-        "type",
         "thoughtProcess",
-        "entityId",
-        "command"
+        "attackerId",
+        "targetId"
       ],
       "properties": {
-        "type": {
-          "type": "string",
-          "enum": [
-            "COMMAND"
-          ]
-        },
         "thoughtProcess": {
           "type": "string",
-          "description": "Brief strategic reasoning behind this turn's decision."
+          "description": "Brief strategic reasoning behind this decision."
         },
-        "entityId": {
+        "attackerId": {
           "type": "string",
-          "description": "ID of your owned entity executing the order."
+          "description": "ID of your owned unit performing the attack."
         },
-        "command": {
+        "targetId": {
           "type": "string",
-          "enum": [
-            "Attack",
-            "Repair",
-            "Build",
-            "Explore"
-          ],
-          "description": "Command to perform"
-        },
-        "target": {
-          "description": "Target is optional for Explore, required otherwise",
-          "anyOf": [
-            {
-              "type": "object",
-              "required": [
-                "entityId"
-              ],
-              "properties": {
-                "entityId": {
-                  "type": "string",
-                  "description": "Target enemy or friendly entity ID (for Attack/Repair)."
-                }
-              }
-            },
-            {
-              "type": "object",
-              "required": [
-                "entityName"
-              ],
-              "properties": {
-                "entityName": {
-                  "type": "string",
-                  "description": "Target construct or unit type name (for Build)."
-                }
-              }
-            },
-            {
-              "type": "object",
-              "required": [
-                "direction"
-              ],
-              "properties": {
-                "direction": {
-                  "type": "string",
-                  "enum": [
-                    "E",
-                    "NE",
-                    "N",
-                    "NW",
-                    "W",
-                    "SW",
-                    "S",
-                    "SE"
-                  ],
-                  "description": "Direction to explore in, if not provided then explore towards closest unexplored area"
-                }
-              }
-            }
-          ]
+          "description": "ID of the specific visible enemy entity to attack."
         }
       }
     },
     {
       "type": "object",
-      "description": "Initiate diplomacy with an opponent.",
+      "description": "Repair a damaged entity with one of your units.",
       "required": [
-        "type",
+        "thoughtProcess",
+        "repairerId",
+        "targetId"
+      ],
+      "properties": {
+        "thoughtProcess": {
+          "type": "string",
+          "description": "Brief strategic reasoning behind this decision."
+        },
+        "repairerId": {
+          "type": "string",
+          "description": "ID of your owned unit performing the repair."
+        },
+        "targetId": {
+          "type": "string",
+          "description": "ID of the specific damaged entity to repair (yours or an ally's)."
+        }
+      }
+    },
+    {
+      "type": "object",
+      "description": "Build a new entity with one of your builders.",
+      "required": [
+        "thoughtProcess",
+        "builderId",
+        "entityName"
+      ],
+      "properties": {
+        "thoughtProcess": {
+          "type": "string",
+          "description": "Brief strategic reasoning behind this decision."
+        },
+        "builderId": {
+          "type": "string",
+          "description": "ID of your owned builder (settler, worker, village, etc.)."
+        },
+        "entityName": {
+          "type": "string",
+          "description": "Type name of the entity to build (must be in the builder's Builds list)."
+        }
+      }
+    },
+    {
+      "type": "object",
+      "description": "Explore with one of your units.",
+      "required": [
+        "thoughtProcess",
+        "explorerId"
+      ],
+      "properties": {
+        "thoughtProcess": {
+          "type": "string",
+          "description": "Brief strategic reasoning behind this decision."
+        },
+        "explorerId": {
+          "type": "string",
+          "description": "ID of your owned unit exploring."
+        },
+        "direction": {
+          "type": "string",
+          "enum": [
+            "E",
+            "NE",
+            "N",
+            "NW",
+            "W",
+            "SW",
+            "S",
+            "SE"
+          ],
+          "description": "Direction to explore in; omit to explore toward the closest unexplored area."
+        }
+      }
+    },
+    {
+      "type": "object",
+      "description": "Initiate diplomacy with an opponent (costs 1 order).",
+      "required": [
         "thoughtProcess",
         "targetPlayerId"
       ],
       "properties": {
-        "type": {
-          "type": "string",
-          "enum": [
-            "CHAT"
-          ]
-        },
         "thoughtProcess": {
           "type": "string",
-          "description": "Brief strategic reasoning."
+          "description": "Brief strategic reasoning behind this decision."
         },
         "targetPlayerId": {
           "type": "string",
@@ -118,21 +125,15 @@
     },
     {
       "type": "object",
-      "description": "End turn and save remaining orders.",
+      "description": "End your turn. The only response that carries a note.",
       "required": [
-        "type",
-        "thoughtProcess"
+        "thoughtProcess",
+        "note"
       ],
       "properties": {
-        "type": {
-          "type": "string",
-          "enum": [
-            "END_TURN"
-          ]
-        },
         "thoughtProcess": {
           "type": "string",
-          "description": "Brief strategic reasoning."
+          "description": "Brief strategic reasoning behind this decision."
         },
         "note": {
           "type": "string",

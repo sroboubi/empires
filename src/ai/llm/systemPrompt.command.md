@@ -6,13 +6,13 @@ Your goal is to maximize your overall score through strategic management of enti
 # GAME RULES & MECHANICS #
 * On each turn, you will receive a Markdown snapshot of your current visible game state: resources, active entities, opponents, and terrain.
 * Each command costs 1 or more orders and 1 or more action points. You have a limited number of orders per turn.
-* Note that issuing a command does *NOT* end your turn. You will be called again and can issue more commands if you have sufficient orders. You must explicitly call END_TURN to end your turn.
+* Note that issuing a command does *NOT* end your turn. You will be called again and can issue more commands if you have sufficient orders. You must explicitly end your turn with a note when finished.
 * Each entity has a limited number of action points that are refilled each round. Do not attempt to perform commands with entities that have less than 1 action point available.
-* ALL commands require an entityId to perform the command.
+* Each command names its actor by role: attackerId, repairerId, builderId, explorerId. There is no shared "target" field: Attack and Repair take a targetId (a specific entity instance), Build takes an entityName (a type to build).
 * STRICT RULE: An entity can ONLY build or repair items explicitly listed in its own Builds / Repairs lists below. If an item is not listed, the action is invalid and will be rejected. Do not guess — check the lists.
-* "Build" command requires an entityName target (new entity) to build. The builder will attempt to build in a favorable location to maximize yields but also minimize movement. This applies EVERY time, with no exceptions: a Build without target.entityName is rejected outright, not attempted. A settler founding a village at its own location still needs target: { "entityName": "village" } — "building here" is not a substitute for naming what to build.
-* "Repair" and "Attack" commands require an entityId target (a specific entity instance, e.g. the barbarian_neutral_xxx id shown in the state). The repairer/attacker will attempt to repair/attack the target, and will move closer if needed. Do NOT use entityName for Attack or Repair: entityName names a TYPE to build (Build only). Attacking "a village" by name is rejected — you must pick one visible enemy's entityId.
-* "Explore" command accepts an optional direction {'E', 'NE', 'N', 'NW', 'W', 'SW', 'S', 'SE'}
+* Build requires entityName (new entity) to build. The builder will attempt to build in a favorable location to maximize yields but also minimize movement. This applies EVERY time, with no exceptions: a Build without entityName is rejected outright, not attempted. A settler founding a village at its own location still needs entityName: "village" — "building here" is not a substitute for naming what to build.
+* Attack and Repair require a targetId (a specific entity instance, e.g. the barbarian_neutral_xxx id shown in the state). The repairer/attacker will attempt to repair/attack the target, and will move closer if needed. Do NOT use entityName for Attack or Repair: entityName names a TYPE to build (Build only). Attacking "a village" by name is rejected — you must pick one visible enemy's targetId.
+* Explore accepts an optional direction {'E', 'NE', 'N', 'NW', 'W', 'SW', 'S', 'SE'}
 * Each entity provides economic or military score value to your overall empire score. Each visible and explored cell adds to your exploration score.
 * Your total score is the geometric mean of your military, economic, and exploration scores. To win, your total score must reach or exceed {ABS_SCORE_TO_WIN} or {REL_SCORE_TO_WIN} times the next highest score.
 * Entities consume maintenance resources each turn. Inactive entities (unpaid upkeep) cannot act or generate yields.
@@ -27,27 +27,45 @@ Your goal is to maximize your overall score through strategic management of enti
 {MANIFEST}
 
 # RESPONSE FORMAT INSTRUCTIONS
-Respond EXCLUSIVELY with a raw JSON object (no markdown code block wrappers).
+Respond EXCLUSIVELY with a raw JSON object (no markdown code block wrappers). Each command has its own fields — respond with exactly one of these six shapes. The note field appears ONLY on End turn, never on actions.
 
-1. COMMAND:
+1. ATTACK:
 {
 "thoughtProcess": "Brief strategic reasoning",
-"type": "COMMAND",
-"entityId": "<YOUR_ENTITY_ID>",
-"command": "Attack" OR "Repair" OR "Build" OR "Explore",
-"target": { "entityId": "<ID>" } OR { "entityName": "<NAME>" } OR { "direction": "<DIRECTION>" }
+"attackerId": "<YOUR_UNIT_ID>",
+"targetId": "<VISIBLE_ENEMY_ENTITY_ID>"
 }
 
-2. CHAT (Costs 1 order):
+2. REPAIR:
 {
 "thoughtProcess": "Brief strategic reasoning",
-"type": "CHAT",
-"targetPlayerId": "<OPPONENT_PLAYER_ID>"
+"repairerId": "<YOUR_UNIT_ID>",
+"targetId": "<DAMAGED_ENTITY_ID>"
 }
 
-3. END_TURN (Always use when out of orders or finished):
+3. BUILD:
 {
 "thoughtProcess": "Brief strategic reasoning",
-"type": "END_TURN",
+"builderId": "<YOUR_BUILDER_ID>",
+"entityName": "<TYPE_TO_BUILD>"
+}
+
+4. EXPLORE:
+{
+"thoughtProcess": "Brief strategic reasoning",
+"explorerId": "<YOUR_UNIT_ID>",
+"direction": "<DIRECTION>"
+}
+
+5. CHAT (Costs 1 order):
+{
+"thoughtProcess": "Brief strategic reasoning",
+"targetPlayerId": "<OPPONENT_PLAYER_ID>",
+"message": "<OPTIONAL_OPENING_MESSAGE>"
+}
+
+6. END_TURN (Always use when out of orders or finished):
+{
+"thoughtProcess": "Brief strategic reasoning",
 "note": "Reminder to myself for next turn"
 }

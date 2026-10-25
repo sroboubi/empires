@@ -90,71 +90,79 @@ export class Harness extends BaseManager {
                 return;
             }
 
-            if (response.type === "COMMAND") {
+            // Each command has its own response schema, so the command is
+            // inferred from which role-named fields are present — there is
+            // no shared "target" whose meaning flips per command (that
+            // ambiguity caused Attack-with-entityName failures). Priority:
+            // actions first, so a stray note on an action never ends the turn.
+            let command = null;
+            let actorId = null;
+            if (response.attackerId) { command = 'attack'; actorId = response.attackerId; }
+            else if (response.repairerId) { command = 'repair'; actorId = response.repairerId; }
+            else if (response.builderId) { command = 'build'; actorId = response.builderId; }
+            else if (response.explorerId) { command = 'explore'; actorId = response.explorerId; }
+            else if (response.targetPlayerId) { command = 'chat'; }
+            else if (response.note !== undefined) { command = 'end_turn'; }
+
+            if (command === 'attack' || command === 'repair' || command === 'build' || command === 'explore') {
                 if (this.player.orders <= 0) {
-                    lastResponseError = `You have 0 orders remaining. You cannot execute commands. You must respond with type: "END_TURN" and provide your strategic note.`;
+                    lastResponseError = `You have 0 orders remaining. You cannot execute commands. End your turn with a note.`;
                     continue;
                 }
 
-                const entity = this.gameState.getEntityById(response.entityId);
+                const entity = this.gameState.getEntityById(actorId);
                 if (!entity) {
-                    lastResponseError = `Actor entity not found: ${response.entityId}`;
+                    lastResponseError = `Actor entity not found: ${actorId}`;
                     continue;
                 } else if (entity.owner !== this.player) {
-                    lastResponseError = `Entity ${response.entityId} does not belong to you`;
+                    lastResponseError = `Entity ${actorId} does not belong to you`;
                     continue;
                 }
 
                 let target = null;
-                if (response.target?.entityId) {
-                    target = this.gameState.getEntityById(response.target.entityId);
+                if (response.targetId) {
+                    target = this.gameState.getEntityById(response.targetId);
                     if (!target) {
-                        lastResponseError = `Target entity not found: ${response.target.entityId}`;
+                        lastResponseError = `Target entity not found: ${response.targetId}`;
                         continue;
                     }
                 }
 
-                const command = (response.command || '').toLowerCase();
                 let ordersUsed = 0;
-
                 let actionOutcome = null;
                 if (command === "attack") {
-                    if (!response.target?.entityId) {
-                        lastResponseError = `Attack requires target.entityId (a specific visible enemy, e.g. barbarian_neutral_xxx). entityName is for Build only — attacking a type name like "village" is rejected.`;
+                    if (!response.targetId) {
+                        lastResponseError = `Attack requires targetId (a specific visible enemy). entityName is for Build only — attacking a type name like "village" is rejected.`;
                         continue;
                     }
                     actionOutcome = attack(this.gameState, entity, target, this.player.orders);
                 } else if (command === "repair") {
-                    if (!response.target?.entityId) {
-                        lastResponseError = `Repair requires target.entityId (a specific damaged entity). entityName is for Build only.`;
+                    if (!response.targetId) {
+                        lastResponseError = `Repair requires targetId (a specific damaged entity). entityName is for Build only.`;
                         continue;
                     }
                     actionOutcome = support(this.gameState, entity, target, "Repair", this.player.orders);
                 } else if (command === "build") {
-                    const targetName = response.target?.entityName;
-                    if (!targetName) {
-                        lastResponseError = `Build action requires target.entityName`;
+                    if (!response.entityName) {
+                        lastResponseError = `Build requires entityName (must be in the builder's Builds list)`;
                         continue;
                     }
-                    actionOutcome = build(this.gameState, entity, targetName);
+                    actionOutcome = build(this.gameState, entity, response.entityName);
                 } else if (command === "explore") {
-                    actionOutcome = explore(this.gameState, entity, response.target?.direction, true);
-                } else {
-                    lastResponseError = `Command "${command}" not recognized`;
-                    continue;
+                    actionOutcome = explore(this.gameState, entity, response.direction, true);
                 }
 
                 ordersUsed = actionOutcome.ordersUsed;
                 if (ordersUsed === 0) {
                     lastResponseError = actionOutcome.result.message;
                     // Store structured command info for the enhanced failure format
-                    const targetDesc = command === 'build' ? response.target?.entityName :
-                        command === 'explore' ? (response.target?.direction || 'unexplored') :
-                            response.target?.entityId || 'unknown';
+                    const targetDesc = command === 'build' ? response.entityName :
+                        command === 'explore' ? (response.direction || 'unexplored') :
+                            response.targetId || 'unknown';
                     lastFailedCommand = {
                         command: command.charAt(0).toUpperCase() + command.slice(1),
                         target: targetDesc,
-                        entityId: response.entityId
+                        entityId: actorId
                     };
                     lastActionResult = null;
                     continue;
@@ -166,11 +174,10 @@ export class Harness extends BaseManager {
 
                 // Action successfully executed: reconcile and render
                 await onActionDone(this.gameState);
-                lastResponseError = null;
                 turnResponseLog.push(response);
-            } else if (response.type === "CHAT") {
+            } else if (command === 'chat') {
                 if (this.player.orders <= 0) {
-                    lastResponseError = `You have 0 orders remaining. You cannot initiate diplomacy. Call END_TURN.`;
+                    lastResponseError = `You have 0 orders remaining. You cannot initiate diplomacy. End your turn with a note.`;
                     continue;
                 }
 
@@ -203,11 +210,11 @@ export class Harness extends BaseManager {
                 lastActionResult = `[completed] Concluded diplomatic session with ${targetPlayer.name}`;
                 lastResponseError = null;
                 turnResponseLog.push(response);
-            } else if (response.type === "END_TURN") {
+            } else if (command === 'end_turn') {
                 this.player.addHistoryEntry(this.gameState.currentRound, { category: 'note', details: response.note });
                 return;
             } else {
-                lastResponseError = `Unknown response type: ${response.type}`;
+                lastResponseError = `Could not determine a command from the response fields. Respond with exactly one command: Attack (attackerId + targetId), Repair (repairerId + targetId), Build (builderId + entityName), Explore (explorerId + optional direction), Chat (targetPlayerId + optional message), or End turn (note).`;
                 continue;
             }
         }
@@ -595,16 +602,16 @@ export class Harness extends BaseManager {
     /**
      * Human-readable action description: "Build mine with worker_1",
      * "Attack red_knight_1 with knight_1", "Explore N with scout_1".
+     * Each command carries its own role-named fields (see response.schema.json).
      */
     describeAction(r) {
-        const cmd = r.command || r.type || 'Unknown';
-        const actor = r.entityId || 'unknown';
-        const target = r.target || {};
-        let targetDesc = '';
-        if (target.entityName) targetDesc = target.entityName;
-        else if (target.entityId) targetDesc = target.entityId;
-        else if (target.direction) targetDesc = target.direction;
-        return targetDesc ? `${cmd} ${targetDesc} with ${actor}` : `${cmd} with ${actor}`;
+        if (r.attackerId) return `Attack ${r.targetId || 'unknown'} with ${r.attackerId}`;
+        if (r.repairerId) return `Repair ${r.targetId || 'unknown'} with ${r.repairerId}`;
+        if (r.builderId) return `Build ${r.entityName || 'unknown'} with ${r.builderId}`;
+        if (r.explorerId) return `Explore ${r.direction || 'unexplored'} with ${r.explorerId}`;
+        if (r.targetPlayerId) return `Chat with ${r.targetPlayerId}`;
+        if (r.note !== undefined) return `End turn`;
+        return `Unknown action`;
     }
 
     getCellInfo(cellCoordStr) {
