@@ -11,6 +11,7 @@ export class Harness extends BaseManager {
         super(player, gameState, controller);
         this.llmClient = null;
         this.cachedCommandSystemPrompt = null;
+        this.lastCallStartMs = 0;
     }
 
     /**
@@ -37,6 +38,22 @@ export class Harness extends BaseManager {
     /**
      * Processes a player's turn by summarizing the game state and interacting with the AI controller.     
      */
+    /**
+     * Enforces a minimum interval between LLM call starts (config
+     * llm.callDelayMs, 0 = no pacing). Generation time counts toward
+     * the interval, so a 4500ms interval with ~3s generations adds
+     * only ~1.5s of waiting per call. Keeps burst-prone providers
+     * (e.g. Gemini free tier, 15 RPM) under their rate limit.
+     * Applied to the command loop only; chat/summary calls are rare.
+     */
+    async paceCall() {
+        const intervalMs = this.gameState.settings?.llm?.callDelayMs || 0;
+        if (!intervalMs) return;
+        const waitMs = intervalMs - (Date.now() - this.lastCallStartMs);
+        if (waitMs > 0) await new Promise(r => setTimeout(r, waitMs));
+        this.lastCallStartMs = Date.now();
+    }
+
     async processTurn() {
         const client = this.getLLMClient();
         const commandSystemPrompt = await this.getCommandSystemPrompt();
@@ -82,6 +99,7 @@ export class Harness extends BaseManager {
             console.debug("system prompt:", commandSystemPrompt);
             console.debug("user content:", userContent);
 
+            await this.paceCall();
             response = await client.generate(userContent, commandSystemPrompt, { responseSchema });
             console.debug("response:", response);
 
