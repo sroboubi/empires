@@ -62,7 +62,15 @@ export class Harness extends BaseManager {
                 } else {
                     userContent += `\n\n### Last Action Failed\n${lastResponseError}`;
                 }
-                if (response) userContent += `\nFailed response: ${JSON.stringify(response)}`;
+                // Echo only the failed command, never the model's reasoning:
+                // echoing the full response re-sends thousands of tokens of
+                // thoughtProcess every retry (measured ~6,600 tokens in a
+                // late-game DeepSeek prompt) and grows the prompt each turn.
+                if (response && typeof response === 'object') {
+                    const { thoughtProcess, reasoning, ...commandOnly } = response;
+                    const compact = JSON.stringify(commandOnly);
+                    if (compact && compact !== '{}') userContent += `\nFailed response: ${compact.slice(0, 500)}`;
+                }
             } else if (lastActionResult) {
                 userContent += `\n\n### Last Action Result\n${lastActionResult}`;
             }
@@ -199,24 +207,65 @@ export class Harness extends BaseManager {
 
     /**
      * Returns the cached command system prompt or builds it dynamically if not cached.
+     * The catalog inside it is filtered to relevant entity types, so the cache
+     * is rebuilt when that set changes (new unit trained, new enemy sighted).
      * @returns {Promise<string>}
      */
     async getCommandSystemPrompt() {
-        if (!this.cachedCommandSystemPrompt) {
-            this.cachedCommandSystemPrompt = await this.buildCommandSystemPrompt();
+        const key = this.relevantManifestKey();
+        if (!this.cachedCommandSystemPrompt || key !== this.cachedManifestKey) {
+            this.cachedCommandSystemPrompt = await this.buildCommandSystemPrompt(key);
+            this.cachedManifestKey = key;
         }
         return this.cachedCommandSystemPrompt;
     }
 
     /**
-     * Builds a structured, hybrid system prompt combining Markdown rules 
+     * Entity types worth describing in the system prompt catalog: what the
+     * player owns, what those can build or repair (transitively, so units
+     * trained later in the game are covered), and what is currently visible.
+     * Everything else is omitted to keep the per-call prompt small; visible
+     * enemies still get full details inline in the state markdown.
+     * Falls back to the full manifest on any error (safe default).
+     * @returns {string} sorted relevant type names, joined for cache comparison
+     */
+    relevantManifestKey() {
+        try {
+            const manifestEntities = this.gameState.manifestData?.entities || this.gameState.manifestData || [];
+            const manifestList = Array.isArray(manifestEntities) ? manifestEntities : Object.values(manifestEntities);
+            const byName = new Map(manifestList.map(m => [m.name, m]));
+            const relevant = new Set();
+            const addWithOutputs = (name) => {
+                if (!name || relevant.has(name)) return;
+                relevant.add(name);
+                const def = byName.get(name);
+                if (!def) return;
+                for (const b of [...(def.buildables || []), ...(def.repairables || [])]) addWithOutputs(b);
+            };
+            for (const e of this.player.getEntities(this.gameState)) addWithOutputs(e.name);
+            for (const e of this.gameState.entities || []) {
+                if (this.player.isVisible?.(e.q, e.r)) relevant.add(e.name);
+            }
+            return [...relevant].sort().join(',');
+        } catch {
+            return '*';
+        }
+    }
+
+    /**
+     * Builds a structured, hybrid system prompt combining Markdown rules
      * and stringified JSON manifest data.
+     * @param {string} [manifestKey] relevant type names from relevantManifestKey();
+     *   '*' (or omitted) keeps the full manifest
      * @returns {Promise<string>} The formatted system prompt string.
      */
-    async buildCommandSystemPrompt() {
+    async buildCommandSystemPrompt(manifestKey) {
         const manifestEntities = this.gameState.manifestData?.entities || this.gameState.manifestData || [];
         const manifestList = Array.isArray(manifestEntities) ? manifestEntities : Object.values(manifestEntities);
-        const manifestMd = manifestToMarkdown(manifestList);
+        const filtered = (!manifestKey || manifestKey === '*')
+            ? manifestList
+            : manifestList.filter(m => manifestKey.split(',').includes(m.name));
+        const manifestMd = manifestToMarkdown(filtered);
         const absScoreToWin = this.gameState.settings?.winCondition?.absoluteScore;
         const relScoreToWin = this.gameState.settings?.winCondition?.relativeScore;
 
