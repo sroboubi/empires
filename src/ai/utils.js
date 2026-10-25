@@ -391,6 +391,14 @@ export function findBuildCandidates(gameState, sourceEntity, targetName,
             }
         }
 
+        // The real Build action also requires the BUILDER to be able to
+        // stand on the target cell (entity.js Build canDo): for a construct
+        // builder this means the cell's terrain must be in the builder's own
+        // spawnConditions.terrain list. Without this, villages claimed units
+        // were buildable and then failed with "Cannot build construct on
+        // target terrain" (fixed-world DeepSeek run, turn 2).
+        if (typeof sourceEntity.canStandOn === 'function' && !sourceEntity.canStandOn(cell)) continue;
+
         // Need a reachable, unoccupied neighbor to build from; prefer the
         // shortest staging path.
         let stage = null;
