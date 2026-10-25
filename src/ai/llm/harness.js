@@ -119,8 +119,16 @@ export class Harness extends BaseManager {
 
                 let actionOutcome = null;
                 if (command === "attack") {
+                    if (!response.target?.entityId) {
+                        lastResponseError = `Attack requires target.entityId (a specific visible enemy, e.g. barbarian_neutral_xxx). entityName is for Build only — attacking a type name like "village" is rejected.`;
+                        continue;
+                    }
                     actionOutcome = attack(this.gameState, entity, target, this.player.orders);
                 } else if (command === "repair") {
+                    if (!response.target?.entityId) {
+                        lastResponseError = `Repair requires target.entityId (a specific damaged entity). entityName is for Build only.`;
+                        continue;
+                    }
                     actionOutcome = support(this.gameState, entity, target, "Repair", this.player.orders);
                 } else if (command === "build") {
                     const targetName = response.target?.entityName;
