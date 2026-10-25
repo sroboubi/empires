@@ -1078,6 +1078,7 @@
 
     <button id="btn-save-game" class="btn btn-secondary" style="margin-top: 8px;">Save Game</button>
     <button id="btn-load-game" class="btn btn-secondary" style="margin-top: 8px;">Load Game</button>
+    <button id="btn-export-game" class="btn btn-secondary" style="margin-top: 8px;" title="Export current game replay as JSON">Export Game</button>
     <button id="btn-next-turn" class="btn btn-secondary" style="margin-top: 8px;">Next Turn</button>
     <button id="btn-mute" class="btn btn-secondary" style="margin-top: 8px;" title="Toggle audio">🔊</button>
   </div>
@@ -1281,6 +1282,9 @@
               </div>
               saves
             </label>
+            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; border-left: 1px solid var(--border-color); padding-left: 12px;">
+              <input type="checkbox" id="setup-record-game" checked> Record Game for Replay
+            </label>
           </div>
         </div>
 
@@ -1383,7 +1387,11 @@
       </div>
 
       <div class="divider"></div>
-      <button id="btn-start-game" class="btn" style="padding: 12px; font-size: 15px;">START GAME</button>
+      <div style="display: flex; gap: 12px;">
+        <button id="btn-start-game" class="btn" style="flex: 2; padding: 12px; font-size: 15px;">START GAME</button>
+        <button id="btn-load-replay" class="btn btn-secondary" style="flex: 1; padding: 12px; font-size: 14px;" type="button">LOAD REPLAY</button>
+        <input type="file" id="replay-file-input" accept=".json" style="display: none;">
+      </div>
     </div>
   </div>
 
@@ -1473,6 +1481,34 @@
 
   <!-- Toast Feedbacks -->
   <div id="toast-container"></div>
+
+  <!-- Floating Replay Controls Bar -->
+  <div id="replay-controls-bar" class="glass-panel" style="display: none; position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 2000; padding: 10px 18px; border-radius: 12px; align-items: center; gap: 12px; box-shadow: var(--glow-shadow); backdrop-filter: blur(var(--blur-strength)); border: 1px solid var(--border-color);">
+    <button id="replay-btn-first" class="btn btn-secondary btn-small" title="First Action (Home)" style="width: auto; padding: 6px 10px;">⏮</button>
+    <button id="replay-btn-prev" class="btn btn-secondary btn-small" title="Previous Action (Left Arrow)" style="width: auto; padding: 6px 12px;">◀</button>
+    <button id="replay-btn-play" class="btn btn-small" title="Play / Pause (Space)" style="width: auto; min-width: 76px; padding: 6px 14px;">▶ Play</button>
+    <button id="replay-btn-next" class="btn btn-secondary btn-small" title="Next Action (Right Arrow)" style="width: auto; padding: 6px 12px;">▶</button>
+    <button id="replay-btn-last" class="btn btn-secondary btn-small" title="Last Action (End)" style="width: auto; padding: 6px 10px;">⏭</button>
+    
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <input type="range" id="replay-scrubber" min="0" max="0" value="0" style="width: 200px; accent-color: var(--accent-color); cursor: pointer;">
+      <span id="replay-step-info" style="font-size: 12px; font-weight: 600; min-width: 130px; color: var(--text-main);">Round 1 (0/0)</span>
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 6px;">
+      <label for="replay-speed-select" style="font-size: 11px; color: var(--text-muted);">Speed:</label>
+      <select id="replay-speed-select" class="form-select" style="width: 65px; padding: 4px 6px; font-size: 11px;">
+        <option value="0.5">0.5x</option>
+        <option value="1" selected>1x</option>
+        <option value="2">2x</option>
+        <option value="4">4x</option>
+      </select>
+    </div>
+
+    <div id="replay-action-desc" style="font-size: 11px; color: var(--accent-color); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-style: italic;"></div>
+
+    <button id="btn-exit-replay" class="btn btn-secondary btn-small" style="background: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.4); color: #fca5a5; margin-left: 8px;">Exit Replay</button>
+  </div>
 
   <!-- Script Entrypoint -->
   <script type="module" src="src/main.js"></script>

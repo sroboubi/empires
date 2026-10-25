@@ -12,8 +12,9 @@
  */
 
 const DB_NAME = 'EmpiresDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = 'saves';
+const REPLAY_STORE_NAME = 'replays';
 
 /**
  * Opens (or creates/upgrades) the IndexedDB database.
@@ -29,6 +30,10 @@ function openDB() {
         const store = db.createObjectStore(STORE_NAME, { keyPath: 'name' });
         store.createIndex('timestamp', 'timestamp', { unique: false });
         store.createIndex('auto', 'auto', { unique: false });
+      }
+      if (!db.objectStoreNames.contains(REPLAY_STORE_NAME)) {
+        const replayStore = db.createObjectStore(REPLAY_STORE_NAME, { keyPath: 'id' });
+        replayStore.createIndex('timestamp', 'timestamp', { unique: false });
       }
     };
 
@@ -132,6 +137,73 @@ export async function pruneAutoSaves(maxCount) {
     for (const save of toDelete) {
       store.delete(save.name);
     }
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+/**
+ * Saves a replay record to IndexedDB.
+ * @param {Object} record - Replay data object with id, name, timestamp, initialState, snapshots
+ * @returns {Promise<void>}
+ */
+export async function saveReplay(record) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(REPLAY_STORE_NAME, 'readwrite');
+    const store = tx.objectStore(REPLAY_STORE_NAME);
+    store.put(record);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+/**
+ * Loads a replay by its ID.
+ * @param {string} id
+ * @returns {Promise<Object|null>}
+ */
+export async function loadReplay(id) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(REPLAY_STORE_NAME, 'readonly');
+    const store = tx.objectStore(REPLAY_STORE_NAME);
+    const request = store.get(id);
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+/**
+ * Lists all saved replays sorted by timestamp descending.
+ * @returns {Promise<Array>}
+ */
+export async function listReplays() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(REPLAY_STORE_NAME, 'readonly');
+    const store = tx.objectStore(REPLAY_STORE_NAME);
+    const request = store.getAll();
+    request.onsuccess = () => {
+      const replays = request.result || [];
+      replays.sort((a, b) => b.timestamp - a.timestamp);
+      resolve(replays);
+    };
+    request.onerror = () => reject(request.error);
+  });
+}
+
+/**
+ * Deletes a replay by its ID.
+ * @param {string} id
+ * @returns {Promise<void>}
+ */
+export async function deleteReplay(id) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(REPLAY_STORE_NAME, 'readwrite');
+    const store = tx.objectStore(REPLAY_STORE_NAME);
+    store.delete(id);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });

@@ -65,3 +65,10 @@ This file documents mistakes made during development, reasons why they occurred,
 - **Why it was made**: Assumed that an `LLMClient` should be statically configured per persona and task rather than being a single versatile invocation client that accepts dynamic prompts and options per `generate()` call.
 - **What to avoid in the future**: Keep client wrappers stateless with respect to dynamic prompts and task schemas. Pass `systemPrompt` and task-specific schema/config options into the execution function (`generate(content, systemPrompt, options)`). Maintain a single AI harness and client instance per player stored in the Player class (`player.aiManager`).
 
+---
+
+### Mistake 10: Capturing initial game state in ReplayRecorder before map generation and entity initialization
+- **Description**: In `src/main.js`, `replayRecorder.start(gameState, settings)` was invoked right after `gameState = new GameState();` but before `gameState.generateMap(...)` and `gameState.initializeManifest(...)`. Because `hexGrid`, `players`, and `entities` were not yet generated, `initialState.cells` was recorded as an empty object `{}`. Loading a replay resulted in `HexGrid.fromCells({})` creating an empty grid with zero hex cells, causing the renderer to display only the single dark ground cylinder ("one black hex").
+- **Why it was made**: Placed the recorder initialization at the top of `startNewGame()` assuming it needed to precede any game events, without verifying that `generateMap` and `initializeManifest` had populated `gameState.hexGrid`, `gameState.players`, and `gameState.entities`.
+- **What to avoid in the future**: Always initialize and start state-capturing recorders *after* all prerequisite state (e.g. map grid, players, starting units) has been completely constructed. Additionally, implement defensive backfills and loading fallbacks so unpopulated initial states do not produce a blank or broken scene.
+

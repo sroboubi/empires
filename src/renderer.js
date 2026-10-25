@@ -447,7 +447,7 @@ export function updateGroundBase(radius) {
   scene.add(groundBaseMesh);
 }
 
-function setTimeOfDay(hour) {
+export function setTimeOfDay(hour) {
   currentHour = hour % 24;
   if (currentHour < 0) currentHour += 24;
 

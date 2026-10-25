@@ -27,11 +27,17 @@ import { collectResourceModelEntries } from './resources.js';
 import { audio } from './audio.js';
 import { saveGame, loadGame, listSaves, deleteSave, pruneAutoSaves } from './saveManager.js';
 import { Harness } from './ai/llm/harness.js';
+import { Player } from './player.js';
+import { ReplayRecorder, ReplayPlayer, exportReplayToJSON, readReplayFile } from './replayManager.js';
 
 let gameState;
 let manifestData;
 let defaultSettings;
 let currentGameSettings = null;
+let replayRecorder = new ReplayRecorder();
+let replayPlayer = null;
+let isReplayMode = false;
+let savedShowAll = false;
 
 const mouse = { x: 0, y: 0 };
 let selectedEntity = null;
@@ -109,6 +115,28 @@ async function init() {
     });
 
     window.addEventListener('keydown', (e) => {
+      if (isReplayMode) {
+        if (e.key === ' ' || e.code === 'Space') {
+          e.preventDefault();
+          replayPlayer?.togglePlay();
+        } else if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          replayPlayer?.stepForward();
+        } else if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          replayPlayer?.stepBackward();
+        } else if (e.key === 'Home') {
+          e.preventDefault();
+          replayPlayer?.first();
+        } else if (e.key === 'End') {
+          e.preventDefault();
+          replayPlayer?.last();
+        } else if (e.key === 'Escape') {
+          exitReplayMode();
+        }
+        return;
+      }
+
       if (e.key === 'Escape') {
         hideContextMenu();
         hidePlayerContextMenu();
@@ -126,6 +154,59 @@ async function init() {
     // Control buttons
     document.getElementById('btn-save-game').addEventListener('click', () => openSaveLoadModal('save'));
     document.getElementById('btn-load-game').addEventListener('click', () => openSaveLoadModal('load'));
+    document.getElementById('btn-export-game').addEventListener('click', () => {
+      if (gameState?.replayRecorder?.hasData()) {
+        exportReplayToJSON(gameState.replayRecorder.getReplayData());
+        showToast('Replay exported successfully!');
+      } else {
+        showToast('No replay data recorded for the current game.', true);
+      }
+    });
+
+    // Replay File Picker & Setup Controls
+    const replayFileInput = document.getElementById('replay-file-input');
+    document.getElementById('btn-load-replay').addEventListener('click', () => {
+      if (replayFileInput) {
+        replayFileInput.value = '';
+        replayFileInput.click();
+      }
+    });
+
+    if (replayFileInput) {
+      replayFileInput.addEventListener('change', async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        try {
+          const replayData = await readReplayFile(file);
+          await startReplayMode(replayData);
+        } catch (err) {
+          console.error('Failed to load replay file:', err);
+          showToast(`Failed to load replay: ${err.message}`, true);
+        }
+      });
+    }
+
+    // Replay Floating Bar Controls
+    document.getElementById('replay-btn-first').addEventListener('click', () => replayPlayer?.first());
+    document.getElementById('replay-btn-prev').addEventListener('click', () => replayPlayer?.stepBackward());
+    document.getElementById('replay-btn-play').addEventListener('click', () => replayPlayer?.togglePlay());
+    document.getElementById('replay-btn-next').addEventListener('click', () => replayPlayer?.stepForward());
+    document.getElementById('replay-btn-last').addEventListener('click', () => replayPlayer?.last());
+
+    document.getElementById('replay-scrubber').addEventListener('input', (e) => {
+      if (replayPlayer) {
+        replayPlayer.pause();
+        replayPlayer.goTo(parseInt(e.target.value, 10));
+      }
+    });
+
+    document.getElementById('replay-speed-select').addEventListener('change', (e) => {
+      if (replayPlayer) {
+        replayPlayer.setSpeed(parseFloat(e.target.value));
+      }
+    });
+
+    document.getElementById('btn-exit-replay').addEventListener('click', exitReplayMode);
 
     // Audio mute toggle
     const muteBtn = document.getElementById('btn-mute');
@@ -166,12 +247,6 @@ async function init() {
 
         if (activeP.orders < 1) {
           showToast('Not enough orders to initiate chat (costs 1 order).', true);
-          return;
-        }
-
-        const llmSettings = gameState.settings?.llm;
-        if (!llmSettings || !llmSettings.orderedModels || llmSettings.orderedModels.length === 0) {
-          showToast('LLM is not configured. Please configure LLM in Game Setup to enable chat.', true);
           return;
         }
 
@@ -255,11 +330,13 @@ function openSetupModal(canClose = true) {
   populateUnitSelectOptions();
   renderSetupUnits();
 
-  // Auto-Save
+  // Auto-Save & Replay Recording
   const autoSave = defaultSettings.autoSave || { enabled: true, intervalTurns: 5, maxAutoSaves: 10 };
   document.getElementById('setup-autosave-enabled').checked = autoSave.enabled;
   document.getElementById('setup-autosave-interval').value = autoSave.intervalTurns;
   document.getElementById('setup-autosave-max').value = autoSave.maxAutoSaves;
+  const recordCheckbox = document.getElementById('setup-record-game');
+  if (recordCheckbox) recordCheckbox.checked = true;
 
   // Barbarian Settings — dynamically render horde sliders from defaultSettings.barbarians.horde
   const barbarians = defaultSettings.barbarians || null;
@@ -1086,6 +1163,7 @@ function handleStartGameClicked() {
       intervalTurns: parseInt(document.getElementById('setup-autosave-interval').value, 10) || 5,
       maxAutoSaves: parseInt(document.getElementById('setup-autosave-max').value, 10) || 10
     },
+    recordGame: document.getElementById('setup-record-game')?.checked ?? true,
     barbarians: document.getElementById('setup-barbarians-enabled').checked
       ? (() => {
         // Collect horde values dynamically — one entry per slider widget rendered
@@ -1134,6 +1212,15 @@ function startNewGame(settings) {
   // The browser drives turns: pass nextTurn as the continuation so the
   // initial AI player's turn runs and chains exactly as before.
   gameState.initializeManifest(manifestData, settings, () => nextTurn());
+
+  // Initialize and start recording AFTER map, players, and starting units exist
+  if (settings.recordGame !== false) {
+    replayRecorder = new ReplayRecorder();
+    replayRecorder.start(gameState, settings);
+    gameState.replayRecorder = replayRecorder;
+  } else {
+    gameState.replayRecorder = null;
+  }
 
   setMapCameraLimits(settings.mapSize);
   drawGrid(gameState);
@@ -1262,6 +1349,10 @@ async function doSaveGame(name, isAuto = false) {
     if (isAuto && currentGameSettings?.autoSave?.maxAutoSaves) {
       await pruneAutoSaves(currentGameSettings.autoSave.maxAutoSaves);
     }
+
+    if (gameState?.replayRecorder?.isRecording()) {
+      await gameState.replayRecorder.saveToIndexedDB();
+    }
   } catch (err) {
     console.error('Save failed:', err);
     showToast('Failed to save game.', true);
@@ -1307,6 +1398,119 @@ async function doLoadGame(saveName) {
 }
 
 /* ==========================================================================
+   REPLAY MODE CONTROLLER
+   ========================================================================== */
+
+/**
+ * Starts Replay mode using parsed replay data.
+ * @param {Object} replayData
+ */
+async function startReplayMode(replayData) {
+  if (!replayData || !replayData.initialState || !Array.isArray(replayData.snapshots)) {
+    showToast('Invalid replay file format: missing initialState or snapshots.', true);
+    return;
+  }
+
+  isReplayMode = true;
+  savedShowAll = CONFIG.SHOW_ALL;
+  CONFIG.SHOW_ALL = true;
+
+  closeSetupModal();
+  deselectEntity();
+  hideContextMenu();
+  clearEntityMeshes();
+
+  // Hide or disable normal gameplay controls
+  document.getElementById('btn-next-turn').disabled = true;
+  document.getElementById('btn-save-game').disabled = true;
+  document.getElementById('replay-controls-bar').style.display = 'flex';
+
+  // Instantiate GameState for replay from initial state
+  gameState = new GameState();
+  gameState.settings = replayData.settings || {};
+  gameState.manifestData = manifestData;
+
+  const hasCells = replayData.initialState?.cells && Object.keys(replayData.initialState.cells).length > 0;
+  if (hasCells) {
+    gameState.hexGrid = HexGrid.fromCells(replayData.initialState.cells);
+  } else {
+    console.warn('[Replay] initialState.cells is empty, generating fallback map');
+    gameState.generateMap(replayData.settings?.mapSize || 15, manifestData.terrains, manifestData);
+  }
+
+  gameState.players = (replayData.initialState?.players || []).map(p => Player.fromJSON(p, gameState));
+  gameState.entities = [];
+
+  setMapCameraLimits(replayData.settings?.mapSize || gameState.hexGrid?.radius || 15);
+  drawGrid(gameState);
+  buildCellResources(gameState);
+  updateHexFog(gameState);
+
+  if (replayPlayer) {
+    replayPlayer.destroy();
+  }
+
+  const scrubber = document.getElementById('replay-scrubber');
+  scrubber.min = 0;
+  scrubber.max = Math.max(0, replayData.snapshots.length - 1);
+  scrubber.value = 0;
+
+  replayPlayer = new ReplayPlayer(replayData, gameState, updateReplayUI);
+  replayPlayer.goTo(0);
+
+  if (gameState.entities.length > 0) {
+    focusCameraOnEntities(gameState.entities);
+  }
+
+  showToast(`Replay loaded (${replayData.snapshots.length} actions)`, false, 3500);
+}
+
+function updateReplayUI(state) {
+  const scrubber = document.getElementById('replay-scrubber');
+  if (scrubber) {
+    scrubber.value = state.index;
+    scrubber.max = Math.max(0, state.total - 1);
+  }
+
+  const stepInfo = document.getElementById('replay-step-info');
+  if (stepInfo) {
+    const round = state.snapshot ? state.snapshot.currentRound : 1;
+    stepInfo.textContent = `Round ${round} (${state.index + 1}/${state.total})`;
+  }
+
+  const actionDesc = document.getElementById('replay-action-desc');
+  if (actionDesc) {
+    actionDesc.textContent = state.snapshot ? state.snapshot.label : '';
+    actionDesc.title = state.snapshot ? state.snapshot.label : '';
+  }
+
+  const playBtn = document.getElementById('replay-btn-play');
+  if (playBtn) {
+    playBtn.textContent = state.isPlaying ? '⏸ Pause' : '▶ Play';
+  }
+
+  updatePlayersUI();
+}
+
+function exitReplayMode() {
+  if (replayPlayer) {
+    replayPlayer.destroy();
+    replayPlayer = null;
+  }
+
+  isReplayMode = false;
+  CONFIG.SHOW_ALL = savedShowAll;
+
+  document.getElementById('replay-controls-bar').style.display = 'none';
+  document.getElementById('btn-next-turn').disabled = false;
+  document.getElementById('btn-save-game').disabled = false;
+
+  deselectEntity();
+  clearEntityMeshes();
+  openSetupModal();
+}
+
+/* ==========================================================================
    TURN LIFECYCLE & AUTO-SAVE CHECK
    ========================================================================== */
 
@@ -1314,6 +1518,7 @@ async function doLoadGame(saveName) {
  * Next Turn: triggers endTurn on gameState, cycling to next player turn and updating Fog of War.
  */
 export async function nextTurn() {
+  if (isReplayMode) return;
   if (gameState.gameOver) {
     showToast('Game is over. Start a new game.', true);
     return;
@@ -1398,6 +1603,11 @@ function showVictoryModal(player, reasons) {
 
   overlay.classList.add('active');
   gameState.gameOver = true;
+
+  if (gameState?.replayRecorder?.isRecording()) {
+    gameState.replayRecorder.recordSnapshot(gameState, `Game Over: ${player.name} won!`);
+    gameState.replayRecorder.saveToIndexedDB();
+  }
 }
 
 /**
@@ -1445,6 +1655,11 @@ function handleLeftClick(event) {
 
 function handleRightClick(event) {
   event.preventDefault();
+
+  if (isReplayMode) {
+    hideContextMenu();
+    return;
+  }
 
   if (!selectedEntity) {
     hideContextMenu();
@@ -1580,6 +1795,10 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
         if (success) {
           audio.playEntitySfx(selectedEntity, 'action', action.name);
           showToast(check.reason || `Executed ${action.name}`);
+          if (gameState?.replayRecorder?.isRecording()) {
+            const loc = targetCell ? ` at (${targetCell.q}, ${targetCell.r})` : '';
+            gameState.replayRecorder.recordSnapshot(gameState, `${selectedEntity.name} ${action.name}${loc}`);
+          }
         } else {
           showToast(`Failed to execute ${action.name}`, true);
         }

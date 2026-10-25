@@ -20,6 +20,7 @@ export class GameState {
     this.settings = null;
     this.gameOver = false;
     this.chatHistory = {};
+    this.replayRecorder = null;
   }
 
   /**
@@ -264,6 +265,10 @@ export class GameState {
       this.activePlayerIndex = 0;
     }
     this.startTurn(onTurnEnd);
+    if (this.replayRecorder?.isRecording()) {
+      const activePlayerName = this.activePlayer ? this.activePlayer.name : 'Unknown';
+      this.replayRecorder.recordSnapshot(this, `Turn started: ${activePlayerName}`);
+    }
   }
 
   /**
@@ -319,6 +324,9 @@ export class GameState {
   async onRoundEnd() {
     if (this.settings?.barbarians) await manageBarbarians(this, this.settings.barbarians);
     this.currentRound++;
+    if (this.replayRecorder?.isRecording()) {
+      this.replayRecorder.recordSnapshot(this, `Round ${this.currentRound} began`);
+    }
   }
 
   /**
