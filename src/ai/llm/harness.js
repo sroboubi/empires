@@ -90,21 +90,19 @@ export class Harness extends BaseManager {
                 return;
             }
 
-            // Each command has its own response schema, so the command is
-            // inferred from which role-named fields are present — there is
-            // no shared "target" whose meaning flips per command (that
-            // ambiguity caused Attack-with-entityName failures). Priority:
-            // actions first, so a stray note on an action never ends the turn.
-            let command = null;
+            // Every response carries an explicit command field naming which
+            // command it performs (one of ATTACK, REPAIR, BUILD, EXPLORE,
+            // CHAT, END_TURN, enforced by the per-command schema). The
+            // command determines which role-named fields are required —
+            // there is no shared "target" whose meaning flips per command.
+            const command = String(response.command || '').toUpperCase();
             let actorId = null;
-            if (response.attackerId) { command = 'attack'; actorId = response.attackerId; }
-            else if (response.repairerId) { command = 'repair'; actorId = response.repairerId; }
-            else if (response.builderId) { command = 'build'; actorId = response.builderId; }
-            else if (response.explorerId) { command = 'explore'; actorId = response.explorerId; }
-            else if (response.targetPlayerId) { command = 'chat'; }
-            else if (response.note !== undefined) { command = 'end_turn'; }
+            if (command === 'ATTACK') actorId = response.attackerId;
+            else if (command === 'REPAIR') actorId = response.repairerId;
+            else if (command === 'BUILD') actorId = response.builderId;
+            else if (command === 'EXPLORE') actorId = response.explorerId;
 
-            if (command === 'attack' || command === 'repair' || command === 'build' || command === 'explore') {
+            if (command === 'ATTACK' || command === 'REPAIR' || command === 'BUILD' || command === 'EXPLORE') {
                 if (this.player.orders <= 0) {
                     lastResponseError = `You have 0 orders remaining. You cannot execute commands. End your turn with a note.`;
                     continue;
@@ -130,25 +128,25 @@ export class Harness extends BaseManager {
 
                 let ordersUsed = 0;
                 let actionOutcome = null;
-                if (command === "attack") {
+                if (command === "ATTACK") {
                     if (!response.targetId) {
                         lastResponseError = `Attack requires targetId (a specific visible enemy). entityName is for Build only — attacking a type name like "village" is rejected.`;
                         continue;
                     }
                     actionOutcome = attack(this.gameState, entity, target, this.player.orders);
-                } else if (command === "repair") {
+                } else if (command === "REPAIR") {
                     if (!response.targetId) {
                         lastResponseError = `Repair requires targetId (a specific damaged entity). entityName is for Build only.`;
                         continue;
                     }
                     actionOutcome = support(this.gameState, entity, target, "Repair", this.player.orders);
-                } else if (command === "build") {
+                } else if (command === "BUILD") {
                     if (!response.entityName) {
                         lastResponseError = `Build requires entityName (must be in the builder's Builds list)`;
                         continue;
                     }
                     actionOutcome = build(this.gameState, entity, response.entityName);
-                } else if (command === "explore") {
+                } else if (command === "EXPLORE") {
                     actionOutcome = explore(this.gameState, entity, response.direction, true);
                 }
 
@@ -156,11 +154,11 @@ export class Harness extends BaseManager {
                 if (ordersUsed === 0) {
                     lastResponseError = actionOutcome.result.message;
                     // Store structured command info for the enhanced failure format
-                    const targetDesc = command === 'build' ? response.entityName :
-                        command === 'explore' ? (response.direction || 'unexplored') :
+                    const targetDesc = command === 'BUILD' ? response.entityName :
+                        command === 'EXPLORE' ? (response.direction || 'unexplored') :
                             response.targetId || 'unknown';
                     lastFailedCommand = {
-                        command: command.charAt(0).toUpperCase() + command.slice(1),
+                        command: command.charAt(0) + command.slice(1).toLowerCase(),
                         target: targetDesc,
                         entityId: actorId
                     };
@@ -175,7 +173,7 @@ export class Harness extends BaseManager {
                 // Action successfully executed: reconcile and render
                 await onActionDone(this.gameState);
                 turnResponseLog.push(response);
-            } else if (command === 'chat') {
+            } else if (command === 'CHAT') {
                 if (this.player.orders <= 0) {
                     lastResponseError = `You have 0 orders remaining. You cannot initiate diplomacy. End your turn with a note.`;
                     continue;
@@ -210,11 +208,11 @@ export class Harness extends BaseManager {
                 lastActionResult = `[completed] Concluded diplomatic session with ${targetPlayer.name}`;
                 lastResponseError = null;
                 turnResponseLog.push(response);
-            } else if (command === 'end_turn') {
+            } else if (command === 'END_TURN') {
                 this.player.addHistoryEntry(this.gameState.currentRound, { category: 'note', details: response.note });
                 return;
             } else {
-                lastResponseError = `Could not determine a command from the response fields. Respond with exactly one command: Attack (attackerId + targetId), Repair (repairerId + targetId), Build (builderId + entityName), Explore (explorerId + optional direction), Chat (targetPlayerId + optional message), or End turn (note).`;
+                lastResponseError = `Unknown command: "${response.command}". Respond with exactly one command field: ATTACK (attackerId + targetId), REPAIR (repairerId + targetId), BUILD (builderId + entityName), EXPLORE (explorerId + optional direction), CHAT (targetPlayerId + optional message), or END_TURN (note).`;
                 continue;
             }
         }
@@ -602,15 +600,16 @@ export class Harness extends BaseManager {
     /**
      * Human-readable action description: "Build mine with worker_1",
      * "Attack red_knight_1 with knight_1", "Explore N with scout_1".
-     * Each command carries its own role-named fields (see response.schema.json).
+     * Each response carries an explicit command field (see response.schema.json).
      */
     describeAction(r) {
-        if (r.attackerId) return `Attack ${r.targetId || 'unknown'} with ${r.attackerId}`;
-        if (r.repairerId) return `Repair ${r.targetId || 'unknown'} with ${r.repairerId}`;
-        if (r.builderId) return `Build ${r.entityName || 'unknown'} with ${r.builderId}`;
-        if (r.explorerId) return `Explore ${r.direction || 'unexplored'} with ${r.explorerId}`;
-        if (r.targetPlayerId) return `Chat with ${r.targetPlayerId}`;
-        if (r.note !== undefined) return `End turn`;
+        const cmd = String(r.command || '').toUpperCase();
+        if (cmd === 'ATTACK') return `Attack ${r.targetId || 'unknown'} with ${r.attackerId || 'unknown'}`;
+        if (cmd === 'REPAIR') return `Repair ${r.targetId || 'unknown'} with ${r.repairerId || 'unknown'}`;
+        if (cmd === 'BUILD') return `Build ${r.entityName || 'unknown'} with ${r.builderId || 'unknown'}`;
+        if (cmd === 'EXPLORE') return `Explore ${r.direction || 'unexplored'} with ${r.explorerId || 'unknown'}`;
+        if (cmd === 'CHAT') return `Chat with ${r.targetPlayerId || 'unknown'}`;
+        if (cmd === 'END_TURN') return `End turn`;
         return `Unknown action`;
     }
 

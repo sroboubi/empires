@@ -4,6 +4,7 @@
       "type": "object",
       "description": "Attack a visible enemy entity with one of your units.",
       "required": [
+        "command",
         "thoughtProcess",
         "attackerId",
         "targetId"
@@ -20,6 +21,13 @@
         "targetId": {
           "type": "string",
           "description": "ID of the specific visible enemy entity to attack."
+        },
+        "command": {
+          "type": "string",
+          "enum": [
+            "ATTACK"
+          ],
+          "description": "This response performs the ATTACK command."
         }
       }
     },
@@ -27,6 +35,7 @@
       "type": "object",
       "description": "Repair a damaged entity with one of your units.",
       "required": [
+        "command",
         "thoughtProcess",
         "repairerId",
         "targetId"
@@ -43,6 +52,13 @@
         "targetId": {
           "type": "string",
           "description": "ID of the specific damaged entity to repair (yours or an ally's)."
+        },
+        "command": {
+          "type": "string",
+          "enum": [
+            "REPAIR"
+          ],
+          "description": "This response performs the REPAIR command."
         }
       }
     },
@@ -50,6 +66,7 @@
       "type": "object",
       "description": "Build a new entity with one of your builders.",
       "required": [
+        "command",
         "thoughtProcess",
         "builderId",
         "entityName"
@@ -66,6 +83,13 @@
         "entityName": {
           "type": "string",
           "description": "Type name of the entity to build (must be in the builder's Builds list)."
+        },
+        "command": {
+          "type": "string",
+          "enum": [
+            "BUILD"
+          ],
+          "description": "This response performs the BUILD command."
         }
       }
     },
@@ -73,6 +97,7 @@
       "type": "object",
       "description": "Explore with one of your units.",
       "required": [
+        "command",
         "thoughtProcess",
         "explorerId"
       ],
@@ -98,6 +123,13 @@
             "SE"
           ],
           "description": "Direction to explore in; omit to explore toward the closest unexplored area."
+        },
+        "command": {
+          "type": "string",
+          "enum": [
+            "EXPLORE"
+          ],
+          "description": "This response performs the EXPLORE command."
         }
       }
     },
@@ -105,6 +137,7 @@
       "type": "object",
       "description": "Initiate diplomacy with an opponent (costs 1 order).",
       "required": [
+        "command",
         "thoughtProcess",
         "targetPlayerId"
       ],
@@ -120,6 +153,13 @@
         "message": {
           "type": "string",
           "description": "Optional opening message or proposition to send."
+        },
+        "command": {
+          "type": "string",
+          "enum": [
+            "CHAT"
+          ],
+          "description": "This response performs the CHAT command."
         }
       }
     },
@@ -127,6 +167,7 @@
       "type": "object",
       "description": "End your turn. The only response that carries a note.",
       "required": [
+        "command",
         "thoughtProcess",
         "note"
       ],
@@ -138,6 +179,13 @@
         "note": {
           "type": "string",
           "description": "Strategic reminder to yourself for your next turn."
+        },
+        "command": {
+          "type": "string",
+          "enum": [
+            "END_TURN"
+          ],
+          "description": "This response performs the END_TURN command."
         }
       }
     }
