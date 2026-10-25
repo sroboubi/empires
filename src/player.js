@@ -138,22 +138,35 @@ export class Player {
   }
 
   /**
-   * Turn lifecycle step called at the start of this player's turn.
-   * Steps all entities owned by this player.
+   * Recomputes military/economic/exploration/total scores from current
+   * state. Called by step() and by headless harnesses that bypass step()'s
+   * async chain — both must see the same scores.
    */
-  step() {
-    this.refillOrders();
+  recalculateScore() {
     this.score = { military: 0, economic: 0 };
     const ownedEntities = this.getEntities();
     for (const entity of ownedEntities) {
       this.score.military += entity.state.score.military;
       this.score.economic += entity.state.score.economic;
+    }
+
+    this.score.exploration = Math.round(Math.pow(this.visibleCells.size * this.exploredCells.size, 1 / 3));
+    this.score.total = Math.round(Math.pow(this.score.military * this.score.economic * this.score.exploration, 1 / 3));
+  }
+
+  /**
+   * Turn lifecycle step called at the start of this player's turn.
+   * Steps all entities owned by this player.
+   */
+  step() {
+    this.refillOrders();
+    const ownedEntities = this.getEntities();
+    for (const entity of ownedEntities) {
       entity.step();
     }
 
     this.updateVisibility();
-    this.score.exploration = Math.round(Math.pow(this.visibleCells.size * this.exploredCells.size, 1 / 3));
-    this.score.total = Math.round(Math.pow(this.score.military * this.score.economic * this.score.exploration, 1 / 3));
+    this.recalculateScore();
 
     if (this.aiManager) {
       this.aiManager.processTurn()

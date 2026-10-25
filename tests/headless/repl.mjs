@@ -58,6 +58,7 @@ async function stepTurns(n) {
       p.refillOrders();
       for (const e of p.getEntities()) e.step();
       p.updateVisibility();
+      p.recalculateScore();
       if (p.aiManager) {
         try { await p.aiManager.processTurn(); }
         catch (e) { console.log(`AI error (${p.name}): ${e.message}`); }

@@ -145,6 +145,7 @@ async function main() {
       player.refillOrders();
       for (const e of player.getEntities()) e.step();
       player.updateVisibility();
+      player.recalculateScore();
 
       // Drive the AI directly
       if (player.aiManager) {
