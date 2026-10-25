@@ -49,7 +49,7 @@ Without a config file, defaults to 2 SmartManager AI players on a radius-12 map.
 | `package.json` | npm deps for the harness only (three, simplex-noise, ajv) — the game itself uses CDN imports and needs no npm |
 | `config.example.json` | Template for game setup (players, map, win conditions, etc.) |
 
-**Key design decision:** We bypass `Player.step()`'s `nextTurn()` chain (DOM-bound via `main.js`) and drive the AI managers directly. The synchronous parts of `Player.step()` (order refill, entity stepping, visibility) are called manually.
+**Key design decision:** turn flow is shared, not duplicated. The harness drives turns through the real `Player.step()` with a no-op continuation (`player.step(() => {})`); the browser passes its `nextTurn` as the continuation. Setup passes no continuation, so no background AI turn fires at game creation. Rendering, sound, and UI remain stubbed — those need the Modal browser runs.
 
 ## Assertions
 
