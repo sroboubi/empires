@@ -117,6 +117,21 @@ test('settler that cannot afford village', () => {
     assert(!md.includes('Can build now'), 'should not show empty buildable section');
 });
 
+test('affordable build with no valid site renders as Cannot build, not Cannot afford', () => {
+    const summary = {
+        ...baseSummary,
+        entities: [{
+            id: 'worker_1', name: 'worker', health: 100, maxHealth: 100, actionPoints: 5,
+            fromStart: { direction: 'E', distance: 1 },
+            buildableNow: [],
+            buildableLater: [{ name: 'farm', missing: 'no valid site nearby' }]
+        }]
+    };
+    const md = serializeStateToMarkdown(summary, entities);
+    assert(md.includes('Cannot build farm (no valid site nearby)'), 'no-site build missing');
+    assert(!md.includes('Cannot afford farm'), 'no-site build must not read as unaffordable');
+});
+
 test('fallback to static manifest when state fields absent', () => {
     const summary = {
         ...baseSummary,

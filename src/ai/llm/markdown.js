@@ -256,8 +256,15 @@ export function serializeStateToMarkdown(summary, manifestEntities = []) {
     for (const name of oppNames) {
       const opp = opponents[name];
       const oppEntities = opp.entities || [];
+      // Display the owner's name, not the map key: production keys are
+      // owner ids (or "null" for ownerless barbarians), which rendered as
+      // "**null**" or a bare id in every opponent section of the 50-turn
+      // game. Prefer opp.name; fall back to a name-like key (test data is
+      // keyed by name without a .name field); ownerless maps to Barbarians.
+      let displayName = (opp.name && opp.name !== 'None') ? opp.name : name;
+      if (displayName === 'null') displayName = 'Barbarians';
       const scoreStr = opp.score !== undefined ? `, score ${typeof opp.score === 'object' ? opp.score.total ?? '' : opp.score}` : '';
-      lines.push(`* **${name}** (${oppEntities.length} visible entit${oppEntities.length === 1 ? 'y' : 'ies'}${scoreStr})`);
+      lines.push(`* **${displayName}** (${oppEntities.length} visible entit${oppEntities.length === 1 ? 'y' : 'ies'}${scoreStr})`);
       for (const e of oppEntities) {
         lines.push(oppEntityToMarkdown(e, byName));
       }
@@ -300,9 +307,11 @@ function entityStateToMarkdown(e, byName, brief = false) {
     // State-dependent: split by affordability and AP
     if ((e.buildableNow || []).length) caps.push(`Can build now: ${e.buildableNow.join(', ')}`);
     for (const b of e.buildableLater || []) {
-      // Distinguish AP issues from resource issues
+      // Distinguish AP issues and site issues from resource issues
       if (b.missing && b.missing.includes('insufficient AP')) {
         caps.push(`Cannot build ${b.name} (${b.missing})`);
+      } else if (b.missing && b.missing.includes('no valid site')) {
+        caps.push(`Cannot build ${b.name} (no valid site nearby)`);
       } else {
         caps.push(`Cannot afford ${b.name} (need ${b.missing})`);
       }

@@ -52,7 +52,7 @@ GAME_URL = "https://grand-empires-dev.netlify.app/"
 
 
 @app.function(image=image, gpu="T4", timeout=1800)
-def run_player_test(turns: int = 3):
+def run_player_test(turns: int = 3, url: str = GAME_URL):
     from playwright.sync_api import sync_playwright
 
     results = {
@@ -91,8 +91,8 @@ def run_player_test(turns: int = 3):
         page.on("console", on_console)
         page.on("pageerror", on_pageerror)
 
-        print(f"Loading {GAME_URL}...", flush=True)
-        page.goto(GAME_URL, wait_until="domcontentloaded", timeout=120000)
+        print(f"Loading {url}...", flush=True)
+        page.goto(url, wait_until="domcontentloaded", timeout=120000)
         page.wait_for_selector("#setup-modal-overlay.active", timeout=120000)
         print("Setup modal visible", flush=True)
         page.wait_for_timeout(3000)
@@ -334,10 +334,10 @@ def run_player_test(turns: int = 3):
 
 
 @app.local_entrypoint()
-def main(turns: int = 3):
+def main(turns: int = 3, url: str = GAME_URL):
     print(f"Starting Modal T4 test with {turns} turns...", flush=True)
     start = datetime.now()
-    results = run_player_test.remote(turns)
+    results = run_player_test.remote(turns, url)
     duration = (datetime.now() - start).total_seconds()
 
     print("\n" + "=" * 60)

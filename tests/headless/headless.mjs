@@ -91,7 +91,7 @@ async function main() {
   // Build full game settings: config file overrides defaultSettings.json
   const gameState = new GameState();
   const mapSize = cfg.mapSize || ds.mapSize || 12;
-  gameState.generateMap(mapSize, null, manifest);
+  gameState.generateMap(mapSize, manifest.terrains, manifest);
 
   const players = cfg.players || ds.players || [
     { id: 1, name: 'Blue', color: '#0000ff', controller: 'ai', description: '' },
@@ -132,57 +132,46 @@ async function main() {
   assert(gameState.players.length === players.length, `expected ${players.length} players`);
   assert(gameState.entities.length > 0, 'expected starting entities');
 
-  // Run turns headlessly. We bypass Player.step()'s nextTurn() chain (DOM)
-  // and drive the AI managers directly.
+  // Run turns headlessly through the real Player.step(), with a no-op
+  // continuation: the harness drives advancement itself, so step() must
+  // not chain into the browser's nextTurn(). Passing a function (rather
+  // than nothing) is what makes AI players act; setup intentionally
+  // passed no continuation, so no background AI turn fires at setup.
   for (let turn = 1; turn <= TURNS; turn++) {
     console.log(`[headless] --- Turn ${turn} (round ${gameState.currentRound}) ---`);
     for (let pi = 0; pi < gameState.players.length; pi++) {
       const player = gameState.players[pi];
       gameState.activePlayerIndex = pi;
 
-      // Sync parts of Player.step() (refill, entity steps, visibility, scores)
-      // without triggering the async AI + nextTurn() DOM chain.
-      player.refillOrders();
-      for (const e of player.getEntities()) e.step();
-      player.updateVisibility();
-
-      // Drive the AI directly
-      if (player.aiManager) {
-        try {
-          await player.aiManager.processTurn();
-        } catch (err) {
-          console.error(`  ERROR in ${player.name} AI: ${err.message}`);
-          failures++;
-        }
+      // Real Player.step(): refill, entity steps, visibility, scores,
+      // then the AI turn (awaited). Errors are logged in step() and
+      // rethrown here for the failure count.
+      try {
+        await player.step(() => {});
+      } catch (err) {
+        console.error(`  ERROR in ${player.name} AI: ${err.message}`);
+        failures++;
       }
 
       // Assertions after each player's turn
       assert(player.orders >= 0, `${player.name} orders negative: ${player.orders}`);
       checkNoNaN(player.resources, `${player.name}.resources`);
       checkNoNaN(player.score, `${player.name}.score`);
-    }
 
-    // Round-end (barbarians etc.)
-    await gameState.onRoundEnd();
+      // Round-end (barbarians etc.) when the last player has acted,
+      // matching the browser's endTurn wrap.
+      if (pi === gameState.players.length - 1) {
+        await gameState.onRoundEnd();
+      }
 
-    // Check win conditions (mirrors main.js checkWinConditions)
-    const wc = settings.winCondition;
-    if (wc && gameState.currentRound >= 5) {
-      for (const p of gameState.players) {
-        let won = false;
-        if (wc.absoluteScore && p.score.total >= wc.absoluteScore) won = true;
-        if (wc.relativeScore) {
-          let nextHighest = 0;
-          for (const o of gameState.players) {
-            if (o.id !== p.id && o.score.total > nextHighest) nextHighest = o.score.total;
-          }
-          if (p.score.total >= wc.relativeScore * nextHighest && nextHighest > 0) won = true;
-        }
-        if (won) {
-          console.log(`[headless] ${p.name} WINS at round ${gameState.currentRound} (score ${p.score.total})`);
-          gameState.gameOver = true;
-          break;
-        }
+      // Check win conditions after each player's turn, as the browser
+      // does after each endTurn — via the single shared check.
+      const win = gameState.checkWinConditions();
+      if (win) {
+        console.log(`[headless] ${win.winner.name} WINS at round ${gameState.currentRound} (score ${win.winner.score.total})`);
+        console.log(`[headless] Reasons: ${win.reasons.join('; ')}`);
+        gameState.gameOver = true;
+        break;
       }
     }
     if (gameState.gameOver) {

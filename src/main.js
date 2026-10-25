@@ -1131,7 +1131,9 @@ function startNewGame(settings) {
 
   gameState = new GameState();
   gameState.generateMap(settings.mapSize, manifestData.terrains, manifestData);
-  gameState.initializeManifest(manifestData, settings);
+  // The browser drives turns: pass nextTurn as the continuation so the
+  // initial AI player's turn runs and chains exactly as before.
+  gameState.initializeManifest(manifestData, settings, () => nextTurn());
 
   setMapCameraLimits(settings.mapSize);
   drawGrid(gameState);
@@ -1324,8 +1326,10 @@ export async function nextTurn() {
   deselectEntity();
   hideContextMenu();
 
-  // this updates the gameState.activePlayer and increments the round if needed
-  await gameState.endTurn();
+  // this updates the gameState.activePlayer and increments the round if needed.
+  // The browser drives turn advancement: nextTurn is the continuation
+  // that runs when an AI player's turn settles (see Player.step).
+  await gameState.endTurn(() => nextTurn());
 
   // enable the button again if the next player is human
   if (gameState.activePlayer && !gameState.activePlayer.isAI) {
@@ -1358,8 +1362,9 @@ export async function nextTurn() {
   // Check auto-save condition
   checkAutoSave();
 
-  // Check win conditions
-  checkWinConditions();
+  // Check win conditions (pure check on GameState; render the modal here)
+  const win = gameState.checkWinConditions();
+  if (win) showVictoryModal(win.winner, win.reasons);
 }
 
 async function checkAutoSave() {
@@ -1375,50 +1380,6 @@ async function checkAutoSave() {
   }
 }
 
-/**
- * Checks if any player has met the win conditions.
- * Called at the end of each turn.
- */
-function checkWinConditions() {
-  if (!gameState || !gameState.settings?.winCondition) return false;
-
-  // Don't check win conditions before MIN_GAME_ROUNDS
-  if (gameState.currentRound < CONFIG.MIN_GAME_ROUNDS) return false;
-
-  const winCondition = gameState.settings.winCondition;
-  const players = gameState.players;
-
-  for (const player of players) {
-    const reasons = [];
-
-    // Check absolute score
-    if (winCondition.absoluteScore && player.score.total >= winCondition.absoluteScore) {
-      reasons.push(`Absolute Score: ${player.score.total} >= ${winCondition.absoluteScore}`);
-    }
-
-    // Check relative score
-    if (winCondition.relativeScore) {
-      // Find the next highest score among other players
-      let nextHighest = 0;
-      for (const other of players) {
-        if (other.id !== player.id && other.score.total > nextHighest) {
-          nextHighest = other.score.total;
-        }
-      }
-      const threshold = winCondition.relativeScore * nextHighest;
-      if (nextHighest > 0 && player.score.total >= threshold) {
-        reasons.push(`Relative Score: ${player.score.total} >= ${winCondition.relativeScore} × ${nextHighest} (next highest)`);
-      }
-    }
-
-    if (reasons.length > 0) {
-      showVictoryModal(player, reasons);
-      return true;
-    }
-  }
-
-  return false;
-}
 
 /**
  * Shows the victory modal with the winning player and reasons.

@@ -317,23 +317,26 @@ function expectedYieldAt(gameState, cell, canonicalName, baseYields) {
  * @param {number} [distancePenalty] weighting of extra travel vs. yield gain
  * @returns {{ordersUsed: number, result: {status: string, message: string}}} Result with orders used and outcome.
  */
-export function build(gameState, sourceEntity, targetName,
-    maxDistance = CONFIG.AI_BUILD_MAX_DISTANCE ?? 10,
-    distancePenalty = CONFIG.AI_BUILD_DISTANCE_PENALTY ?? 0.2) {
-    const fail = (message) => ({ ordersUsed: 0, result: { status: 'failed', message } });
-    if (!gameState || !sourceEntity || !targetName || !sourceEntity.active) return fail('Invalid builder or target.');
-    const grid = gameState.hexGrid;
-    if (!grid) return fail('No hex grid.');
-
+/**
+ * Finds all valid build sites for a builder and target type, using the same
+ * rules as build(): land, within maxDistance, explored by the owner,
+ * unoccupied, matching spawnConditions terrain/separation, with a reachable
+ * unoccupied neighbor to stage from. Shared by build() and by state
+ * serialization, so the LLM sees placeability computed by the engine instead
+ * of discovering it through failed Build commands.
+ * @param {Object} gameState
+ * @param {Object} sourceEntity builder unit
+ * @param {string} targetName
+ * @param {number} [maxDistance]
+ * @returns {{ candidates: Array, canonicalName: string }} candidates are
+ *   unsorted; each has { cell, stage, dist, yield }
+ */
+export function findBuildCandidates(gameState, sourceEntity, targetName,
+    maxDistance = CONFIG.AI_BUILD_MAX_DISTANCE ?? 10) {
+    const grid = gameState?.hexGrid;
+    if (!grid || !sourceEntity || !targetName) return { candidates: [], canonicalName: targetName };
     const owner = sourceEntity.owner;
-    const availableOrders = owner ? owner.orders : 1;
-    if (availableOrders <= 0) return fail('No orders available.');
-
     const actions = sourceEntity.getActions ? sourceEntity.getActions() : [];
-    const expectedActionName = `Build ${camelToTitle(targetName)}`;
-    const buildAction = actions.find(a => a.name.toLowerCase() === expectedActionName.toLowerCase() || a.name.toLowerCase() === `build ${targetName.toLowerCase()}`);
-    if (!buildAction) return fail(`${sourceEntity.name} cannot build ${targetName}.`);
-
     const moveAction = actions.find(a => a.name === "Move");
 
     // Canonical manifest key (case-insensitive): drives base yields and the
@@ -388,6 +391,14 @@ export function build(gameState, sourceEntity, targetName,
             }
         }
 
+        // The real Build action also requires the BUILDER to be able to
+        // stand on the target cell (entity.js Build canDo): for a construct
+        // builder this means the cell's terrain must be in the builder's own
+        // spawnConditions.terrain list. Without this, villages claimed units
+        // were buildable and then failed with "Cannot build construct on
+        // target terrain" (fixed-world DeepSeek run, turn 2).
+        if (typeof sourceEntity.canStandOn === 'function' && !sourceEntity.canStandOn(cell)) continue;
+
         // Need a reachable, unoccupied neighbor to build from; prefer the
         // shortest staging path.
         let stage = null;
@@ -406,7 +417,30 @@ export function build(gameState, sourceEntity, targetName,
         });
     }
 
+    return { candidates, canonicalName };
+}
+
+export function build(gameState, sourceEntity, targetName,
+    maxDistance = CONFIG.AI_BUILD_MAX_DISTANCE ?? 10,
+    distancePenalty = CONFIG.AI_BUILD_DISTANCE_PENALTY ?? 0.2) {
+    const fail = (message) => ({ ordersUsed: 0, result: { status: 'failed', message } });
+    if (!gameState || !sourceEntity || !targetName || !sourceEntity.active) return fail('Invalid builder or target.');
+    const grid = gameState.hexGrid;
+    if (!grid) return fail('No hex grid.');
+
+    const owner = sourceEntity.owner;
+    const availableOrders = owner ? owner.orders : 1;
+    if (availableOrders <= 0) return fail('No orders available.');
+
+    const actions = sourceEntity.getActions ? sourceEntity.getActions() : [];
+    const expectedActionName = `Build ${camelToTitle(targetName)}`;
+    const buildAction = actions.find(a => a.name.toLowerCase() === expectedActionName.toLowerCase() || a.name.toLowerCase() === `build ${targetName.toLowerCase()}`);
+    if (!buildAction) return fail(`${sourceEntity.name} cannot build ${targetName}.`);
+
+    const { candidates, canonicalName } = findBuildCandidates(gameState, sourceEntity, targetName, maxDistance);
     if (candidates.length === 0) return fail(`No valid site to build ${canonicalName}.`);
+    const moveAction = (sourceEntity.getActions ? sourceEntity.getActions() : []).find(a => a.name === "Move");
+
 
     // Closest first; a farther site wins only if its relative yield gain
     // justifies the extra travel: each extra hex must buy at least

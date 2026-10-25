@@ -1,5 +1,4 @@
 import { animateToTimeOfDay } from "./renderer.js";
-import { nextTurn } from "./main.js";
 import { SmartManager } from "./ai/standard/smartManager.js";
 import { Harness } from "./ai/llm/harness.js";
 import { CONFIG } from './config.js';
@@ -138,31 +137,58 @@ export class Player {
   }
 
   /**
-   * Turn lifecycle step called at the start of this player's turn.
-   * Steps all entities owned by this player.
+   * Recomputes military/economic/exploration/total scores from current
+   * state. Called by step(), which every driver (browser and headless)
+   * goes through — both see the same scores.
    */
-  step() {
-    this.refillOrders();
+  recalculateScore() {
     this.score = { military: 0, economic: 0 };
     const ownedEntities = this.getEntities();
     for (const entity of ownedEntities) {
       this.score.military += entity.state.score.military;
       this.score.economic += entity.state.score.economic;
+    }
+
+    this.score.exploration = Math.round(Math.pow(this.visibleCells.size * this.exploredCells.size, 1 / 3));
+    this.score.total = Math.round(Math.pow(this.score.military * this.score.economic * this.score.exploration, 1 / 3));
+  }
+
+  /**
+   * Turn lifecycle step called at the start of this player's turn.
+   * Steps all entities owned by this player.
+   *
+   * Async: the caller decides how to handle the returned promise —
+   * the harness awaits it, the browser fire-and-forgets it (see
+   * GameState.startTurn). The driver owns turn advancement, so step()
+   * never imports nextTurn() from main.js (that import is what forced
+   * headless harnesses to bypass step() entirely). The driver passes
+   * its continuation as onTurnEnd: the browser passes nextTurn, and
+   * harnesses that drive turns explicitly pass a no-op. The AI turn
+   * runs only when a continuation is provided, so setup paths that
+   * pass nothing get the synchronous bookkeeping only, with no
+   * background AI turn. AI errors are logged here and then rethrown,
+   * so the awaiting driver can count them; the turn still advances
+   * via the finally callback.
+   */
+  async step(onTurnEnd) {
+    this.refillOrders();
+    const ownedEntities = this.getEntities();
+    for (const entity of ownedEntities) {
       entity.step();
     }
 
     this.updateVisibility();
-    this.score.exploration = Math.round(Math.pow(this.visibleCells.size * this.exploredCells.size, 1 / 3));
-    this.score.total = Math.round(Math.pow(this.score.military * this.score.economic * this.score.exploration, 1 / 3));
+    this.recalculateScore();
 
-    if (this.aiManager) {
-      this.aiManager.processTurn()
-        .catch(err => {
-          console.error(`Error during AI turn for player ${this.name}:`, err);
-        })
-        .finally(() => {
-          nextTurn();
-        });
+    if (this.aiManager && typeof onTurnEnd === 'function') {
+      try {
+        await this.aiManager.processTurn();
+      } catch (err) {
+        console.error(`Error during AI turn for player ${this.name}:`, err);
+        throw err;
+      } finally {
+        onTurnEnd();
+      }
     }
   }
 

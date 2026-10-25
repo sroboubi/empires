@@ -1,7 +1,7 @@
 import { BaseManager } from "../baseManager.js";
 import { LLMClient } from "./client.js";
 import responseSchema from './response.schema.json' with { type: 'json' };
-import { attack, support, build, explore, onActionDone } from "../utils.js";
+import { attack, support, build, explore, onActionDone, findBuildCandidates } from "../utils.js";
 import { HexGrid } from '../../hexGrid.js';
 import { manifestToMarkdown, serializeStateToMarkdown, summarizeTerrain } from "./markdown.js";
 import { CONFIG } from "../../config.js";
@@ -26,7 +26,7 @@ export class Harness extends BaseManager {
                 timeoutMs: 30000,
                 generationConfig: {
                     temperature: 0.1,
-                    maxOutputTokens: 4000,
+                    maxOutputTokens: 8000,
                     thinkingBudget: 1000
                 }
             });
@@ -62,7 +62,15 @@ export class Harness extends BaseManager {
                 } else {
                     userContent += `\n\n### Last Action Failed\n${lastResponseError}`;
                 }
-                if (response) userContent += `\nFailed response: ${JSON.stringify(response)}`;
+                // Echo only the failed command, never the model's reasoning:
+                // echoing the full response re-sends thousands of tokens of
+                // thoughtProcess every retry (measured ~6,600 tokens in a
+                // late-game DeepSeek prompt) and grows the prompt each turn.
+                if (response && typeof response === 'object') {
+                    const { thoughtProcess, reasoning, ...commandOnly } = response;
+                    const compact = JSON.stringify(commandOnly);
+                    if (compact && compact !== '{}') userContent += `\nFailed response: ${compact.slice(0, 500)}`;
+                }
             } else if (lastActionResult) {
                 userContent += `\n\n### Last Action Result\n${lastActionResult}`;
             }
@@ -82,63 +90,77 @@ export class Harness extends BaseManager {
                 return;
             }
 
-            if (response.type === "COMMAND") {
+            // Every response carries an explicit command field naming which
+            // command it performs (one of ATTACK, REPAIR, BUILD, EXPLORE,
+            // CHAT, END_TURN, enforced by the per-command schema). The
+            // command determines which role-named fields are required —
+            // there is no shared "target" whose meaning flips per command.
+            const command = String(response.command || '').toUpperCase();
+            let actorId = null;
+            if (command === 'ATTACK') actorId = response.attackerId;
+            else if (command === 'REPAIR') actorId = response.repairerId;
+            else if (command === 'BUILD') actorId = response.builderId;
+            else if (command === 'EXPLORE') actorId = response.explorerId;
+
+            if (command === 'ATTACK' || command === 'REPAIR' || command === 'BUILD' || command === 'EXPLORE') {
                 if (this.player.orders <= 0) {
-                    lastResponseError = `You have 0 orders remaining. You cannot execute commands. You must respond with type: "END_TURN" and provide your strategic note.`;
+                    lastResponseError = `You have 0 orders remaining. You cannot execute commands. End your turn with a note.`;
                     continue;
                 }
 
-                const entity = this.gameState.getEntityById(response.entityId);
+                const entity = this.gameState.getEntityById(actorId);
                 if (!entity) {
-                    lastResponseError = `Actor entity not found: ${response.entityId}`;
+                    lastResponseError = `Actor entity not found: ${actorId}`;
                     continue;
                 } else if (entity.owner !== this.player) {
-                    lastResponseError = `Entity ${response.entityId} does not belong to you`;
+                    lastResponseError = `Entity ${actorId} does not belong to you`;
                     continue;
                 }
 
                 let target = null;
-                if (response.target?.entityId) {
-                    target = this.gameState.getEntityById(response.target.entityId);
+                if (response.targetId) {
+                    target = this.gameState.getEntityById(response.targetId);
                     if (!target) {
-                        lastResponseError = `Target entity not found: ${response.target.entityId}`;
+                        lastResponseError = `Target entity not found: ${response.targetId}`;
                         continue;
                     }
                 }
 
-                const command = (response.command || '').toLowerCase();
                 let ordersUsed = 0;
-
                 let actionOutcome = null;
-                if (command === "attack") {
-                    actionOutcome = attack(this.gameState, entity, target, this.player.orders);
-                } else if (command === "repair") {
-                    actionOutcome = support(this.gameState, entity, target, "Repair", this.player.orders);
-                } else if (command === "build") {
-                    const targetName = response.target?.entityName;
-                    if (!targetName) {
-                        lastResponseError = `Build action requires target.entityName`;
+                if (command === "ATTACK") {
+                    if (!response.targetId) {
+                        lastResponseError = `Attack requires targetId (a specific visible enemy). entityName is for Build only — attacking a type name like "village" is rejected.`;
                         continue;
                     }
-                    actionOutcome = build(this.gameState, entity, targetName);
-                } else if (command === "explore") {
-                    actionOutcome = explore(this.gameState, entity, response.target?.direction, true);
-                } else {
-                    lastResponseError = `Command "${command}" not recognized`;
-                    continue;
+                    actionOutcome = attack(this.gameState, entity, target, this.player.orders);
+                } else if (command === "REPAIR") {
+                    if (!response.targetId) {
+                        lastResponseError = `Repair requires targetId (a specific damaged entity). entityName is for Build only.`;
+                        continue;
+                    }
+                    actionOutcome = support(this.gameState, entity, target, "Repair", this.player.orders);
+                } else if (command === "BUILD") {
+                    if (!response.entityName) {
+                        lastResponseError = `Build requires entityName (must be in the builder's Builds list)`;
+                        continue;
+                    }
+                    actionOutcome = build(this.gameState, entity, response.entityName);
+                } else if (command === "EXPLORE") {
+                    actionOutcome = explore(this.gameState, entity, response.direction, true);
                 }
 
                 ordersUsed = actionOutcome.ordersUsed;
                 if (ordersUsed === 0) {
                     lastResponseError = actionOutcome.result.message;
                     // Store structured command info for the enhanced failure format
-                    const targetDesc = command === 'build' ? response.target?.entityName :
-                        command === 'explore' ? (response.target?.direction || 'unexplored') :
-                            response.target?.entityId || 'unknown';
+                    const targetDesc = command === 'BUILD' ? response.entityName :
+                        command === 'EXPLORE' ? (response.direction || 'unexplored') :
+                            response.targetId || 'unknown';
                     lastFailedCommand = {
-                        command: command.charAt(0).toUpperCase() + command.slice(1),
+                        command: command.charAt(0) + command.slice(1).toLowerCase(),
                         target: targetDesc,
-                        entityId: response.entityId
+                        entityId: actorId
                     };
                     lastActionResult = null;
                     continue;
@@ -150,11 +172,10 @@ export class Harness extends BaseManager {
 
                 // Action successfully executed: reconcile and render
                 await onActionDone(this.gameState);
-                lastResponseError = null;
                 turnResponseLog.push(response);
-            } else if (response.type === "CHAT") {
+            } else if (command === 'CHAT') {
                 if (this.player.orders <= 0) {
-                    lastResponseError = `You have 0 orders remaining. You cannot initiate diplomacy. Call END_TURN.`;
+                    lastResponseError = `You have 0 orders remaining. You cannot initiate diplomacy. End your turn with a note.`;
                     continue;
                 }
 
@@ -187,11 +208,11 @@ export class Harness extends BaseManager {
                 lastActionResult = `[completed] Concluded diplomatic session with ${targetPlayer.name}`;
                 lastResponseError = null;
                 turnResponseLog.push(response);
-            } else if (response.type === "END_TURN") {
+            } else if (command === 'END_TURN') {
                 this.player.addHistoryEntry(this.gameState.currentRound, { category: 'note', details: response.note });
                 return;
             } else {
-                lastResponseError = `Unknown response type: ${response.type}`;
+                lastResponseError = `Unknown command: "${response.command}". Respond with exactly one command field: ATTACK (attackerId + targetId), REPAIR (repairerId + targetId), BUILD (builderId + entityName), EXPLORE (explorerId + optional direction), CHAT (targetPlayerId + optional message), or END_TURN (note).`;
                 continue;
             }
         }
@@ -199,24 +220,65 @@ export class Harness extends BaseManager {
 
     /**
      * Returns the cached command system prompt or builds it dynamically if not cached.
+     * The catalog inside it is filtered to relevant entity types, so the cache
+     * is rebuilt when that set changes (new unit trained, new enemy sighted).
      * @returns {Promise<string>}
      */
     async getCommandSystemPrompt() {
-        if (!this.cachedCommandSystemPrompt) {
-            this.cachedCommandSystemPrompt = await this.buildCommandSystemPrompt();
+        const key = this.relevantManifestKey();
+        if (!this.cachedCommandSystemPrompt || key !== this.cachedManifestKey) {
+            this.cachedCommandSystemPrompt = await this.buildCommandSystemPrompt(key);
+            this.cachedManifestKey = key;
         }
         return this.cachedCommandSystemPrompt;
     }
 
     /**
-     * Builds a structured, hybrid system prompt combining Markdown rules 
+     * Entity types worth describing in the system prompt catalog: what the
+     * player owns, what those can build or repair (transitively, so units
+     * trained later in the game are covered), and what is currently visible.
+     * Everything else is omitted to keep the per-call prompt small; visible
+     * enemies still get full details inline in the state markdown.
+     * Falls back to the full manifest on any error (safe default).
+     * @returns {string} sorted relevant type names, joined for cache comparison
+     */
+    relevantManifestKey() {
+        try {
+            const manifestEntities = this.gameState.manifestData?.entities || this.gameState.manifestData || [];
+            const manifestList = Array.isArray(manifestEntities) ? manifestEntities : Object.values(manifestEntities);
+            const byName = new Map(manifestList.map(m => [m.name, m]));
+            const relevant = new Set();
+            const addWithOutputs = (name) => {
+                if (!name || relevant.has(name)) return;
+                relevant.add(name);
+                const def = byName.get(name);
+                if (!def) return;
+                for (const b of [...(def.buildables || []), ...(def.repairables || [])]) addWithOutputs(b);
+            };
+            for (const e of this.player.getEntities(this.gameState)) addWithOutputs(e.name);
+            for (const e of this.gameState.entities || []) {
+                if (this.player.isVisible?.(e.q, e.r)) relevant.add(e.name);
+            }
+            return [...relevant].sort().join(',');
+        } catch {
+            return '*';
+        }
+    }
+
+    /**
+     * Builds a structured, hybrid system prompt combining Markdown rules
      * and stringified JSON manifest data.
+     * @param {string} [manifestKey] relevant type names from relevantManifestKey();
+     *   '*' (or omitted) keeps the full manifest
      * @returns {Promise<string>} The formatted system prompt string.
      */
-    async buildCommandSystemPrompt() {
+    async buildCommandSystemPrompt(manifestKey) {
         const manifestEntities = this.gameState.manifestData?.entities || this.gameState.manifestData || [];
         const manifestList = Array.isArray(manifestEntities) ? manifestEntities : Object.values(manifestEntities);
-        const manifestMd = manifestToMarkdown(manifestList);
+        const filtered = (!manifestKey || manifestKey === '*')
+            ? manifestList
+            : manifestList.filter(m => manifestKey.split(',').includes(m.name));
+        const manifestMd = manifestToMarkdown(filtered);
         const absScoreToWin = this.gameState.settings?.winCondition?.absoluteScore;
         const relScoreToWin = this.gameState.settings?.winCondition?.relativeScore;
 
@@ -497,7 +559,16 @@ export class Harness extends BaseManager {
                         .map(([res, amt]) => ({ res, need: Math.round((amt - (this.player.resources?.[res] || 0)) * 10) / 10 }))
                         .filter(x => x.need > 0);
                     if (missing.length === 0) {
-                        summary.buildableNow.push(b);
+                        // Affordable is not placeable: only list as buildable
+                        // now when the engine finds at least one valid site.
+                        // Otherwise the model burns orders discovering this
+                        // through failed Build commands.
+                        const { candidates } = findBuildCandidates(this.gameState, entity, b);
+                        if (candidates.length > 0) {
+                            summary.buildableNow.push(b);
+                        } else {
+                            summary.buildableLater.push({ name: b, missing: 'no valid site nearby' });
+                        }
                     } else {
                         summary.buildableLater.push({ name: b, missing: missing.map(m => `${m.need} ${m.res}`).join(', ') });
                     }
@@ -529,16 +600,17 @@ export class Harness extends BaseManager {
     /**
      * Human-readable action description: "Build mine with worker_1",
      * "Attack red_knight_1 with knight_1", "Explore N with scout_1".
+     * Each response carries an explicit command field (see response.schema.json).
      */
     describeAction(r) {
-        const cmd = r.command || r.type || 'Unknown';
-        const actor = r.entityId || 'unknown';
-        const target = r.target || {};
-        let targetDesc = '';
-        if (target.entityName) targetDesc = target.entityName;
-        else if (target.entityId) targetDesc = target.entityId;
-        else if (target.direction) targetDesc = target.direction;
-        return targetDesc ? `${cmd} ${targetDesc} with ${actor}` : `${cmd} with ${actor}`;
+        const cmd = String(r.command || '').toUpperCase();
+        if (cmd === 'ATTACK') return `Attack ${r.targetId || 'unknown'} with ${r.attackerId || 'unknown'}`;
+        if (cmd === 'REPAIR') return `Repair ${r.targetId || 'unknown'} with ${r.repairerId || 'unknown'}`;
+        if (cmd === 'BUILD') return `Build ${r.entityName || 'unknown'} with ${r.builderId || 'unknown'}`;
+        if (cmd === 'EXPLORE') return `Explore ${r.direction || 'unexplored'} with ${r.explorerId || 'unknown'}`;
+        if (cmd === 'CHAT') return `Chat with ${r.targetPlayerId || 'unknown'}`;
+        if (cmd === 'END_TURN') return `End turn`;
+        return `Unknown action`;
     }
 
     getCellInfo(cellCoordStr) {

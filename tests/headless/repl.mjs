@@ -32,7 +32,7 @@ async function setup(configPath) {
   manifest = await loadGameManifest();
   const ds = manifest.defaultSettings || {};
   gameState = new GameState();
-  gameState.generateMap(cfg.mapSize || ds.mapSize || 12, null, manifest);
+  gameState.generateMap(cfg.mapSize || ds.mapSize || 12, manifest.terrains, manifest);
   const players = cfg.players || ds.players || [
     { id: 1, name: 'Blue', color: '#0000ff', controller: 'ai' },
     { id: 2, name: 'Red', color: '#ff0000', controller: 'ai' },
@@ -55,13 +55,9 @@ async function stepTurns(n) {
     for (let pi = 0; pi < gameState.players.length; pi++) {
       const p = gameState.players[pi];
       gameState.activePlayerIndex = pi;
-      p.refillOrders();
-      for (const e of p.getEntities()) e.step();
-      p.updateVisibility();
-      if (p.aiManager) {
-        try { await p.aiManager.processTurn(); }
-        catch (e) { console.log(`AI error (${p.name}): ${e.message}`); }
-      }
+      // Real Player.step() with a no-op continuation (see headless.mjs).
+      try { await p.step(() => {}); }
+      catch (e) { console.log(`AI error (${p.name}): ${e.message}`); }
     }
     await gameState.onRoundEnd();
     console.log(`Round ${gameState.currentRound} complete (${gameState.entities.length} entities)`);
