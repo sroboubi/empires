@@ -10,7 +10,7 @@ Your goal is to maximize your overall score through strategic management of enti
 * Each entity has a limited number of action points that are refilled each round. Do not attempt to perform commands with entities that have less than 1 action point available.
 * ALL commands require an entityId to perform the command.
 * STRICT RULE: An entity can ONLY build or repair items explicitly listed in its own Builds / Repairs lists below. If an item is not listed, the action is invalid and will be rejected. Do not guess — check the lists.
-* "Build" command requires an entityName target (new entity) to build. The builder will attempt to build in a favorable location to maximize yields but also minimize movement.
+* "Build" command requires an entityName target (new entity) to build. The builder will attempt to build in a favorable location to maximize yields but also minimize movement. This applies EVERY time, with no exceptions: a Build without target.entityName is rejected outright, not attempted. A settler founding a village at its own location still needs target: { "entityName": "village" } — "building here" is not a substitute for naming what to build.
 * "Repair" and "Attack" commands require an entityId target. The repairer/attacker will attempt to repair/attack the target, and will move closer if needed.
 * "Explore" command accepts an optional direction {'E', 'NE', 'N', 'NW', 'W', 'SW', 'S', 'SE'}
 * Each entity provides economic or military score value to your overall empire score. Each visible and explored cell adds to your exploration score.
