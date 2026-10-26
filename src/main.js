@@ -19,7 +19,8 @@ import {
   clearEntityMeshes,
   buildCellResources,
   reconcileCellResources,
-  focusCameraOnEntities
+  focusCameraOnEntities,
+  setTimeOfDay
 } from './renderer.js';
 import { loadGameManifest } from './manifestLoader.js';
 import { HexGrid } from './hexGrid.js';
@@ -27,11 +28,16 @@ import { collectResourceModelEntries } from './resources.js';
 import { audio } from './audio.js';
 import { saveGame, loadGame, listSaves, deleteSave, pruneAutoSaves } from './saveManager.js';
 import { Harness } from './ai/llm/harness.js';
+import { Player } from './player.js';
+import { ReplayRecorder, ReplayPlayer, exportReplayToJSON, readReplayFile } from './replayManager.js';
 
 let gameState;
 let manifestData;
 let defaultSettings;
 let currentGameSettings = null;
+let replayRecorder = new ReplayRecorder();
+let replayPlayer = null;
+let isReplayMode = false;
 
 const mouse = { x: 0, y: 0 };
 let selectedEntity = null;
@@ -109,6 +115,26 @@ async function init() {
     });
 
     window.addEventListener('keydown', (e) => {
+      if (isReplayMode) {
+        if (e.key === ' ' || e.code === 'Space') {
+          e.preventDefault();
+          replayPlayer?.togglePlay();
+        } else if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          replayPlayer?.stepForward();
+        } else if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          replayPlayer?.stepBackward();
+        } else if (e.key === 'Home') {
+          e.preventDefault();
+          replayPlayer?.first();
+        } else if (e.key === 'End') {
+          e.preventDefault();
+          replayPlayer?.last();
+        }
+        return;
+      }
+
       if (e.key === 'Escape') {
         hideContextMenu();
         hidePlayerContextMenu();
@@ -126,6 +152,65 @@ async function init() {
     // Control buttons
     document.getElementById('btn-save-game').addEventListener('click', () => openSaveLoadModal('save'));
     document.getElementById('btn-load-game').addEventListener('click', () => openSaveLoadModal('load'));
+    document.getElementById('btn-export-game').addEventListener('click', () => {
+      if (gameState?.replayRecorder?.hasData()) {
+        exportReplayToJSON(gameState.replayRecorder.getReplayData());
+        showToast('Replay exported successfully!');
+      } else {
+        showToast('No replay data recorded for the current game.', true);
+      }
+    });
+
+    // Replay Mode file selector (only used when CONFIG.REPLAY_MODE is true)
+    const replayModeFileInput = document.getElementById('replay-mode-file-input');
+    const btnReplayModeSelect = document.getElementById('btn-replay-mode-select');
+    if (btnReplayModeSelect && replayModeFileInput) {
+      btnReplayModeSelect.addEventListener('click', () => {
+        replayModeFileInput.value = '';
+        replayModeFileInput.click();
+      });
+      replayModeFileInput.addEventListener('change', async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        try {
+          const replayData = await readReplayFile(file);
+          document.getElementById('replay-mode-overlay').classList.remove('active');
+          await startReplayMode(replayData);
+        } catch (err) {
+          console.error('Failed to load replay file:', err);
+          showToast(`Failed to load replay: ${err.message}`, true);
+        }
+      });
+    }
+
+    // Replay Floating Bar Controls
+    document.getElementById('replay-btn-first').addEventListener('click', () => replayPlayer?.first());
+    document.getElementById('replay-btn-prev').addEventListener('click', () => replayPlayer?.stepBackward());
+    document.getElementById('replay-btn-play').addEventListener('click', () => replayPlayer?.togglePlay());
+    document.getElementById('replay-btn-next').addEventListener('click', () => replayPlayer?.stepForward());
+    document.getElementById('replay-btn-last').addEventListener('click', () => replayPlayer?.last());
+
+    document.getElementById('replay-scrubber').addEventListener('input', (e) => {
+      if (replayPlayer) {
+        replayPlayer.pause();
+        replayPlayer.goTo(parseInt(e.target.value, 10));
+      }
+    });
+
+    document.getElementById('replay-speed-select').addEventListener('change', (e) => {
+      if (replayPlayer) {
+        replayPlayer.setSpeed(parseFloat(e.target.value));
+      }
+    });
+
+    // Replay fog toggle: on = show the world from the current snapshot's
+    // active player's point of view (their restored fog); off = full map.
+    document.getElementById('replay-fog-toggle').addEventListener('change', (e) => {
+      CONFIG.SHOW_ALL = !e.target.checked;
+      updateHexFog(gameState);
+      reconcileEntities(gameState);
+      reconcileCellResources(gameState);
+    });
 
     // Audio mute toggle
     const muteBtn = document.getElementById('btn-mute');
@@ -169,12 +254,6 @@ async function init() {
           return;
         }
 
-        const llmSettings = gameState.settings?.llm;
-        if (!llmSettings || !llmSettings.orderedModels || llmSettings.orderedModels.length === 0) {
-          showToast('LLM is not configured. Please configure LLM in Game Setup to enable chat.', true);
-          return;
-        }
-
         // Deduct 1 order
         activeP.orders -= 1;
         activeP.addHistoryEntry(gameState.currentRound, {
@@ -213,8 +292,13 @@ async function init() {
     // LLM setup UI bindings
     setupLlmUI();
 
-    // Open Setup Modal automatically on initial load
-    openSetupModal(false);
+    // Open Setup Modal automatically on initial load, or the replay file
+    // selector when REPLAY_MODE is enabled.
+    if (CONFIG.REPLAY_MODE) {
+      document.getElementById('replay-mode-overlay').classList.add('active');
+    } else {
+      openSetupModal(false);
+    }
 
     console.log('Game initialized successfully.');
   } catch (err) {
@@ -1131,9 +1215,21 @@ function startNewGame(settings) {
 
   gameState = new GameState();
   gameState.generateMap(settings.mapSize, manifestData.terrains, manifestData);
+
   // The browser drives turns: pass nextTurn as the continuation so the
   // initial AI player's turn runs and chains exactly as before.
   gameState.initializeManifest(manifestData, settings, () => nextTurn());
+
+  // Start recording AFTER initializeManifest so initialState contains the
+  // generated players and starting units (otherwise owners/entities are lost).
+  // AI turns are async, so this still runs before the first AI action.
+  if (CONFIG.RECORD_GAME) {
+    replayRecorder = new ReplayRecorder();
+    gameState.replayRecorder = replayRecorder;
+    replayRecorder.start(gameState, settings);
+  } else {
+    gameState.replayRecorder = null;
+  }
 
   setMapCameraLimits(settings.mapSize);
   drawGrid(gameState);
@@ -1262,6 +1358,7 @@ async function doSaveGame(name, isAuto = false) {
     if (isAuto && currentGameSettings?.autoSave?.maxAutoSaves) {
       await pruneAutoSaves(currentGameSettings.autoSave.maxAutoSaves);
     }
+
   } catch (err) {
     console.error('Save failed:', err);
     showToast('Failed to save game.', true);
@@ -1283,6 +1380,14 @@ async function doLoadGame(saveName) {
     gameState = new GameState();
     gameState.manifestData = manifestData;
     gameState.deserialize(record.data);
+
+    // Restart recording after a load: deserialize() builds a fresh GameState
+    // whose replayRecorder is null, so without this no further actions record.
+    if (CONFIG.RECORD_GAME) {
+      replayRecorder = new ReplayRecorder();
+      gameState.replayRecorder = replayRecorder;
+      replayRecorder.start(gameState, gameState.settings || {});
+    }
 
     if (gameState.hexGrid?.radius) setMapCameraLimits(gameState.hexGrid.radius);
     drawGrid(gameState);
@@ -1307,6 +1412,121 @@ async function doLoadGame(saveName) {
 }
 
 /* ==========================================================================
+   REPLAY MODE CONTROLLER
+   ========================================================================== */
+
+/**
+ * Starts Replay mode using parsed replay data.
+ * @param {Object} replayData
+ */
+async function startReplayMode(replayData) {
+  if (!replayData || !replayData.initialState || !Array.isArray(replayData.snapshots)) {
+    showToast('Invalid replay file format: missing initialState or snapshots.', true);
+    return;
+  }
+
+  isReplayMode = true;
+  CONFIG.SHOW_ALL = true;
+
+  closeSetupModal();
+  deselectEntity();
+  hideContextMenu();
+  clearEntityMeshes();
+
+  // Hide normal gameplay controls entirely while in replay mode
+  ['btn-save-game', 'btn-load-game', 'btn-export-game', 'btn-next-turn'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (btn) btn.style.display = 'none';
+  });
+  document.getElementById('replay-controls-bar').style.display = 'flex';
+  const fogToggle = document.getElementById('replay-fog-toggle');
+  if (fogToggle) fogToggle.checked = false;
+
+  // Instantiate GameState for replay from initial state
+  gameState = new GameState();
+  gameState.settings = replayData.settings || {};
+  gameState.manifestData = manifestData;
+
+  const hasCells = replayData.initialState?.cells && Object.keys(replayData.initialState.cells).length > 0;
+  if (hasCells) {
+    gameState.hexGrid = HexGrid.fromCells(replayData.initialState.cells);
+  } else {
+    console.warn('[Replay] initialState.cells is empty, generating fallback map');
+    gameState.generateMap(replayData.settings?.mapSize || 15, manifestData.terrains, manifestData);
+  }
+
+  // Fallback for replays recorded before initialState captured players:
+  // derive the player list from the first snapshot that has it.
+  let initialPlayers = replayData.initialState?.players || [];
+  if (initialPlayers.length === 0) {
+    const firstWithPlayers = replayData.snapshots.find(s => Array.isArray(s.players) && s.players.length > 0);
+    if (firstWithPlayers) {
+      console.warn('[Replay] initialState.players is empty; using first snapshot players as fallback');
+      initialPlayers = firstWithPlayers.players;
+    }
+  }
+  gameState.players = initialPlayers.map(p => Player.fromJSON(p, gameState, true));
+  gameState.entities = [];
+
+  setMapCameraLimits(replayData.settings?.mapSize || gameState.hexGrid?.radius || 15);
+  drawGrid(gameState);
+  buildCellResources(gameState);
+  updateHexFog(gameState);
+
+  if (replayPlayer) {
+    replayPlayer.destroy();
+  }
+
+  const scrubber = document.getElementById('replay-scrubber');
+  scrubber.min = 0;
+  scrubber.max = Math.max(0, replayData.snapshots.length - 1);
+  scrubber.value = 0;
+
+  replayPlayer = new ReplayPlayer(replayData, gameState, updateReplayUI);
+  replayPlayer.goTo(0);
+
+  if (gameState.entities.length > 0) {
+    focusCameraOnEntities(gameState.entities);
+  }
+
+  // Set initial time of day from replay data
+  if (replayData.initialState?.timeOfDay !== undefined) {
+    setTimeOfDay(replayData.initialState.timeOfDay);
+  }
+
+  showToast(`Replay loaded (${replayData.snapshots.length} actions)`, false, 3500);
+}
+
+function updateReplayUI(state) {
+  const scrubber = document.getElementById('replay-scrubber');
+  if (scrubber) {
+    scrubber.value = state.index;
+    scrubber.max = Math.max(0, state.total - 1);
+  }
+
+  const stepInfo = document.getElementById('replay-step-info');
+  if (stepInfo) {
+    const round = state.snapshot ? state.snapshot.currentRound : 1;
+    stepInfo.textContent = `Round ${round} (${state.index + 1}/${state.total})`;
+  }
+
+  const actionDesc = document.getElementById('replay-action-desc');
+  if (actionDesc) {
+    actionDesc.textContent = state.snapshot ? state.snapshot.label : '';
+    actionDesc.title = state.snapshot ? state.snapshot.label : '';
+  }
+
+  const playBtn = document.getElementById('replay-btn-play');
+  if (playBtn) {
+    playBtn.textContent = state.isPlaying ? '⏸ Pause' : '▶ Play';
+  }
+
+  updatePlayersUI();
+}
+
+// exitReplayMode removed - users refresh the page to exit replay mode
+
+/* ==========================================================================
    TURN LIFECYCLE & AUTO-SAVE CHECK
    ========================================================================== */
 
@@ -1314,6 +1534,7 @@ async function doLoadGame(saveName) {
  * Next Turn: triggers endTurn on gameState, cycling to next player turn and updating Fog of War.
  */
 export async function nextTurn() {
+  if (isReplayMode) return;
   if (gameState.gameOver) {
     showToast('Game is over. Start a new game.', true);
     return;
@@ -1398,6 +1619,10 @@ function showVictoryModal(player, reasons) {
 
   overlay.classList.add('active');
   gameState.gameOver = true;
+
+  if (gameState?.replayRecorder?.isRecording()) {
+    gameState.replayRecorder.recordSnapshot(gameState, `Game Over: ${player.name} won!`);
+  }
 }
 
 /**
@@ -1445,6 +1670,11 @@ function handleLeftClick(event) {
 
 function handleRightClick(event) {
   event.preventDefault();
+
+  if (isReplayMode) {
+    hideContextMenu();
+    return;
+  }
 
   if (!selectedEntity) {
     hideContextMenu();
@@ -1580,6 +1810,10 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
         if (success) {
           audio.playEntitySfx(selectedEntity, 'action', action.name);
           showToast(check.reason || `Executed ${action.name}`);
+          if (gameState?.replayRecorder?.isRecording()) {
+            const loc = targetCell ? ` at (${targetCell.q}, ${targetCell.r})` : '';
+            gameState.replayRecorder.recordSnapshot(gameState, `${selectedEntity.name} ${action.name}${loc}`);
+          }
         } else {
           showToast(`Failed to execute ${action.name}`, true);
         }

@@ -179,7 +179,7 @@ export async function manageBarbarians(gameState, config) {
       const targetEnemy = visibleEnemies[0];
       console.debug(`[Barbarians] ${entity.name} at (${entity.q}, ${entity.r}) attacking ${targetEnemy.name} (Owner: ${targetEnemy.owner?.name || 'neutral'}) at (${targetEnemy.q}, ${targetEnemy.r})`);
       attack(gameState, entity, targetEnemy, Infinity);
-      await onActionDone(gameState, [entity.cell, targetEnemy.cell]);
+      await onActionDone(gameState, [entity.cell, targetEnemy.cell], `${entity.name} attacked ${targetEnemy.name}`);
     } else {
       // Restore target cell reference if needed
       if (!entity.targetCell && entity.state.targetCell) {
@@ -224,7 +224,7 @@ export async function manageBarbarians(gameState, config) {
 
             const moved = moveAction.do(bestNeighbor, null);
             if (!moved) break;
-            await onActionDone(gameState, [entity.cell]);
+            await onActionDone(gameState, [entity.cell], `${entity.name} moved to (${bestNeighbor.q}, ${bestNeighbor.r})`);
 
             console.debug(`[Barbarians] ${entity.name} moved to (${bestNeighbor.q}, ${bestNeighbor.r}) (Target: (${entity.targetCell.q}, ${entity.targetCell.r}), Remaining AP: ${entity.actionPoints})`);
           }

@@ -20,6 +20,8 @@ export class GameState {
     this.settings = null;
     this.gameOver = false;
     this.chatHistory = {};
+    this.replayRecorder = null;
+    this.fogPovPlayer = null; // Replay only: fog POV override (snapshot's active player); null = human-player union
   }
 
   /**
@@ -264,6 +266,10 @@ export class GameState {
       this.activePlayerIndex = 0;
     }
     this.startTurn(onTurnEnd);
+    if (this.replayRecorder?.isRecording()) {
+      const activePlayerName = this.activePlayer ? this.activePlayer.name : 'Unknown';
+      this.replayRecorder.recordSnapshot(this, `Turn started: ${activePlayerName}`);
+    }
   }
 
   /**
@@ -319,6 +325,9 @@ export class GameState {
   async onRoundEnd() {
     if (this.settings?.barbarians) await manageBarbarians(this, this.settings.barbarians);
     this.currentRound++;
+    if (this.replayRecorder?.isRecording()) {
+      this.replayRecorder.recordSnapshot(this, `Round ${this.currentRound} began`);
+    }
   }
 
   /**
@@ -398,6 +407,8 @@ export class GameState {
    * Returns true if a human can see this cell
    */
   isVisibleToHuman(cell) {
+    // Replay fog POV: when set, only the snapshot's active player's fog counts.
+    if (this.fogPovPlayer) return this.fogPovPlayer.isVisible(cell.q, cell.r);
     for (const p of this.players.filter(p => !p.isAI)) {
       if (p.isVisible(cell.q, cell.r)) return true;
     }
@@ -408,6 +419,8 @@ export class GameState {
    * Returns true if a human has explored this cell
    */
   isExploredByHuman(cell) {
+    // Replay fog POV: when set, only the snapshot's active player's fog counts.
+    if (this.fogPovPlayer) return this.fogPovPlayer.isExplored(cell.q, cell.r);
     for (const p of this.players.filter(p => !p.isAI)) {
       if (p.isExplored(cell.q, cell.r)) return true;
     }

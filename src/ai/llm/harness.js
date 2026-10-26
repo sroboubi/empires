@@ -171,7 +171,7 @@ export class Harness extends BaseManager {
                 lastResponseError = null;
 
                 // Action successfully executed: reconcile and render
-                await onActionDone(this.gameState);
+                await onActionDone(this.gameState, null, this.describeAction(response));
                 turnResponseLog.push(response);
             } else if (command === 'CHAT') {
                 if (this.player.orders <= 0) {
@@ -204,7 +204,7 @@ export class Harness extends BaseManager {
                 console.log(`[Harness] ${this.player.name} initiated diplomatic chat with ${targetPlayer.name}`);
                 await this.chat(this.player, targetPlayer, response.message || response.thoughtProcess);
 
-                await onActionDone(this.gameState);
+                await onActionDone(this.gameState, null, `Chat with ${targetPlayer.name}`);
                 lastActionResult = `[completed] Concluded diplomatic session with ${targetPlayer.name}`;
                 lastResponseError = null;
                 turnResponseLog.push(response);

@@ -600,7 +600,10 @@ export function support(gameState, sourceEntity, targetEntity, actionName = null
  * Update UI and render after an action is done.
  * @param {GameState} gameState 
  */
-export async function onActionDone(gameState, involvedCells = null) {
+export async function onActionDone(gameState, involvedCells = null, actionDesc = '') {
+    if (gameState?.replayRecorder?.isRecording()) {
+        gameState.replayRecorder.recordSnapshot(gameState, actionDesc || 'AI action');
+    }
     if (!CONFIG.SHOW_ALL && Array.isArray(involvedCells) && involvedCells.length > 0) {
         if (!involvedCells.some(cell => gameState.isVisibleToHuman(cell))) {
             console.debug("AI action done (no visible cells)");
