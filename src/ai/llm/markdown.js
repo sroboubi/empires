@@ -213,6 +213,13 @@ export function serializeStateToMarkdown(summary, manifestEntities = []) {
     lines.push('');
   }
 
+  const shortages = summary.deficitRemedies || [];
+  if (shortages.length) {
+    lines.push('### Shortages');
+    for (const d of shortages) lines.push(`* **${capitalize(d.resource)}** is falling (${d.net}/turn); your ${d.builderId} can build ${d.producer} now (+${d.yield} ${d.resource}/turn).`);
+    lines.push('');
+  }
+
   // Score with breakdown (military, economic, exploration)
   if (summary.score !== undefined && summary.score !== null) {
     const s = summary.score;
@@ -232,10 +239,36 @@ export function serializeStateToMarkdown(summary, manifestEntities = []) {
     if (scoreStr) lines.push(`**Score**: ${scoreStr}\n`);
   }
 
+  if (summary.mapSize !== undefined || summary.exploredPercent !== undefined) {
+    const mapBits = [];
+    if (summary.mapSize !== undefined && summary.mapSize !== null) mapBits.push(`size ${summary.mapSize}`);
+    if (summary.exploredPercent !== undefined && summary.exploredPercent !== null) mapBits.push(`explored ${summary.exploredPercent}%`);
+    if (mapBits.length) lines.push(`**Map**: ${mapBits.join(', ')}\n`);
+  }
+
+  // Strategic Memory: recent history (notes, chat summaries, damage, losses).
+  // summary.history is {round: [entries]} for the last 3 rounds; newest first, capped.
+  const historyRounds = summary.history || {};
+  const memLines = [];
+  const roundNums = Object.keys(historyRounds).map(Number).sort((a, b) => b - a);
+  for (const r of roundNums) {
+    const entries = [...(historyRounds[r] || [])].reverse();
+    for (const h of entries) {
+      if (memLines.length >= 12) break;
+      memLines.push(`* [Round ${r}] ${h.category || 'note'}: ${h.details || ''}`);
+    }
+    if (memLines.length >= 12) break;
+  }
+  if (memLines.length) {
+    lines.push('### Strategic Memory');
+    lines.push(...memLines);
+    lines.push('');
+  }
+
   // Entities: active first, with relative position + inline capabilities.
   const entities = summary.entities || [];
-  const active = entities.filter(e => (e.actionPoints ?? 0) > 0);
-  const exhausted = entities.filter(e => (e.actionPoints ?? 0) <= 0);
+  const active = entities.filter(e => e.active !== false && (e.actionPoints ?? 0) > 0);
+  const exhausted = entities.filter(e => e.active === false || (e.actionPoints ?? 0) <= 0);
 
   if (active.length) {
     lines.push(`### Active Entities (${active.length})`);
@@ -278,6 +311,33 @@ export function serializeStateToMarkdown(summary, manifestEntities = []) {
     lines.push('');
   }
 
+  const threats = summary.threats || [];
+  if (threats.length) {
+    lines.push(`### Threats (${threats.length})`);
+    for (const t of threats) lines.push(`* **${t.id}** (${capitalize(t.name)}) adjacent to your ${t.adjacentTo}`);
+    lines.push('');
+  }
+
+  // Known players: every other player's score is visible to all, matching
+  // the human players UI (scores are not fog-hidden; only positions are).
+  const known = summary.knownPlayers || [];
+  if (known.length) {
+    lines.push(`### Known Players (${known.length})`);
+    for (const p of known) {
+      const sc = p.score;
+      let sStr = '';
+      if (sc && typeof sc === 'object' && sc.total !== undefined) {
+        const bd = [sc.military, sc.economic, sc.exploration].every(v => v !== undefined)
+          ? ` (${sc.military} military, ${sc.economic} economic, ${sc.exploration} exploration)` : '';
+        sStr = `total score: ${sc.total}${bd}`;
+      } else if (sc !== undefined && sc !== null) {
+        sStr = `score ${sc}`;
+      }
+      lines.push(`* **${p.name}**${sStr ? ` (${sStr})` : ''}`);
+    }
+    lines.push('');
+  }
+
   return lines.join('\n').trim();
 }
 
@@ -294,10 +354,10 @@ function entityStateToMarkdown(e, byName, brief = false) {
     if (terrain) bits.push(terrain);
     if (hp) bits.push(hp.trim());
     if (ap) bits.push(ap.trim().replace(/^, /, ''));
-    return `* **${e.id}** (${capitalize(e.name)})${bits.length ? ' — ' + bits.join(', ') : ''}`;
+    return `* **${e.id}** (${capitalize(e.name)})${e.active === false ? ' (inactive)' : ''}${bits.length ? ' — ' + bits.join(', ') : ''}`;
   }
 
-  const parts = [`* **${e.id}** (${capitalize(e.name)})`];
+  const parts = [`* **${e.id}** (${capitalize(e.name)})${e.active === false ? ' (inactive)' : ''}`];
   const details = [];
   if (pos) details.push(pos);
   if (terrain) details.push(terrain);
@@ -328,13 +388,22 @@ function entityStateToMarkdown(e, byName, brief = false) {
   if (e.damagedRepairables !== undefined) {
     // State-dependent: only damaged, visible repairables
     if (e.damagedRepairables.length) {
-      const list = e.damagedRepairables.map(d => `${d.id} (${round1(d.health)}/${round1(d.maxHealth)} HP)`).join(', ');
+      const list = e.damagedRepairables.map(d => {
+        let str = `${d.id} (${round1(d.health)}/${round1(d.maxHealth)} HP`;
+        if (d.distance !== undefined) str += `, ${d.distance} ${d.direction || ''}`.replace(/ $/, '');
+        if (d.reachable === true) str += ', reachable';
+        else if (d.reachable === false) str += ', out of reach';
+        return str + ')';
+      }).join(', ');
       caps.push(`Can repair (damaged): ${list}`);
     }
     // If empty, omit entirely — nothing to repair right now
   } else if (def && (def.repairables || []).length) {
     caps.push(`Repairs: ${(def.repairables || []).join(', ')}`);
   }
+  if (e.nearestEnemy) caps.push(`Nearest enemy: ${e.nearestEnemy.id} (${e.nearestEnemy.distance} ${e.nearestEnemy.direction})`);
+  if (e.nearestAlly) caps.push(`Nearest ally: ${e.nearestAlly.id} (${e.nearestAlly.distance} ${e.nearestAlly.direction})`);
+  if (e.canAttackNow && e.canAttackNow.length) caps.push(`Can attack now: ${e.canAttackNow.join(', ')}`);
   if (caps.length) parts.push(`  * ${caps.join('; ')}`);
   return parts.join('\n');
 }
@@ -352,7 +421,7 @@ function oppEntityToMarkdown(e, byName) {
   // Include combat info so the player can assess the threat
   const def = byName.get(e.name);
   if (def && def.damage) bits.push(`${round1(def.damage.value)} ${def.damage.type} dmg`);
-  return `  * ${e.id} (${capitalize(e.name)})${bits.length ? ' — ' + bits.join(' | ') : ''}`;
+  return `  * ${e.id} (${capitalize(e.name)})${e.active === false ? ' (inactive)' : ''}${bits.length ? ' — ' + bits.join(' | ') : ''}`;
 }
 
 /** "3 NE of start", "at start", or "" — relative, no raw coordinates. */

@@ -165,6 +165,11 @@ export class LLMClient {
                             continue;
                         }
 
+                        if (response.status === 429 || response.status >= 500) {
+                            const backoffMs = Math.min(1000 * 2 ** attempts, 8000);
+                            await new Promise(r => setTimeout(r, backoffMs));
+                        }
+
                         throw new Error(`HTTP ${response.status}: ${errMsg}`);
                     }
 
@@ -190,7 +195,7 @@ export class LLMClient {
                             // A verbatim retry often rambles again, so
                             // escalate with a brevity instruction (once
                             // per model — the guard stops duplicates).
-                            const brevityNote = 'Your previous response was cut off because it exceeded the maximum output length. Reply again with the full JSON, keeping thoughtProcess to at most 20 words.';
+                            const brevityNote = 'Your previous response was cut off because it exceeded the maximum output length. Reply again with the full JSON, keeping thoughtProcess to at most 50 words.';
                             if (!payload.messages.some(m => m.content === brevityNote)) {
                                 payload.messages.push({ role: 'user', content: brevityNote });
                             }
