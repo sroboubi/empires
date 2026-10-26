@@ -209,6 +209,7 @@ async function init() {
       CONFIG.SHOW_ALL = !e.target.checked;
       updateHexFog(gameState);
       reconcileEntities(gameState);
+      reconcileCellResources(gameState);
     });
 
     // Audio mute toggle

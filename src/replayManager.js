@@ -1,5 +1,5 @@
 import Entity from './entity.js';
-import { reconcileEntities, reconcileCellResources, buildCellResources, getTimeOfDay, setTimeOfDay } from './renderer.js';
+import { reconcileEntities, reconcileCellResources, buildCellResources, updateHexFog, getTimeOfDay, setTimeOfDay } from './renderer.js';
 
 /**
  * ReplayRecorder — Records lightweight per-action dynamic state snapshots
@@ -147,7 +147,8 @@ export class ReplayRecorder {
         state: structuredClone(e.state),
         facing: e.facing || 'E',
         active: e.active !== false,
-        destroyed: !!e.destroyed
+        age: e.age || 0,
+        visibleCells: Array.from(e.visibleCells || [])
       })),
       removedResources,
       playerFog
@@ -193,7 +194,7 @@ export class ReplayPlayer {
     this.isPlaying = false;
     this.speed = 1.0;
     this.timer = null;
-    this.lastCellResourcesKey = '';
+    this.lastRemovedResourcesKey = '';
   }
 
   get totalSnapshots() {
@@ -316,7 +317,10 @@ export class ReplayPlayer {
     // Fog point-of-view for replay: the snapshot's active player is the one
     // acting, so fog checks use their fog when the replay fog toggle is on.
     // Harmless when SHOW_ALL is on, which short-circuits all fog checks.
-    this.gameState.fogPovPlayer = this.gameState.activePlayer;
+    // Round-end snapshots have activePlayerIndex === -1; keep the previous POV
+    // rather than falling back to the human union.
+    const povPlayer = this.gameState.activePlayer;
+    if (povPlayer) this.gameState.fogPovPlayer = povPlayer;
 
     // Restore time of day
     if (snapshot.timeOfDay !== undefined) {
@@ -359,7 +363,8 @@ export class ReplayPlayer {
         }
         entity.facing = eData.facing || 'E';
         entity.active = eData.active !== false;
-        entity.destroyed = eData.destroyed || false;
+        if (eData.age !== undefined) entity.age = eData.age;
+        if (Array.isArray(eData.visibleCells)) entity.visibleCells = new Set(eData.visibleCells);
       } else {
         const meta = this.gameState.manifestData?.entities?.[eData.name];
         if (meta && cell) {
@@ -370,15 +375,17 @@ export class ReplayPlayer {
             health: eData.state?.health ?? eData.health,
             actionPoints: eData.state?.actionPoints ?? eData.actionPoints,
             facing: eData.facing || 'E',
-            active: eData.active !== false,
-            destroyed: eData.destroyed || false
+            active: eData.active !== false
           });
+          if (eData.age !== undefined) entity.age = eData.age;
+          if (Array.isArray(eData.visibleCells)) entity.visibleCells = new Set(eData.visibleCells);
           this.gameState.entities.push(entity);
         }
       }
     }
 
     // 3. Restore Cell Resources - start from initialState and apply removals up to this snapshot
+    let resourcesChanged = false;
     if (this.gameState.hexGrid && this.gameState.hexGrid.cells && this.replayData.initialState?.cellResources) {
       // First, restore all initial resources
       for (const cell of this.gameState.hexGrid.cells.values()) {
@@ -390,16 +397,24 @@ export class ReplayPlayer {
         }
       }
       // Then apply removals from all snapshots up to current index
+      const removedKeys = [];
       for (let i = 0; i <= index; i++) {
         const snap = this.replayData.snapshots[i];
         if (snap.removedResources) {
           for (const key of Object.keys(snap.removedResources)) {
+            removedKeys.push(key);
             const cell = this.gameState.hexGrid.getCell(...key.split(',').map(Number));
             if (cell && cell.resource) {
               delete cell.resource;
             }
           }
         }
+      }
+      // Only rebuild the InstancedMeshes when the removed-resource set changed.
+      const removedKey = removedKeys.sort().join(';');
+      if (removedKey !== this.lastRemovedResourcesKey) {
+        this.lastRemovedResourcesKey = removedKey;
+        resourcesChanged = true;
       }
     }
 
@@ -415,9 +430,13 @@ export class ReplayPlayer {
     }
 
     // 5. Update 3D Visuals
-    buildCellResources(this.gameState);
+    if (resourcesChanged) {
+      buildCellResources(this.gameState); // also calls reconcileCellResources
+    } else {
+      reconcileCellResources(this.gameState);
+    }
+    updateHexFog(this.gameState);
     reconcileEntities(this.gameState);
-    reconcileCellResources(this.gameState);
   }
 
   /**

@@ -965,7 +965,7 @@ export function reconcileEntities(gameState) {
   const activeIds = new Set();
 
   gameState.entities.forEach(entity => {
-    const isEntityVisibleInScene = gameState.isVisibleToHuman(entity.cell);
+    const isEntityVisibleInScene = entity.cell ? gameState.isVisibleToHuman(entity.cell) : false;
 
     if (isEntityVisibleInScene || CONFIG.SHOW_ALL) {
       activeIds.add(entity.id);
