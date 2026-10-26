@@ -1282,9 +1282,6 @@
               </div>
               saves
             </label>
-            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; border-left: 1px solid var(--border-color); padding-left: 12px;">
-              <input type="checkbox" id="setup-record-game" checked> Record Game for Replay
-            </label>
           </div>
         </div>
 
@@ -1388,10 +1385,23 @@
 
       <div class="divider"></div>
       <div style="display: flex; gap: 12px;">
-        <button id="btn-start-game" class="btn" style="flex: 2; padding: 12px; font-size: 15px;">START GAME</button>
-        <button id="btn-load-replay" class="btn btn-secondary" style="flex: 1; padding: 12px; font-size: 14px;" type="button">LOAD REPLAY</button>
-        <input type="file" id="replay-file-input" accept=".json" style="display: none;">
+        <button id="btn-start-game" class="btn" style="flex: 1; padding: 12px; font-size: 15px;">START GAME</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Replay Mode File Selector (shown when CONFIG.REPLAY_MODE is true) -->
+  <div id="replay-mode-overlay" class="modal-overlay">
+    <div class="glass-panel modal-card" style="width: 460px; text-align: center;">
+      <div class="modal-header">
+        <div class="modal-title">REPLAY MODE</div>
+      </div>
+      <div class="divider"></div>
+      <div style="font-size: 13px; color: var(--text-muted); margin: 16px 0;">
+        Select a replay JSON file to load.
+      </div>
+      <input type="file" id="replay-mode-file-input" accept=".json" style="display: none;">
+      <button id="btn-replay-mode-select" class="btn" style="width: 100%; padding: 12px;">SELECT REPLAY FILE</button>
     </div>
   </div>
 
@@ -1482,20 +1492,21 @@
   <!-- Toast Feedbacks -->
   <div id="toast-container"></div>
 
-  <!-- Floating Replay Controls Bar -->
-  <div id="replay-controls-bar" class="glass-panel" style="display: none; position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 2000; padding: 10px 18px; border-radius: 12px; align-items: center; gap: 12px; box-shadow: var(--glow-shadow); backdrop-filter: blur(var(--blur-strength)); border: 1px solid var(--border-color);">
-    <button id="replay-btn-first" class="btn btn-secondary btn-small" title="First Action (Home)" style="width: auto; padding: 6px 10px;">⏮</button>
-    <button id="replay-btn-prev" class="btn btn-secondary btn-small" title="Previous Action (Left Arrow)" style="width: auto; padding: 6px 12px;">◀</button>
-    <button id="replay-btn-play" class="btn btn-small" title="Play / Pause (Space)" style="width: auto; min-width: 76px; padding: 6px 14px;">▶ Play</button>
-    <button id="replay-btn-next" class="btn btn-secondary btn-small" title="Next Action (Right Arrow)" style="width: auto; padding: 6px 12px;">▶</button>
-    <button id="replay-btn-last" class="btn btn-secondary btn-small" title="Last Action (End)" style="width: auto; padding: 6px 10px;">⏭</button>
-    
-    <div style="display: flex; align-items: center; gap: 8px;">
-      <input type="range" id="replay-scrubber" min="0" max="0" value="0" style="width: 200px; accent-color: var(--accent-color); cursor: pointer;">
-      <span id="replay-step-info" style="font-size: 12px; font-weight: 600; min-width: 130px; color: var(--text-main);">Round 1 (0/0)</span>
+  <!-- Floating Replay Controls Bar (bottom-left, 3 stacked rows) -->
+  <div id="replay-controls-bar" class="glass-panel" style="display: none; position: fixed; bottom: 24px; left: 24px; z-index: 2000; padding: 12px 16px; border-radius: 12px; flex-direction: column; align-items: stretch; gap: 10px; box-shadow: var(--glow-shadow); backdrop-filter: blur(var(--blur-strength)); border: 1px solid var(--border-color); min-width: 380px;">
+    <!-- Row 1: transport controls -->
+    <div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+      <button id="replay-btn-first" class="btn btn-secondary btn-small" title="First Action (Home)" style="width: auto; padding: 6px 10px;">⏮</button>
+      <button id="replay-btn-prev" class="btn btn-secondary btn-small" title="Previous Action (Left Arrow)" style="width: auto; padding: 6px 12px;">◀</button>
+      <button id="replay-btn-play" class="btn btn-small" title="Play / Pause (Space)" style="width: auto; min-width: 76px; padding: 6px 14px;">▶ Play</button>
+      <button id="replay-btn-next" class="btn btn-secondary btn-small" title="Next Action (Right Arrow)" style="width: auto; padding: 6px 12px;">▶</button>
+      <button id="replay-btn-last" class="btn btn-secondary btn-small" title="Last Action (End)" style="width: auto; padding: 6px 10px;">⏭</button>
     </div>
 
-    <div style="display: flex; align-items: center; gap: 6px;">
+    <!-- Row 2: scrubber + speed -->
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <input type="range" id="replay-scrubber" min="0" max="0" value="0" style="flex: 1; accent-color: var(--accent-color); cursor: pointer;">
+      <span id="replay-step-info" style="font-size: 12px; font-weight: 600; min-width: 110px; color: var(--text-main);">Round 1 (0/0)</span>
       <label for="replay-speed-select" style="font-size: 11px; color: var(--text-muted);">Speed:</label>
       <select id="replay-speed-select" class="form-select" style="width: 65px; padding: 4px 6px; font-size: 11px;">
         <option value="0.5">0.5x</option>
@@ -1505,9 +1516,8 @@
       </select>
     </div>
 
-    <div id="replay-action-desc" style="font-size: 11px; color: var(--accent-color); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-style: italic;"></div>
-
-    <button id="btn-exit-replay" class="btn btn-secondary btn-small" style="background: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.4); color: #fca5a5; margin-left: 8px;">Exit Replay</button>
+    <!-- Row 3: action information -->
+    <div id="replay-action-desc" style="font-size: 11px; color: var(--accent-color); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-style: italic;"></div>
   </div>
 
   <!-- Script Entrypoint -->

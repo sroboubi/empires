@@ -1,6 +1,5 @@
-import { saveReplay } from './saveManager.js';
 import Entity from './entity.js';
-import { reconcileEntities, reconcileCellResources, buildCellResources } from './renderer.js';
+import { reconcileEntities, reconcileCellResources, buildCellResources, getTimeOfDay, setTimeOfDay } from './renderer.js';
 
 /**
  * ReplayRecorder — Records lightweight per-action dynamic state snapshots
@@ -10,6 +9,8 @@ export class ReplayRecorder {
   constructor() {
     this.active = false;
     this.replayData = null;
+    // Resource keys already recorded as removed (so each snapshot only stores new removals)
+    this.removedResourceKeys = new Set();
   }
 
   /**
@@ -23,23 +24,55 @@ export class ReplayRecorder {
     const dateStr = new Date(timestamp).toLocaleString();
     const name = `Replay - ${dateStr}`;
 
+    // Strip sensitive data from settings before storing
+    const safeSettings = JSON.parse(JSON.stringify(settings || {}));
+    if (safeSettings.llm && safeSettings.llm.apiKey) {
+      safeSettings.llm.apiKey = '';
+    }
+
+    // Capture all cell resources once in initialState (resources are only removed, never added)
+    const initialCellResources = {};
+    if (gameState.hexGrid && gameState.hexGrid.cells) {
+      for (const cell of gameState.hexGrid.cells.values()) {
+        if (cell.resource) {
+          initialCellResources[`${cell.q},${cell.r}`] = {
+            name: cell.resource.name,
+            kind: cell.resource.kind,
+            quantity: cell.resource.quantity,
+            items: cell.resource.items ? [...cell.resource.items] : []
+          };
+        }
+      }
+    }
+
+    // Capture fog of war for each player
+    const initialPlayerFog = gameState.players.map(p => ({
+      id: p.id,
+      exploredCells: Array.from(p.exploredCells),
+      visibleCells: Array.from(p.visibleCells)
+    }));
+
     this.replayData = {
       id,
       name,
       timestamp,
-      settings: JSON.parse(JSON.stringify(settings || {})),
+      settings: safeSettings,
       initialState: {
-        cells: gameState.hexGrid ? gameState.hexGrid.getCellsObject() : {},
+        cells: gameState.hexGrid ? structuredClone(gameState.hexGrid.getCellsObject()) : {},
         mapSize: settings?.mapSize || 15,
-        players: gameState.players.map(p => p.toJSON()),
-        entities: gameState.entities.map(e => e.toJSON()),
+        players: gameState.players.map(p => structuredClone(p.toJSON())),
+        entities: gameState.entities.map(e => structuredClone(e.toJSON())),
         activePlayerIndex: gameState.activePlayerIndex,
-        currentRound: gameState.currentRound
+        currentRound: gameState.currentRound,
+        timeOfDay: getTimeOfDay(),
+        cellResources: initialCellResources,
+        playerFog: initialPlayerFog
       },
       snapshots: []
     };
 
     this.active = true;
+    this.removedResourceKeys = new Set();
     this.recordSnapshot(gameState, 'Game initialized');
   }
 
@@ -59,31 +92,42 @@ export class ReplayRecorder {
   recordSnapshot(gameState, label = '') {
     if (!this.isRecording()) return;
 
-    // Defensive backfill: ensure initialState has full cells, players, and entities
-    if (this.replayData?.initialState) {
-      if ((!this.replayData.initialState.cells || Object.keys(this.replayData.initialState.cells).length === 0) && gameState.hexGrid) {
-        this.replayData.initialState.cells = gameState.hexGrid.getCellsObject();
-      }
-      if ((!this.replayData.initialState.players || this.replayData.initialState.players.length === 0) && gameState.players?.length > 0) {
-        this.replayData.initialState.players = gameState.players.map(p => p.toJSON());
-      }
-      if ((!this.replayData.initialState.entities || this.replayData.initialState.entities.length === 0) && gameState.entities?.length > 0) {
-        this.replayData.initialState.entities = gameState.entities.map(e => e.toJSON());
-      }
-    }
-
-    // Capture current cell resources (only coordinates and basic resource info)
-    const cellResources = {};
+    // Track which resource cells were removed since the previous snapshot.
+    // Resources are only ever removed (never added), so we compare against the
+    // initial resource set and only record keys not already reported.
+    const prevSnapshot = this.replayData.snapshots[this.replayData.snapshots.length - 1];
+    const initialResourceKeys = new Set(Object.keys(this.replayData.initialState.cellResources || {}));
+    const currentResourceKeys = new Set();
     if (gameState.hexGrid && gameState.hexGrid.cells) {
       for (const cell of gameState.hexGrid.cells.values()) {
         if (cell.resource) {
-          cellResources[`${cell.q},${cell.r}`] = {
-            name: cell.resource.name,
-            kind: cell.resource.kind,
-            quantity: cell.resource.quantity,
-            items: cell.resource.items || []
-          };
+          currentResourceKeys.add(`${cell.q},${cell.r}`);
         }
+      }
+    }
+    // Only record resources removed since the last snapshot
+    const removedResources = {};
+    for (const key of initialResourceKeys) {
+      if (!currentResourceKeys.has(key) && !this.removedResourceKeys.has(key)) {
+        removedResources[key] = true;
+        this.removedResourceKeys.add(key);
+      }
+    }
+
+    // Capture fog of war for each player
+    const playerFog = gameState.players.map(p => ({
+      id: p.id,
+      exploredCells: Array.from(p.exploredCells),
+      visibleCells: Array.from(p.visibleCells)
+    }));
+
+    // Track destroyed entities (entities in previous snapshot but not in current)
+    const prevEntityIds = prevSnapshot ? new Set(prevSnapshot.entities.map(e => e.id)) : new Set();
+    const currentEntityIds = new Set(gameState.entities.map(e => e.id));
+    const destroyedEntityIds = [];
+    for (const id of prevEntityIds) {
+      if (!currentEntityIds.has(id)) {
+        destroyedEntityIds.push(id);
       }
     }
 
@@ -93,6 +137,7 @@ export class ReplayRecorder {
       label: label || 'Action',
       currentRound: gameState.currentRound,
       activePlayerIndex: gameState.activePlayerIndex,
+      timeOfDay: getTimeOfDay(),
       players: gameState.players.map(p => ({
         id: p.id,
         name: p.name,
@@ -100,6 +145,8 @@ export class ReplayRecorder {
         resources: { ...(p.resources || {}) },
         orders: p.orders,
         maxOrders: p.maxOrders,
+        ordersPerTurn: p.ordersPerTurn,
+        ordersConfig: p.ordersConfig,
         score: { ...(p.score || {}) }
       })),
       entities: gameState.entities.map(e => ({
@@ -108,15 +155,15 @@ export class ReplayRecorder {
         ownerId: e.owner ? e.owner.id : null,
         q: e.q,
         r: e.r,
-        health: e.health,
-        maxHealth: e.maxHealth,
-        actionPoints: e.actionPoints,
-        maxActionPoints: e.maxActionPoints,
+        // Capture full entity state
+        state: structuredClone(e.state),
         facing: e.facing || 'E',
         active: e.active !== false,
         destroyed: !!e.destroyed
       })),
-      cellResources
+      removedResources,
+      destroyedEntityIds,
+      playerFog
     };
 
     this.replayData.snapshots.push(snapshot);
@@ -139,19 +186,6 @@ export class ReplayRecorder {
     return this.replayData;
   }
 
-  /**
-   * Persists the current replay data to IndexedDB.
-   * @returns {Promise<void>}
-   */
-  async saveToIndexedDB() {
-    if (!this.hasData()) return;
-    try {
-      await saveReplay(this.replayData);
-      console.debug(`[ReplayRecorder] Saved replay "${this.replayData.id}" (${this.replayData.snapshots.length} snapshots) to IndexedDB.`);
-    } catch (err) {
-      console.error('[ReplayRecorder] Failed to save replay to IndexedDB:', err);
-    }
-  }
 }
 
 /**
@@ -283,10 +317,21 @@ export class ReplayPlayer {
     const snapshot = this.replayData.snapshots[index];
     if (!snapshot || !this.gameState) return;
 
+    // Validate snapshot has entities array
+    if (!Array.isArray(snapshot.entities)) {
+      console.error('[ReplayPlayer] Snapshot missing entities array:', snapshot);
+      return;
+    }
+
     this.gameState.currentRound = snapshot.currentRound;
     this.gameState.activePlayerIndex = snapshot.activePlayerIndex;
 
-    // 1. Restore Player stats (resources, orders, score)
+    // Restore time of day
+    if (snapshot.timeOfDay !== undefined) {
+      setTimeOfDay(snapshot.timeOfDay);
+    }
+
+    // 1. Restore Player stats (resources, orders, score, ordersPerTurn, ordersConfig)
     if (snapshot.players && Array.isArray(snapshot.players)) {
       for (const pData of snapshot.players) {
         const player = this.gameState.players.find(p => p.id === pData.id);
@@ -294,12 +339,14 @@ export class ReplayPlayer {
           player.resources = { ...(pData.resources || {}) };
           player.orders = pData.orders;
           if (pData.maxOrders !== undefined) player.maxOrders = pData.maxOrders;
+          if (pData.ordersPerTurn !== undefined) player.ordersPerTurn = pData.ordersPerTurn;
+          if (pData.ordersConfig) player.ordersConfig = { ...pData.ordersConfig };
           if (pData.score) player.score = { ...(pData.score || {}) };
         }
       }
     }
 
-    // 2. Restore Entities
+    // 2. Restore Entities (with full state)
     const snapshotEntityIds = new Set(snapshot.entities.map(e => e.id));
     // Remove entities not present in snapshot
     this.gameState.entities = this.gameState.entities.filter(e => snapshotEntityIds.has(e.id));
@@ -314,20 +361,22 @@ export class ReplayPlayer {
         entity.r = eData.r;
         entity.cell = cell;
         entity.owner = owner;
-        entity.health = eData.health;
-        entity.state.health = eData.health;
-        entity.actionPoints = eData.actionPoints;
-        entity.state.actionPoints = eData.actionPoints;
+        // Restore full entity state
+        if (eData.state) {
+          entity.state = structuredClone(eData.state);
+        }
         entity.facing = eData.facing || 'E';
         entity.active = eData.active !== false;
         entity.destroyed = eData.destroyed || false;
       } else {
         const meta = this.gameState.manifestData?.entities?.[eData.name];
         if (meta && cell) {
+          // Pass full state for new entity creation
           entity = new Entity(meta, owner, this.gameState, cell, {
             id: eData.id,
-            health: eData.health,
-            actionPoints: eData.actionPoints,
+            ...(eData.state || {}),
+            health: eData.state?.health ?? eData.health,
+            actionPoints: eData.state?.actionPoints ?? eData.actionPoints,
             facing: eData.facing || 'E',
             active: eData.active !== false,
             destroyed: eData.destroyed || false
@@ -337,29 +386,44 @@ export class ReplayPlayer {
       }
     }
 
-    // 3. Restore Cell Resources (and rebuild InstancedMesh if changed)
-    let resourcesChanged = false;
-    if (snapshot.cellResources && this.gameState.hexGrid && this.gameState.hexGrid.cells) {
-      const currentKeys = Object.keys(snapshot.cellResources).sort().join(';');
-      if (currentKeys !== this.lastCellResourcesKey) {
-        resourcesChanged = true;
-        this.lastCellResourcesKey = currentKeys;
-      }
-
+    // 3. Restore Cell Resources - start from initialState and apply removals up to this snapshot
+    if (this.gameState.hexGrid && this.gameState.hexGrid.cells && this.replayData.initialState?.cellResources) {
+      // First, restore all initial resources
       for (const cell of this.gameState.hexGrid.cells.values()) {
         const key = `${cell.q},${cell.r}`;
-        if (snapshot.cellResources[key]) {
-          cell.resource = { ...snapshot.cellResources[key] };
+        if (this.replayData.initialState.cellResources[key]) {
+          cell.resource = structuredClone(this.replayData.initialState.cellResources[key]);
         } else if (cell.resource) {
           delete cell.resource;
         }
       }
+      // Then apply removals from all snapshots up to current index
+      for (let i = 0; i <= index; i++) {
+        const snap = this.replayData.snapshots[i];
+        if (snap.removedResources) {
+          for (const key of Object.keys(snap.removedResources)) {
+            const cell = this.gameState.hexGrid.getCell(...key.split(',').map(Number));
+            if (cell && cell.resource) {
+              delete cell.resource;
+            }
+          }
+        }
+      }
     }
 
-    // 4. Update 3D Visuals
-    if (resourcesChanged) {
-      buildCellResources(this.gameState);
+    // 4. Restore Fog of War
+    if (snapshot.playerFog && Array.isArray(snapshot.playerFog)) {
+      for (const fogData of snapshot.playerFog) {
+        const player = this.gameState.players.find(p => p.id === fogData.id);
+        if (player) {
+          player.exploredCells = new Set(fogData.exploredCells || []);
+          player.visibleCells = new Set(fogData.visibleCells || []);
+        }
+      }
     }
+
+    // 5. Update 3D Visuals
+    buildCellResources(this.gameState);
     reconcileEntities(this.gameState);
     reconcileCellResources(this.gameState);
   }
@@ -381,7 +445,12 @@ export class ReplayPlayer {
       if (this.currentIndex >= this.totalSnapshots - 1) {
         this.pause();
       } else {
-        this.stepForward();
+        try {
+          this.stepForward();
+        } catch (err) {
+          console.error('[ReplayPlayer] Error during stepForward:', err);
+          this.pause();
+        }
       }
     }, delay);
   }
@@ -422,7 +491,8 @@ export function exportReplayToJSON(replayData) {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  // Delay revoking the URL to ensure the download starts
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 /**

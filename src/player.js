@@ -21,7 +21,7 @@ export class Player {
    * @param {Object|string|null} [controller]
    * @param {Object} [ordersConfig] - { max, initial, perTurn }
    */
-  constructor(id, name, gameState, color, startingResources = {}, description = '', controller = null, ordersConfig = null) {
+  constructor(id, name, gameState, color, startingResources = {}, description = '', controller = null, ordersConfig = null, isReplay = false) {
     this.id = id;
     this.name = name;
     this.color = color;
@@ -50,9 +50,12 @@ export class Player {
     // Each entry: { round, timestamp, category, entityName, entityId, details }
     this.history = new Map();
 
-    // Persistent AI controller manager instance
+    // Persistent AI controller manager instance (skip during replay)
     this.aiManager = null;
-    if (this.controller) {
+    // In replay mode we don't instantiate AI managers, but we still need to
+    // know whether this player was AI-controlled for UI labelling.
+    this._isReplayAI = isReplay && !!this.controller;
+    if (this.controller && !isReplay) {
       const llmConfig = gameState?.settings?.llm;
       if (llmConfig?.orderedModels?.length > 0) {
         this.aiManager = new Harness(this, gameState, this.controller);
@@ -67,7 +70,7 @@ export class Player {
    * @returns {boolean}
    */
   get isAI() {
-    return this.aiManager !== null && this.aiManager !== undefined;
+    return (this.aiManager !== null && this.aiManager !== undefined) || this._isReplayAI === true;
   }
 
   /**
@@ -470,9 +473,12 @@ export class Player {
 
   /**
    * Re-hydrates a Player instance from serialized JSON object.
+   * @param {Object} data
+   * @param {GameState} gameState
+   * @param {boolean} [isReplay=false] - If true, skip AI manager creation
    */
-  static fromJSON(data, gameState) {
-    const player = new Player(data.id, data.name, gameState, data.color, data.resources, data.description, data.controller, data.ordersConfig);
+  static fromJSON(data, gameState, isReplay = false) {
+    const player = new Player(data.id, data.name, gameState, data.color, data.resources, data.description, data.controller, data.ordersConfig, isReplay);
     player.maxOrders = data.maxOrders ?? 0;
     player.ordersPerTurn = data.ordersPerTurn ?? 0;
     player.orders = data.orders ?? 0;

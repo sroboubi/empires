@@ -72,3 +72,10 @@ This file documents mistakes made during development, reasons why they occurred,
 - **Why it was made**: Placed the recorder initialization at the top of `startNewGame()` assuming it needed to precede any game events, without verifying that `generateMap` and `initializeManifest` had populated `gameState.hexGrid`, `gameState.players`, and `gameState.entities`.
 - **What to avoid in the future**: Always initialize and start state-capturing recorders *after* all prerequisite state (e.g. map grid, players, starting units) has been completely constructed. Additionally, implement defensive backfills and loading fallbacks so unpopulated initial states do not produce a blank or broken scene.
 
+---
+
+### Mistake 11: Moving ReplayRecorder.start() before initializeManifest() to "capture the initial AI turn"
+- **Description**: In `src/main.js`, `replayRecorder.start(gameState, settings)` was moved before `gameState.initializeManifest(...)` to avoid missing the first AI turn. This regressed Mistake 10: `initialState.players` and `initialState.entities` were recorded as empty arrays. On playback, `gameState.players` was empty, so `applySnapshot()` could not resolve `ownerId` to a Player, and `spawnEntityMesh()` skipped the owner color ring for every entity.
+- **Why it was made**: Assumed the recorder had to be active before `initializeManifest()` to capture the initial AI turn, without accounting for the fact that `initializeManifest()` is what creates players and starting units. The AI turn is asynchronous, so starting the recorder immediately after `initializeManifest()` returns still captures the initial state before the first AI action.
+- **What to avoid in the future**: Never start a state-capturing recorder before the state it captures has been constructed. If an async process (AI turn) must be captured, start the recorder synchronously after the state is built but before the async work resumes; do not move the recorder earlier than the state construction.
+

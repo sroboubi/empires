@@ -19,7 +19,8 @@ import {
   clearEntityMeshes,
   buildCellResources,
   reconcileCellResources,
-  focusCameraOnEntities
+  focusCameraOnEntities,
+  setTimeOfDay
 } from './renderer.js';
 import { loadGameManifest } from './manifestLoader.js';
 import { HexGrid } from './hexGrid.js';
@@ -37,7 +38,6 @@ let currentGameSettings = null;
 let replayRecorder = new ReplayRecorder();
 let replayPlayer = null;
 let isReplayMode = false;
-let savedShowAll = false;
 
 const mouse = { x: 0, y: 0 };
 let selectedEntity = null;
@@ -131,8 +131,6 @@ async function init() {
         } else if (e.key === 'End') {
           e.preventDefault();
           replayPlayer?.last();
-        } else if (e.key === 'Escape') {
-          exitReplayMode();
         }
         return;
       }
@@ -163,21 +161,20 @@ async function init() {
       }
     });
 
-    // Replay File Picker & Setup Controls
-    const replayFileInput = document.getElementById('replay-file-input');
-    document.getElementById('btn-load-replay').addEventListener('click', () => {
-      if (replayFileInput) {
-        replayFileInput.value = '';
-        replayFileInput.click();
-      }
-    });
-
-    if (replayFileInput) {
-      replayFileInput.addEventListener('change', async (e) => {
+    // Replay Mode file selector (only used when CONFIG.REPLAY_MODE is true)
+    const replayModeFileInput = document.getElementById('replay-mode-file-input');
+    const btnReplayModeSelect = document.getElementById('btn-replay-mode-select');
+    if (btnReplayModeSelect && replayModeFileInput) {
+      btnReplayModeSelect.addEventListener('click', () => {
+        replayModeFileInput.value = '';
+        replayModeFileInput.click();
+      });
+      replayModeFileInput.addEventListener('change', async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
         try {
           const replayData = await readReplayFile(file);
+          document.getElementById('replay-mode-overlay').classList.remove('active');
           await startReplayMode(replayData);
         } catch (err) {
           console.error('Failed to load replay file:', err);
@@ -205,8 +202,6 @@ async function init() {
         replayPlayer.setSpeed(parseFloat(e.target.value));
       }
     });
-
-    document.getElementById('btn-exit-replay').addEventListener('click', exitReplayMode);
 
     // Audio mute toggle
     const muteBtn = document.getElementById('btn-mute');
@@ -288,8 +283,13 @@ async function init() {
     // LLM setup UI bindings
     setupLlmUI();
 
-    // Open Setup Modal automatically on initial load
-    openSetupModal(false);
+    // Open Setup Modal automatically on initial load, or the replay file
+    // selector when REPLAY_MODE is enabled.
+    if (CONFIG.REPLAY_MODE) {
+      document.getElementById('replay-mode-overlay').classList.add('active');
+    } else {
+      openSetupModal(false);
+    }
 
     console.log('Game initialized successfully.');
   } catch (err) {
@@ -330,13 +330,11 @@ function openSetupModal(canClose = true) {
   populateUnitSelectOptions();
   renderSetupUnits();
 
-  // Auto-Save & Replay Recording
+  // Auto-Save
   const autoSave = defaultSettings.autoSave || { enabled: true, intervalTurns: 5, maxAutoSaves: 10 };
   document.getElementById('setup-autosave-enabled').checked = autoSave.enabled;
   document.getElementById('setup-autosave-interval').value = autoSave.intervalTurns;
   document.getElementById('setup-autosave-max').value = autoSave.maxAutoSaves;
-  const recordCheckbox = document.getElementById('setup-record-game');
-  if (recordCheckbox) recordCheckbox.checked = true;
 
   // Barbarian Settings — dynamically render horde sliders from defaultSettings.barbarians.horde
   const barbarians = defaultSettings.barbarians || null;
@@ -1163,7 +1161,6 @@ function handleStartGameClicked() {
       intervalTurns: parseInt(document.getElementById('setup-autosave-interval').value, 10) || 5,
       maxAutoSaves: parseInt(document.getElementById('setup-autosave-max').value, 10) || 10
     },
-    recordGame: document.getElementById('setup-record-game')?.checked ?? true,
     barbarians: document.getElementById('setup-barbarians-enabled').checked
       ? (() => {
         // Collect horde values dynamically — one entry per slider widget rendered
@@ -1209,15 +1206,18 @@ function startNewGame(settings) {
 
   gameState = new GameState();
   gameState.generateMap(settings.mapSize, manifestData.terrains, manifestData);
+
   // The browser drives turns: pass nextTurn as the continuation so the
   // initial AI player's turn runs and chains exactly as before.
   gameState.initializeManifest(manifestData, settings, () => nextTurn());
 
-  // Initialize and start recording AFTER map, players, and starting units exist
-  if (settings.recordGame !== false) {
+  // Start recording AFTER initializeManifest so initialState contains the
+  // generated players and starting units (otherwise owners/entities are lost).
+  // AI turns are async, so this still runs before the first AI action.
+  if (CONFIG.RECORD_GAME) {
     replayRecorder = new ReplayRecorder();
-    replayRecorder.start(gameState, settings);
     gameState.replayRecorder = replayRecorder;
+    replayRecorder.start(gameState, settings);
   } else {
     gameState.replayRecorder = null;
   }
@@ -1350,9 +1350,6 @@ async function doSaveGame(name, isAuto = false) {
       await pruneAutoSaves(currentGameSettings.autoSave.maxAutoSaves);
     }
 
-    if (gameState?.replayRecorder?.isRecording()) {
-      await gameState.replayRecorder.saveToIndexedDB();
-    }
   } catch (err) {
     console.error('Save failed:', err);
     showToast('Failed to save game.', true);
@@ -1412,7 +1409,6 @@ async function startReplayMode(replayData) {
   }
 
   isReplayMode = true;
-  savedShowAll = CONFIG.SHOW_ALL;
   CONFIG.SHOW_ALL = true;
 
   closeSetupModal();
@@ -1420,9 +1416,11 @@ async function startReplayMode(replayData) {
   hideContextMenu();
   clearEntityMeshes();
 
-  // Hide or disable normal gameplay controls
-  document.getElementById('btn-next-turn').disabled = true;
-  document.getElementById('btn-save-game').disabled = true;
+  // Hide normal gameplay controls entirely while in replay mode
+  ['btn-save-game', 'btn-load-game', 'btn-export-game', 'btn-next-turn'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (btn) btn.style.display = 'none';
+  });
   document.getElementById('replay-controls-bar').style.display = 'flex';
 
   // Instantiate GameState for replay from initial state
@@ -1438,7 +1436,17 @@ async function startReplayMode(replayData) {
     gameState.generateMap(replayData.settings?.mapSize || 15, manifestData.terrains, manifestData);
   }
 
-  gameState.players = (replayData.initialState?.players || []).map(p => Player.fromJSON(p, gameState));
+  // Fallback for replays recorded before initialState captured players:
+  // derive the player list from the first snapshot that has it.
+  let initialPlayers = replayData.initialState?.players || [];
+  if (initialPlayers.length === 0) {
+    const firstWithPlayers = replayData.snapshots.find(s => Array.isArray(s.players) && s.players.length > 0);
+    if (firstWithPlayers) {
+      console.warn('[Replay] initialState.players is empty; using first snapshot players as fallback');
+      initialPlayers = firstWithPlayers.players;
+    }
+  }
+  gameState.players = initialPlayers.map(p => Player.fromJSON(p, gameState, true));
   gameState.entities = [];
 
   setMapCameraLimits(replayData.settings?.mapSize || gameState.hexGrid?.radius || 15);
@@ -1460,6 +1468,11 @@ async function startReplayMode(replayData) {
 
   if (gameState.entities.length > 0) {
     focusCameraOnEntities(gameState.entities);
+  }
+
+  // Set initial time of day from replay data
+  if (replayData.initialState?.timeOfDay !== undefined) {
+    setTimeOfDay(replayData.initialState.timeOfDay);
   }
 
   showToast(`Replay loaded (${replayData.snapshots.length} actions)`, false, 3500);
@@ -1492,23 +1505,7 @@ function updateReplayUI(state) {
   updatePlayersUI();
 }
 
-function exitReplayMode() {
-  if (replayPlayer) {
-    replayPlayer.destroy();
-    replayPlayer = null;
-  }
-
-  isReplayMode = false;
-  CONFIG.SHOW_ALL = savedShowAll;
-
-  document.getElementById('replay-controls-bar').style.display = 'none';
-  document.getElementById('btn-next-turn').disabled = false;
-  document.getElementById('btn-save-game').disabled = false;
-
-  deselectEntity();
-  clearEntityMeshes();
-  openSetupModal();
-}
+// exitReplayMode removed - users refresh the page to exit replay mode
 
 /* ==========================================================================
    TURN LIFECYCLE & AUTO-SAVE CHECK
@@ -1606,7 +1603,6 @@ function showVictoryModal(player, reasons) {
 
   if (gameState?.replayRecorder?.isRecording()) {
     gameState.replayRecorder.recordSnapshot(gameState, `Game Over: ${player.name} won!`);
-    gameState.replayRecorder.saveToIndexedDB();
   }
 }
 
