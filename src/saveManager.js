@@ -136,3 +136,5 @@ export async function pruneAutoSaves(maxCount) {
     tx.onerror = () => reject(tx.error);
   });
 }
+
+// Replay IndexedDB functions removed - replays are kept in memory and exported to file only
