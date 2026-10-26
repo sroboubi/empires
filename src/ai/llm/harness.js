@@ -102,6 +102,21 @@ export class Harness extends BaseManager {
             else if (command === 'BUILD') actorId = response.builderId;
             else if (command === 'EXPLORE') actorId = response.explorerId;
 
+            // Degenerate BUILD: both fields empty. Models emit this when
+            // they cannot fill a command's fields, typically meaning to
+            // end the turn (their thoughtProcess often says so). Treat it
+            // as END_TURN: ending cleanly costs no retry and no orders,
+            // exactly like the END_TURN branch below. Only both-empty
+            // qualifies — a half-empty BUILD is genuinely malformed and
+            // keeps the existing failure handling below. The thoughtProcess
+            // text is never consulted here; it is not executable content.
+            const isEmptyField = (v) => v === undefined || v === null || String(v).trim() === '';
+            if (command === 'BUILD' && isEmptyField(response.builderId) && isEmptyField(response.entityName)) {
+                console.log(`[Harness] ${this.player.name} ended turn via empty BUILD (treated as END_TURN)`);
+                this.player.addHistoryEntry(this.gameState.currentRound, { category: 'note', details: response.note });
+                return;
+            }
+
             if (command === 'ATTACK' || command === 'REPAIR' || command === 'BUILD' || command === 'EXPLORE') {
                 if (this.player.orders <= 0) {
                     lastResponseError = `You have 0 orders remaining. You cannot execute commands. End your turn with a note.`;
