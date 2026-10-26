@@ -638,35 +638,35 @@ export class SmartManager extends BaseManager {
             // 1. Critical Deficit Recovery (Stabilize negative burn before units starve, reserving scarce resources)
             if (await handleCriticalDeficits(player, gameState, manifest, myEntities, evalRes, reservedResources, involvedCells)) {
                 actionExecuted = true;
-                await onActionDone(gameState, involvedCells);
+                await onActionDone(gameState, involvedCells, 'Critical Deficit Recovery');
                 continue;
             }
 
             // 2. Combat & Defense (Retaliate against attackers and eliminate immediate threats)
             if (await handleCombatAndThreats(player, gameState, manifest, myEntities, involvedCells)) {
                 actionExecuted = true;
-                await onActionDone(gameState, involvedCells);
+                await onActionDone(gameState, involvedCells, 'Combat & Defense');
                 continue;
             }
 
             // 3. Heavy Repairs (Restore heavily damaged constructs/units < 50% HP)
             if (await handleHeavyRepairs(player, gameState, myEntities, involvedCells)) {
                 actionExecuted = true;
-                await onActionDone(gameState, involvedCells);
+                await onActionDone(gameState, involvedCells, 'Heavy Repairs');
                 continue;
             }
 
             // 4. Proactive Growth (Expand economy, settlements, units using surplus resources; respects reservedResources)
             if (await handleProactiveGrowth(player, gameState, manifest, myEntities, evalRes, reservedResources, involvedCells)) {
                 actionExecuted = true;
-                await onActionDone(gameState, involvedCells);
+                await onActionDone(gameState, involvedCells, 'Proactive Growth');
                 continue;
             }
 
             // 5. Exploration (Scout closest unexplored hexes using BFS and multi-step moves; strictly excludes builders)
             if (await handleExploration(player, gameState, manifest, myEntities, targetedExplorationCells, involvedCells)) {
                 actionExecuted = true;
-                await onActionDone(gameState, involvedCells);
+                await onActionDone(gameState, involvedCells, 'Exploration');
                 continue;
             }
         }

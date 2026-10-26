@@ -203,6 +203,14 @@ async function init() {
       }
     });
 
+    // Replay fog toggle: on = show the world from the current snapshot's
+    // active player's point of view (their restored fog); off = full map.
+    document.getElementById('replay-fog-toggle').addEventListener('change', (e) => {
+      CONFIG.SHOW_ALL = !e.target.checked;
+      updateHexFog(gameState);
+      reconcileEntities(gameState);
+    });
+
     // Audio mute toggle
     const muteBtn = document.getElementById('btn-mute');
     const renderMuteIcon = () => { muteBtn.textContent = audio.muted ? '🔇' : '🔊'; };
@@ -1372,6 +1380,14 @@ async function doLoadGame(saveName) {
     gameState.manifestData = manifestData;
     gameState.deserialize(record.data);
 
+    // Restart recording after a load: deserialize() builds a fresh GameState
+    // whose replayRecorder is null, so without this no further actions record.
+    if (CONFIG.RECORD_GAME) {
+      replayRecorder = new ReplayRecorder();
+      gameState.replayRecorder = replayRecorder;
+      replayRecorder.start(gameState, gameState.settings || {});
+    }
+
     if (gameState.hexGrid?.radius) setMapCameraLimits(gameState.hexGrid.radius);
     drawGrid(gameState);
     reconcileEntities(gameState);
@@ -1422,6 +1438,8 @@ async function startReplayMode(replayData) {
     if (btn) btn.style.display = 'none';
   });
   document.getElementById('replay-controls-bar').style.display = 'flex';
+  const fogToggle = document.getElementById('replay-fog-toggle');
+  if (fogToggle) fogToggle.checked = false;
 
   // Instantiate GameState for replay from initial state
   gameState = new GameState();

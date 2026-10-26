@@ -142,6 +142,8 @@ export function initRenderer(canvas) {
 
   // 5. Setup Lighting (Single HemisphereLight + Directional Sun)
   if (CONFIG.REPLAY_MODE) {
+    // Replay mode scrubs rapidly through night and day, so a small ambient
+    // floor keeps actions visible in dark frames.
     scene.add(new THREE.AmbientLight(0xFFFFFF, 0.2));
   }
 

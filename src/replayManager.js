@@ -61,7 +61,6 @@ export class ReplayRecorder {
         cells: gameState.hexGrid ? structuredClone(gameState.hexGrid.getCellsObject()) : {},
         mapSize: settings?.mapSize || 15,
         players: gameState.players.map(p => structuredClone(p.toJSON())),
-        entities: gameState.entities.map(e => structuredClone(e.toJSON())),
         activePlayerIndex: gameState.activePlayerIndex,
         currentRound: gameState.currentRound,
         timeOfDay: getTimeOfDay(),
@@ -95,7 +94,6 @@ export class ReplayRecorder {
     // Track which resource cells were removed since the previous snapshot.
     // Resources are only ever removed (never added), so we compare against the
     // initial resource set and only record keys not already reported.
-    const prevSnapshot = this.replayData.snapshots[this.replayData.snapshots.length - 1];
     const initialResourceKeys = new Set(Object.keys(this.replayData.initialState.cellResources || {}));
     const currentResourceKeys = new Set();
     if (gameState.hexGrid && gameState.hexGrid.cells) {
@@ -121,16 +119,6 @@ export class ReplayRecorder {
       visibleCells: Array.from(p.visibleCells)
     }));
 
-    // Track destroyed entities (entities in previous snapshot but not in current)
-    const prevEntityIds = prevSnapshot ? new Set(prevSnapshot.entities.map(e => e.id)) : new Set();
-    const currentEntityIds = new Set(gameState.entities.map(e => e.id));
-    const destroyedEntityIds = [];
-    for (const id of prevEntityIds) {
-      if (!currentEntityIds.has(id)) {
-        destroyedEntityIds.push(id);
-      }
-    }
-
     const snapshot = {
       index: this.replayData.snapshots.length,
       timestamp: Date.now(),
@@ -146,7 +134,7 @@ export class ReplayRecorder {
         orders: p.orders,
         maxOrders: p.maxOrders,
         ordersPerTurn: p.ordersPerTurn,
-        ordersConfig: p.ordersConfig,
+        ordersConfig: { ...(p.ordersConfig || {}) },
         score: { ...(p.score || {}) }
       })),
       entities: gameState.entities.map(e => ({
@@ -162,7 +150,6 @@ export class ReplayRecorder {
         destroyed: !!e.destroyed
       })),
       removedResources,
-      destroyedEntityIds,
       playerFog
     };
 
@@ -325,6 +312,11 @@ export class ReplayPlayer {
 
     this.gameState.currentRound = snapshot.currentRound;
     this.gameState.activePlayerIndex = snapshot.activePlayerIndex;
+
+    // Fog point-of-view for replay: the snapshot's active player is the one
+    // acting, so fog checks use their fog when the replay fog toggle is on.
+    // Harmless when SHOW_ALL is on, which short-circuits all fog checks.
+    this.gameState.fogPovPlayer = this.gameState.activePlayer;
 
     // Restore time of day
     if (snapshot.timeOfDay !== undefined) {
