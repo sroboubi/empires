@@ -12,9 +12,8 @@
  */
 
 const DB_NAME = 'EmpiresDB';
-const DB_VERSION = 2;
+const DB_VERSION = 1;
 const STORE_NAME = 'saves';
-const REPLAY_STORE_NAME = 'replays';
 
 /**
  * Opens (or creates/upgrades) the IndexedDB database.
@@ -30,10 +29,6 @@ function openDB() {
         const store = db.createObjectStore(STORE_NAME, { keyPath: 'name' });
         store.createIndex('timestamp', 'timestamp', { unique: false });
         store.createIndex('auto', 'auto', { unique: false });
-      }
-      if (!db.objectStoreNames.contains(REPLAY_STORE_NAME)) {
-        const replayStore = db.createObjectStore(REPLAY_STORE_NAME, { keyPath: 'id' });
-        replayStore.createIndex('timestamp', 'timestamp', { unique: false });
       }
     };
 

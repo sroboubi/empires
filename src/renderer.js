@@ -142,6 +142,8 @@ export function initRenderer(canvas) {
 
   // 5. Setup Lighting (Single HemisphereLight + Directional Sun)
   if (CONFIG.REPLAY_MODE) {
+    // Replay mode scrubs rapidly through night and day, so a small ambient
+    // floor keeps actions visible in dark frames.
     scene.add(new THREE.AmbientLight(0xFFFFFF, 0.2));
   }
 
@@ -963,7 +965,7 @@ export function reconcileEntities(gameState) {
   const activeIds = new Set();
 
   gameState.entities.forEach(entity => {
-    const isEntityVisibleInScene = gameState.isVisibleToHuman(entity.cell);
+    const isEntityVisibleInScene = entity.cell ? gameState.isVisibleToHuman(entity.cell) : false;
 
     if (isEntityVisibleInScene || CONFIG.SHOW_ALL) {
       activeIds.add(entity.id);

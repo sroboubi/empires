@@ -14,7 +14,7 @@ export var CONFIG = {
   PAN_CAMERA_ON_HUMAN_TURN: true,
   PAN_CAMERA_ON_AI_TURN: false,
   MIN_GAME_ROUNDS: 5,
-  RECORD_GAME: true,     // record every game for replay (query-param overridable)
+  RECORD_GAME: false,    // record every game for replay (query-param overridable; default off until replay size is bounded)
   REPLAY_MODE: false,    // when true, show a replay file selector instead of the game setup menu
   AUDIO_ENABLED: true,   // master switch for all game audio (query-param overridable)
   AUDIO_VOLUME: 0.8,     // master volume 0..1 (query-param overridable)

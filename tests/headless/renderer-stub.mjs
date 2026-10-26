@@ -33,3 +33,12 @@ export let sunMesh = null;
 export let stats = null;
 export class Compass { constructor() {} update() {} dispose() {} }
 export default {};
+
+// Time-of-day state (replayManager reads it for snapshots; the real renderer
+// drives the sun from it). Mirrors renderer.js normalization.
+let _timeOfDay = 12;
+export function getTimeOfDay() { return _timeOfDay; }
+export function setTimeOfDay(hour) {
+  _timeOfDay = hour % 24;
+  if (_timeOfDay < 0) _timeOfDay += 24;
+}
