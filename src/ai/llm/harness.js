@@ -23,7 +23,7 @@ export class Harness extends BaseManager {
                 baseUrl: this.gameState.settings?.llm?.baseUrl,
                 apiKey: this.gameState.settings?.llm?.apiKey,
                 orderedModels: this.gameState.settings?.llm?.orderedModels,
-                timeoutMs: 30000,
+                timeoutMs: this.gameState.settings?.llm?.timeoutMs ?? 30000,
                 generationConfig: {
                     temperature: 0.1,
                     maxOutputTokens: 8000,
