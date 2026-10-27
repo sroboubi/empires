@@ -1192,6 +1192,7 @@ function handleStartGameClicked() {
       : null,
     winCondition: Object.keys(winCondition).length > 0 ? winCondition : null,
     llm: {
+      ...(defaultSettings?.llm || {}),
       baseUrl: setupLlmBaseUrl,
       apiKey: setupLlmApiKey,
       orderedModels: orderedModels
