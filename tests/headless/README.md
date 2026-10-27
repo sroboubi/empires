@@ -37,11 +37,76 @@ Game configuration comes from an optional JSON config file (see `config.example.
 
 Without a config file, defaults to 2 SmartManager AI players on a radius-12 map.
 
+## Checkpoint / resume
+
+Long LLM games outlive single runtime sessions, so the harness can
+checkpoint at every round end and resume after a kill:
+
+```bash
+# Fresh run with checkpointing (one checkpoint file per run directory)
+node --import ./stubs.mjs --loader ./loader.mjs ./headless.mjs \
+  --config mygame.json --checkpoint-dir ~/workspace/llm-play/checkpoints/my-run
+
+# After a kill: resume with the SAME config file, playing only the
+# remaining rounds. Checkpointing continues into the same directory,
+# so a resumed run survives a second kill the same way.
+node --import ./stubs.mjs --loader ./loader.mjs ./headless.mjs \
+  --config mygame.json --resume ~/workspace/llm-play/checkpoints/my-run
+# (--resume also accepts the checkpoint file itself, and --checkpoint-dir
+# can override where the resumed run writes.)
+```
+
+**What a checkpoint is.** The production save payload —
+`GameState.serialize()` output, exactly what the browser's saveManager
+stores — written as `<dir>/checkpoint.json`. The saveManager itself is
+IndexedDB-only and cannot run under Node, so the harness stores the same
+payload as a plain file instead of duplicating serialization code.
+Writes are atomic (tmp file + rename): a kill mid-write leaves the
+previous round's checkpoint intact. One checkpoint is also saved at
+setup, so even a kill during round 1 is resumable (and preserves the
+generated map, which a fresh run would not reproduce).
+
+**What resume restores.** Map cells, entities (full state + age),
+players (resources, orders, scores, explored/visible cells, history),
+chat history, round number, and settings. Two things serialize() does
+not carry are restored in the harness: `initializationSettings`
+(SmartManager deficit reasoning) from the checkpoint's own settings,
+and AI managers, which are re-created from the resume-time config —
+Harness/SmartManager hold no cross-turn state worth preserving
+(Harness keeps only a lazy client and a prompt cache). Controllers and
+LLM credentials always come from the resume-time config, never from the
+checkpoint.
+
+**Granularity and refusal rules.** Checkpoints are whole rounds: a kill
+mid-round loses that round's partial progress, and resume replays the
+partial round from its start (for LLM runs, that round's LLM calls are
+re-spent — bounded at one round). Rounds whose `onRoundEnd()` completed
+are never replayed. Resume refuses, loudly: a missing/malformed
+checkpoint, a completed game (`gameOver`, or rounds already >= the
+config's turn total), and a player-list mismatch against the config.
+A fresh run likewise refuses to start in a directory that already holds
+a checkpoint, so a typo cannot destroy a killed run's only way back.
+The same applies to resume with an explicit `--checkpoint-dir` pointing
+at a different run's directory; checkpointing back into the resume dir
+(the default) is always allowed.
+
+**Secrets.** Checkpoint files live outside the repo (never committed)
+and never carry credentials: `settings.llm.apiKey` is stripped on write,
+since config `${VAR}` expansion can put a real key into settings.
+Base URL and model list are kept (harmless, useful provenance).
+
+**Not preserved / not deterministic.** Gameplay randomness is ambient
+`Math.random` (entity-id suffixes, one overflow-resource pick) with no
+seeded RNG state to save, so a resumed game continues correctly but is
+not a bit-identical replay of the killed process's future. Map
+generation randomness does not matter: the generated cells are saved.
+
 ## How it works
 
 | File | Purpose |
 |------|---------|
 | `headless.mjs` | Test driver: creates GameState, 2 AI players, drives turns, asserts |
+| `checkpoint.mjs` | Checkpoint/resume: round-end save payloads to disk, resume validation (see above) |
 | `repl.mjs` | Interactive REPL: step turns, inspect state, spawn entities, run AI manually |
 | `stubs.mjs` | Browser API stubs: window, document, AudioContext, fetch (local files), IndexedDB, localStorage |
 | `loader.mjs` | Node module loader: replaces `renderer.js`/`audio.js`/`main.js` with no-ops, redirects esm.sh CDN to node_modules |
