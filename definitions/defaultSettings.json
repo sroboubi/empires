@@ -67,6 +67,14 @@
   },
   "llm": {
     "callDelayMs": 0,
-    "timeoutMs": 30000
+    "timeoutMs": 30000,
+    "interface": "json",
+    "menu": {
+      "attackTargets": 5,
+      "attackOrders": 3,
+      "repairTargets": 5,
+      "repairOrders": 3,
+      "moveTargets": 3
+    }
   }
 }

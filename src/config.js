@@ -36,6 +36,7 @@ export var CONFIG = {
   AUDIO_URL: './definitions/audio.json',
   DEFAULT_SETTINGS_URL: './definitions/defaultSettings.json',
   COMMAND_PROMPT_URL: './src/ai/llm/systemPrompt.command.md',
+  MENU_PROMPT_URL: './src/ai/llm/systemPrompt.menu.md',
   CHAT_PROMPT_URL: './src/ai/llm/systemPrompt.chat.md',
   CHAT_SUMMATION_PROMPT_URL: './src/ai/llm/systemPrompt.chatSummation.md',
 };
