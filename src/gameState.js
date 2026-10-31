@@ -349,8 +349,11 @@ export class GameState {
     const entity = new Entity(meta, owner, this, cell, initialState);
     this.entities.push(entity);
 
-    // Add history entry for entity creation
-    if (owner) {
+    // Add history entry for entity creation — but not on rehydration:
+    // deserialize() re-spawns every existing entity, and recording those
+    // as creations would pollute history on every load (and on every
+    // checkpoint resume, where history is LLM-visible).
+    if (owner && !initialState) {
       owner.addHistoryEntry(this.currentRound, {
         category: 'spawn',
         details: `Created ${entity.name} at (${cell.q}, ${cell.r})`,
@@ -484,7 +487,11 @@ export class GameState {
           const cell = this.hexGrid ? this.hexGrid.getCell(eData.q, eData.r) : null;
           const owner = this.players.find(p => p.id === eData.ownerId) || null;
           if (cell) {
-            this.spawnEntity(eData.name, cell, owner, eData.state);
+            const entity = this.spawnEntity(eData.name, cell, owner, eData.state);
+            // Age lives on the instance, not in state: restore it so a
+            // loaded game does not reset every entity's age to 0.
+            // Guarded: saves written before age was serialized lack it.
+            if (entity && eData.age !== undefined) entity.age = eData.age;
           }
         });
       }

@@ -898,6 +898,9 @@ export default class Entity {
       ownerId: this.owner ? this.owner.id : null,
       q: this.q,
       r: this.r,
+      // Instance age (not part of state): drives barbarian maxAge deaths,
+      // so saves must carry it or a loaded game resets every age to 0.
+      age: this.age,
       state: this.state
     };
   }

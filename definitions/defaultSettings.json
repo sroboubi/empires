@@ -64,5 +64,9 @@
     "spawnFrequencyTurns": 5,
     "maxNumber": 20,
     "maxAge": 25
+  },
+  "llm": {
+    "callDelayMs": 0,
+    "timeoutMs": 30000
   }
 }
