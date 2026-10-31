@@ -1,6 +1,5 @@
 import { animateToTimeOfDay } from "./renderer.js";
-import { SmartManager } from "./ai/standard/smartManager.js";
-import { Harness } from "./ai/llm/harness.js";
+import { createAiManager } from "./ai/managers.js";
 import { CONFIG } from './config.js';
 
 const turnHours = { start: 7, end: 17 }
@@ -50,19 +49,34 @@ export class Player {
     // Each entry: { round, timestamp, category, entityName, entityId, details }
     this.history = new Map();
 
-    // Persistent AI controller manager instance (skip during replay)
+    // Persistent AI controller manager instance (skip during replay).
+    // Created lazily via ensureAiManager(): player.controller holds a URL
+    // to a BaseManager implementation (see src/ai/managers.js); null means
+    // a human player.
     this.aiManager = null;
+    this._aiManagerPromise = null;
+    this._isReplay = isReplay;
     // In replay mode we don't instantiate AI managers, but we still need to
     // know whether this player was AI-controlled for UI labelling.
     this._isReplayAI = isReplay && !!this.controller;
-    if (this.controller && !isReplay) {
-      const llmConfig = gameState?.settings?.llm;
-      if (llmConfig?.orderedModels?.length > 0) {
-        this.aiManager = new Harness(this, gameState, this.controller);
-      } else {
-        this.aiManager = new SmartManager(this, gameState, this.controller);
+  }
+
+  /**
+   * Returns the player's AI manager, creating it on first use by resolving
+   * player.controller to a BaseManager implementation. Returns null for
+   * human players and replays.
+   */
+  async ensureAiManager() {
+    if (!this.controller || this._isReplay) return null;
+    if (!this.aiManager) {
+      if (!this._aiManagerPromise) {
+        this._aiManagerPromise = createAiManager(this, this.gameState, this.controller)
+          .then(m => { this.aiManager = m; return m; })
+          .catch(err => { this._aiManagerPromise = null; throw err; });
       }
+      await this._aiManagerPromise;
     }
+    return this.aiManager;
   }
 
   /**
@@ -183,6 +197,9 @@ export class Player {
     this.updateVisibility();
     this.recalculateScore();
 
+    if (this.controller) {
+      await this.ensureAiManager();
+    }
     if (this.aiManager && typeof onTurnEnd === 'function') {
       try {
         await this.aiManager.processTurn();

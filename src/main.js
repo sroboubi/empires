@@ -27,7 +27,6 @@ import { HexGrid } from './hexGrid.js';
 import { collectResourceModelEntries } from './resources.js';
 import { audio } from './audio.js';
 import { saveGame, loadGame, listSaves, deleteSave, pruneAutoSaves } from './saveManager.js';
-import { Harness } from './ai/llm/harness.js';
 import { Player } from './player.js';
 import { ReplayRecorder, ReplayPlayer, exportReplayToJSON, readReplayFile } from './replayManager.js';
 
@@ -2109,7 +2108,8 @@ export async function closeChatModal() {
   const { humanPlayer, aiPlayer, resolvePromise } = currentChatSession;
   if (aiPlayer && humanPlayer) {
     // Requirement 7: When human exits chat, allow the AI player to add a note to summarize the chat
-    await aiPlayer.aiManager.summarizeChatAndAddNote(humanPlayer);
+    const mgr = await aiPlayer.ensureAiManager();
+    if (mgr) await mgr.summarizeChatAndAddNote(humanPlayer);
   }
 
   updatePlayersUI();
@@ -2152,7 +2152,8 @@ export async function sendChatMessage() {
   `;
 
   try {
-    const reply = await aiPlayer.aiManager.generateChatReply(humanPlayer);
+    const mgr = await aiPlayer.ensureAiManager();
+    const reply = await mgr.generateChatReply(humanPlayer);
 
     // Add AI message to gameState
     gameState.addChatMessage(aiPlayer, humanPlayer, reply.content);

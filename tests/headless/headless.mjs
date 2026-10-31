@@ -199,19 +199,11 @@ async function main() {
   if (cfg.barbarians) console.log(`[headless] Barbarians enabled`);
   if (cfg.llm?.orderedModels?.length) console.log(`[headless] LLM enabled: ${cfg.llm.orderedModels.join(', ')}`);
 
-  // Per-player controller override: the game picks LLM vs SmartManager globally
-  // based on settings.llm, so swap aiManager for players that want the other.
-  // (No game code changes — this is test-harness-only.)
-  const { SmartManager } = await import('../../src/ai/standard/smartManager.js');
-  const { Harness } = await import('../../src/ai/llm/harness.js');
+  // AI managers are created lazily by Player.ensureAiManager() from each
+  // player's controller URL (see src/ai/managers.js) — no manual swapping
+  // needed here. Eagerly resolve now so a bad controller URL fails fast.
   for (const p of gameState.players) {
-    const wantLLM = players.find(pd => pd.id === p.id)?.controller === 'llm';
-    const hasLLM = p.aiManager instanceof Harness;
-    if (wantLLM && !hasLLM && cfg.llm?.apiKey) {
-      p.aiManager = new Harness(p, gameState, p.controller);
-    } else if (!wantLLM && hasLLM) {
-      p.aiManager = new SmartManager(p, gameState, p.controller);
-    }
+    if (p.controller) await p.ensureAiManager();
   }
 
   assert(gameState.players.length === players.length, `expected ${players.length} players`);
