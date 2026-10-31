@@ -4,18 +4,32 @@
     {
       "id": 1,
       "name": "English Empire",
-      "color": "#ff4d4d",
-      "description": "Aggressive expansionist empire",
+      "color": "#ff4d4d",      
       "controller": null
     },
     {
       "id": 2,
       "name": "French Empire",
       "color": "#3399ff",
-      "description": "Strategic maritime alliance",
       "controller": {
-        "personality": "defensive",
-        "strategy": "economic focused"
+        "url": "./ai/standard/smartManager.js",
+        "description": "Likes to speak with an accent. A cautious leader who favors diplomacy and defense over rash attacks.",
+        "focus": ["diplomacy", "defense", "exploration"]
+      }
+    },
+    {
+      "id": 3,
+      "name": "German Empire",
+      "color": "#ffcc00",
+      "controller": {
+        "url": "./ai/llm/json/harness.js",
+        "description": "A militaristic expansionist who favors aggressive attacks and rapid territorial growth.",
+        "focus": ["military", "expansion", "exploration"],
+        "config": {
+          "provider": "http://localhost:1234/v1",
+          "model": "google/gemma-4-e4b",
+          "timeoutMs": 30000
+        }
       }
     }
   ],
@@ -64,9 +78,5 @@
     "spawnFrequencyTurns": 5,
     "maxNumber": 20,
     "maxAge": 25
-  },
-  "llm": {
-    "callDelayMs": 0,
-    "timeoutMs": 30000
   }
 }

@@ -18,7 +18,6 @@ import {
 import { HexGrid } from '../../hexGrid.js';
 import { camelToTitle } from '../../utils.js';
 import { BaseManager } from '../baseManager.js';
-import { Harness } from '../llm/harness.js';
 
 /**
  * Smart AI Manager
@@ -686,3 +685,4 @@ export class SmartManager extends BaseManager {
     }
 }
 
+export default SmartManager;

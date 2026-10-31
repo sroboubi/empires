@@ -1331,58 +1331,16 @@
           </div>
         </div>
 
-        <!-- OpenAI-Compatible LLM Settings -->
+        <!-- AI Provider Keys (Phase 23) -->
         <div class="form-group full-width">
-          <label class="form-label">AI Configuration (OpenAI-compatible LLM)</label>
-          <div style="display: flex; flex-direction: column; gap: 10px;">
-            <!-- Base URL Input -->
-            <div style="display: flex; flex-direction: column; gap: 4px;">
-              <label for="setup-llm-base-url" style="font-size: 11px; color: var(--text-muted); font-weight: 600;">Base URL</label>
-              <input type="text" id="setup-llm-base-url" class="form-input"
-                placeholder="e.g. https://openrouter.ai/api/v1 or http://localhost:1234/v1"
-                value="https://openrouter.ai/api/v1" style="width: 100%;">
-            </div>
-
-            <!-- API Key Input and Fetch Button -->
-            <div style="display: flex; gap: 8px; align-items: center;">
-              <div style="position: relative; flex: 1;">
-                <input type="password" id="setup-llm-api-key" class="form-input"
-                  placeholder="API Key (Optional for local servers, e.g. sk-or-v1-...)" style="width: 100%; padding-right: 32px;">
-                <button type="button" id="btn-toggle-llm-key"
-                  style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 14px;"
-                  title="Toggle Key Visibility">👁</button>
-              </div>
-              <label id="setup-llm-free-only-wrapper"
-                style="display: flex; align-items: center; gap: 5px; font-size: 12px; white-space: nowrap; cursor: pointer; color: var(--text-muted);">
-                <input type="checkbox" id="setup-llm-free-only" checked> Free Only
-              </label>
-              <button id="btn-fetch-llm-models" class="btn btn-secondary btn-small" type="button"
-                style="width: 130px; white-space: nowrap;">Fetch Models</button>
-            </div>
-
-            <div id="setup-llm-status" style="font-size: 12px; color: var(--text-muted); min-height: 16px;"></div>
-
-            <!-- Model Selection & Priority Ordering Section -->
-            <div id="setup-llm-model-picker" style="display: none; flex-direction: column; gap: 8px;">
-              <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span id="setup-llm-picker-title"
-                  style="font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Available Models</span>
-                <span id="setup-llm-selection-count"
-                  style="font-size: 11px; font-weight: 600; color: var(--accent-color);">0 selected</span>
-              </div>
-              <!-- Search input -->
-              <input type="text" id="setup-llm-search" class="form-input" placeholder="Search models..."
-                style="width: 100%; font-size: 12px; padding: 6px 10px;">
-              <div style="font-size: 11px; color: var(--text-muted);">
-                Select models to enable. Drag or use ▲/▼ to set priority order among selected models.
-              </div>
-              <div id="setup-llm-priority-list" class="dynamic-list"
-                style="max-height: 280px; overflow-y: auto; padding-right: 4px;"></div>
-            </div>
+          <label class="form-label">AI Provider API Keys</label>
+          <div id="setup-provider-keys" style="display: flex; flex-direction: column; gap: 8px;">
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">
+            Keys are kept in this browser session only. Local providers don't need a key.
           </div>
         </div>
       </div>
-
       <div class="divider"></div>
       <div style="display: flex; gap: 12px;">
         <button id="btn-start-game" class="btn" style="flex: 1; padding: 12px; font-size: 15px;">START GAME</button>

@@ -1,0 +1,89 @@
+{
+    "providers": {
+        "local": {
+            "url": "http://localhost:1234/v1"
+        },
+        "open-router": {
+            "url": "https://openrouter.ai/api/v1"
+        },
+        "google": {
+            "url": "https://generativelanguage.googleapis.com/v1beta/openai"
+        },
+        "groq": {
+            "url": "https://api.groq.com/openai/v1"
+        }
+    },
+    "controllers": {
+        "standard": {
+            "url": "./ai/standard/smartManager.js",
+            "config": {}
+        },
+        "llm-json-gemma-4": {
+            "url": "./ai/llm/json/harness.js",
+            "config": {
+                "provider": "local",
+                "model": "google/gemma-4-e4b"
+            }
+        },
+        "llm-menu-deepseek-4.1": {
+            "url": "./ai/llm/menu/harness.js",
+            "config": {
+                "provider": "open-router",
+                "model": "deepseek/deepseek-v4.1-flash-1017",
+                "attackTargets": 5,
+                "attackOrders": 3,
+                "repairTargets": 5,
+                "repairOrders": 3,
+                "moveTargets": 3,
+                "maxChatExchanges": 6,
+                "chatCooldownOrders": 2
+            }
+        },
+        "llm-menu-gemma-4": {
+            "url": "./ai/llm/menu/harness.js",
+            "config": {
+                "provider": "local",
+                "model": "google/gemma-4-e4b",
+                "attackTargets": 5,
+                "attackOrders": 3,
+                "repairTargets": 5,
+                "repairOrders": 3,
+                "moveTargets": 3,
+                "maxChatExchanges": 6,
+                "chatCooldownOrders": 2
+            }
+        },
+        "llm-menu-qwen-3.5": {
+            "url": "./ai/llm/menu/harness.js",
+            "config": {
+                "provider": "local",
+                "model": "qwen3.5-4b",
+                "attackTargets": 5,
+                "attackOrders": 3,
+                "repairTargets": 5,
+                "repairOrders": 3,
+                "moveTargets": 3,
+                "maxChatExchanges": 6,
+                "chatCooldownOrders": 2
+            }
+        },
+        "llm-menu-phi-4": {
+            "url": "./ai/llm/menu/harness.js",
+            "config": {
+                "provider": "local",
+                "model": "phi-4-mini-instruct",
+                "attackTargets": 5,
+                "attackOrders": 3,
+                "repairTargets": 5,
+                "repairOrders": 3,
+                "moveTargets": 3,
+                "maxChatExchanges": 6,
+                "chatCooldownOrders": 2
+            }
+        }
+    },
+    "baseConfig": {
+        "callDelayMs": 0,
+        "timeoutMs": 30000
+    }
+}

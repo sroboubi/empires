@@ -1,30 +1,39 @@
-import { BaseManager } from "../baseManager.js";
-import { LLMClient } from "./client.js";
-import responseSchema from './response.schema.json' with { type: 'json' };
-import { attack, support, build, explore, onActionDone, findBuildCandidates, isCombatCapable } from "../utils.js";
+/**
+ * Shared base for LLM turn managers (JSON commands, menu, future variants).
+ * Holds everything that is not interface-specific: the LLM client, game-state
+ * summarization, and the diplomatic chat flow. Concrete harnesses extend this
+ * and implement processTurn().
+ */
+import { BaseManager } from '../baseManager.js';
+import { LLMClient } from './client.js';
 import { HexGrid } from '../../hexGrid.js';
-import { manifestToMarkdown, serializeStateToMarkdown, summarizeTerrain } from "./markdown.js";
-import { CONFIG } from "../../config.js";
+import { manifestToMarkdown } from './markdown.js';
+import { findBuildCandidates, isCombatCapable } from '../utils.js';
+import { CONFIG } from '../../config.js';
 
-export class Harness extends BaseManager {
+export class LlmBaseManager extends BaseManager {
     constructor(player, gameState, controller) {
         super(player, gameState, controller);
         this.llmClient = null;
-        this.cachedCommandSystemPrompt = null;
     }
 
     /**
      * Retrieves or instantiates the single LLMClient for this AI player.
+     * All client settings come from the controller config (see
+     * definitions/ai.json) — there is no global fallback. The setup UI
+     * (Phase 23) resolves provider keys to baseUrl/apiKey.
      * @returns {LLMClient}
      */
+
     getLLMClient() {
         if (!this.llmClient) {
+            const cc = this.player.controller?.config || {};
             this.llmClient = new LLMClient({
-                baseUrl: this.gameState.settings?.llm?.baseUrl,
-                apiKey: this.gameState.settings?.llm?.apiKey,
-                orderedModels: this.gameState.settings?.llm?.orderedModels,
-                timeoutMs: this.gameState.settings?.llm?.timeoutMs ?? 30000,
-                callDelayMs: this.gameState.settings?.llm?.callDelayMs,
+                baseUrl: cc.baseUrl,
+                apiKey: cc.apiKey,
+                orderedModels: cc.model,
+                timeoutMs: cc.timeoutMs ?? 30000,
+                callDelayMs: cc.callDelayMs ?? 0,
                 generationConfig: {
                     temperature: 0.1,
                     maxOutputTokens: 8000,
@@ -36,282 +45,36 @@ export class Harness extends BaseManager {
     }
 
     /**
+     * Builds the leader-persona block for the system prompt from the
+     * controller (leader info combined in per Phase 23: description and
+     * focus), falling back to the player's own description.
+     * @returns {string}
+     */
+    personaBlock() {
+        const c = this.player.controller || {};
+        const parts = [];
+        const desc = c.description || this.player.description;
+        if (desc) parts.push(`You are described as: ${desc}`);
+        if (Array.isArray(c.focus) && c.focus.length) {
+            parts.push(`Your strategic focus: ${c.focus.join(', ')}.`);
+        }
+        return parts.join('\n');
+    }
+
+    /**
      * Processes a player's turn by summarizing the game state and interacting with the AI controller.     
      */
-    async processTurn() {
-        const client = this.getLLMClient();
-        const commandSystemPrompt = await this.getCommandSystemPrompt();
 
-        let attempts = 4; // Safeguard against infinite loops
-        let lastResponseError = null;
-        let lastActionResult = null;
-        let lastFailedCommand = null; // { command, targetDesc, entityId } for structured failure reporting
-        let response = null;
-        const turnResponseLog = [];
-
-        while (attempts > 0) {
-            if (lastResponseError) attempts--;
-            const manifestEntities = this.gameState.manifestData?.entities || this.gameState.manifestData || [];
-            const manifestList = Array.isArray(manifestEntities) ? manifestEntities : Object.values(manifestEntities);
-            const stateMd = serializeStateToMarkdown(this.summarizeGameState(), manifestList);
-            const terrainMd = summarizeTerrain(this.gameState, this.player);
-            let userContent = stateMd;
-            if (terrainMd) userContent += '\n\n' + terrainMd;
-            if (lastResponseError) {
-                if (lastFailedCommand) {
-                    userContent += `\n\n### Last Action Failed\n* **Command Attempted**: ${lastFailedCommand.command} (${lastFailedCommand.target}) using ${lastFailedCommand.entityId}\n* **Failure Reason**: ${lastResponseError}`;
-                } else {
-                    userContent += `\n\n### Last Action Failed\n${lastResponseError}`;
-                }
-                // Echo only the failed command, never the model's reasoning:
-                // echoing the full response re-sends thousands of tokens of
-                // thoughtProcess every retry (measured ~6,600 tokens in a
-                // late-game DeepSeek prompt) and grows the prompt each turn.
-                if (response && typeof response === 'object') {
-                    const { thoughtProcess, reasoning, ...commandOnly } = response;
-                    const compact = JSON.stringify(commandOnly);
-                    if (compact && compact !== '{}') userContent += `\nFailed response: ${compact.slice(0, 500)}`;
-                }
-            } else if (lastActionResult) {
-                userContent += `\n\n### Last Action Result\n${lastActionResult}`;
-            }
-            if (turnResponseLog.length > 0) {
-                userContent += `\n\n### Actions Taken This Turn (${turnResponseLog.length})\n` +
-                    turnResponseLog.map((r, i) => `${i + 1}. ${this.describeAction(r)}`).join('\n');
-            }
-
-            console.debug("system prompt:", commandSystemPrompt);
-            console.debug("user content:", userContent);
-
-            response = await client.generate(userContent, commandSystemPrompt, { responseSchema });
-            console.debug("response:", response);
-
-            if (!response) {
-                console.error(`Failed to process turn for player ${this.player.name}: No response received.`);
-                return;
-            }
-
-            // Every response carries an explicit command field naming which
-            // command it performs (one of ATTACK, REPAIR, BUILD, EXPLORE,
-            // CHAT, END_TURN, enforced by the per-command schema). The
-            // command determines which role-named fields are required —
-            // there is no shared "target" whose meaning flips per command.
-            const command = String(response.command || '').toUpperCase();
-            let actorId = null;
-            if (command === 'ATTACK') actorId = response.attackerId;
-            else if (command === 'REPAIR') actorId = response.repairerId;
-            else if (command === 'BUILD') actorId = response.builderId;
-            else if (command === 'EXPLORE') actorId = response.explorerId;
-
-            if (command === 'ATTACK' || command === 'REPAIR' || command === 'BUILD' || command === 'EXPLORE') {
-                if (this.player.orders <= 0) {
-                    lastResponseError = `You have 0 orders remaining. You cannot execute commands. End your turn with a note.`;
-                    continue;
-                }
-
-                const entity = this.gameState.getEntityById(actorId);
-                if (!entity) {
-                    lastResponseError = `Actor entity not found: ${actorId}`;
-                    continue;
-                } else if (entity.owner !== this.player) {
-                    lastResponseError = `Entity ${actorId} does not belong to you`;
-                    continue;
-                }
-
-                let target = null;
-                if (response.targetId) {
-                    target = this.gameState.getEntityById(response.targetId);
-                    if (!target) {
-                        lastResponseError = `Target entity not found: ${response.targetId}`;
-                        continue;
-                    }
-                }
-
-                let ordersUsed = 0;
-                let actionOutcome = null;
-                if (command === "ATTACK") {
-                    if (!response.targetId) {
-                        lastResponseError = `Attack requires targetId (a specific visible enemy). entityName is for Build only — attacking a type name like "village" is rejected.`;
-                        continue;
-                    }
-                    actionOutcome = attack(this.gameState, entity, target, this.player.orders);
-                } else if (command === "REPAIR") {
-                    if (!response.targetId) {
-                        lastResponseError = `Repair requires targetId (a specific damaged entity). entityName is for Build only.`;
-                        continue;
-                    }
-                    actionOutcome = support(this.gameState, entity, target, "Repair", this.player.orders);
-                } else if (command === "BUILD") {
-                    if (!response.entityName) {
-                        lastResponseError = `Build requires entityName (must be in the builder's Builds list)`;
-                        continue;
-                    }
-                    actionOutcome = build(this.gameState, entity, response.entityName);
-                } else if (command === "EXPLORE") {
-                    actionOutcome = explore(this.gameState, entity, response.direction, true);
-                }
-
-                ordersUsed = actionOutcome.ordersUsed;
-                if (ordersUsed === 0) {
-                    lastResponseError = actionOutcome.result.message;
-                    // Store structured command info for the enhanced failure format
-                    const targetDesc = command === 'BUILD' ? response.entityName :
-                        command === 'EXPLORE' ? (response.direction || 'unexplored') :
-                            response.targetId || 'unknown';
-                    lastFailedCommand = {
-                        command: command.charAt(0) + command.slice(1).toLowerCase(),
-                        target: targetDesc,
-                        entityId: actorId
-                    };
-                    lastActionResult = null;
-                    continue;
-                }
-                lastFailedCommand = null;
-                // Feed the outcome back to the LLM: completed, partial, or the failure reason
-                lastActionResult = `[${actionOutcome.result.status}] ${actionOutcome.result.message}`;
-                lastResponseError = null;
-
-                // Action successfully executed: reconcile and render
-                await onActionDone(this.gameState, null, this.describeAction(response));
-                turnResponseLog.push(response);
-            } else if (command === 'CHAT') {
-                if (this.player.orders <= 0) {
-                    lastResponseError = `You have 0 orders remaining. You cannot initiate diplomacy. End your turn with a note.`;
-                    continue;
-                }
-
-                const targetPlayer = this.gameState.players.find(p =>
-                    String(p.id) === String(response.targetPlayerId) ||
-                    p.name.toLowerCase() === String(response.targetPlayerId || '').toLowerCase()
-                );
-
-                if (!targetPlayer) {
-                    lastResponseError = `Target player not found: "${response.targetPlayerId}". Check opponent list for valid IDs or names.`;
-                    continue;
-                }
-
-                if (targetPlayer.id === this.player.id) {
-                    lastResponseError = `Cannot initiate diplomacy with yourself.`;
-                    continue;
-                }
-
-                // Initiating chat costs 1 order
-                this.player.orders -= 1;
-                this.player.addHistoryEntry(this.gameState.currentRound, {
-                    category: 'action',
-                    details: `Initiated diplomatic chat with ${targetPlayer.name} (costs 1 order)`
-                });
-
-                console.log(`[Harness] ${this.player.name} initiated diplomatic chat with ${targetPlayer.name}`);
-                await this.chat(this.player, targetPlayer, response.message || response.thoughtProcess);
-
-                await onActionDone(this.gameState, null, `Chat with ${targetPlayer.name}`);
-                lastActionResult = `[completed] Concluded diplomatic session with ${targetPlayer.name}`;
-                lastResponseError = null;
-                turnResponseLog.push(response);
-            } else if (command === 'END_TURN') {
-                this.player.addHistoryEntry(this.gameState.currentRound, { category: 'note', details: response.note });
-                return;
-            } else {
-                lastResponseError = `Unknown command: "${response.command}". Respond with exactly one command field: ATTACK (attackerId + targetId), REPAIR (repairerId + targetId), BUILD (builderId + entityName), EXPLORE (explorerId + optional direction), CHAT (targetPlayerId + optional message), or END_TURN (note).`;
-                continue;
-            }
-        }
-    }
-
-    /**
-     * Returns the cached command system prompt or builds it dynamically if not cached.
-     * The catalog inside it is filtered to relevant entity types, so the cache
-     * is rebuilt when that set changes (new unit trained, new enemy sighted).
-     * @returns {Promise<string>}
-     */
-    async getCommandSystemPrompt() {
-        const key = this.relevantManifestKey();
-        if (!this.cachedCommandSystemPrompt || key !== this.cachedManifestKey) {
-            this.cachedCommandSystemPrompt = await this.buildCommandSystemPrompt(key);
-            this.cachedManifestKey = key;
-        }
-        return this.cachedCommandSystemPrompt;
-    }
-
-    /**
-     * Entity types worth describing in the system prompt catalog: what the
-     * player owns, what those can build or repair (transitively, so units
-     * trained later in the game are covered), and what is currently visible.
-     * Everything else is omitted to keep the per-call prompt small; visible
-     * enemies still get full details inline in the state markdown.
-     * Falls back to the full manifest on any error (safe default).
-     * @returns {string} sorted relevant type names, joined for cache comparison
-     */
-    relevantManifestKey() {
-        try {
-            const manifestEntities = this.gameState.manifestData?.entities || this.gameState.manifestData || [];
-            const manifestList = Array.isArray(manifestEntities) ? manifestEntities : Object.values(manifestEntities);
-            const byName = new Map(manifestList.map(m => [m.name, m]));
-            const relevant = new Set();
-            const addWithOutputs = (name) => {
-                if (!name || relevant.has(name)) return;
-                relevant.add(name);
-                const def = byName.get(name);
-                if (!def) return;
-                for (const b of [...(def.buildables || []), ...(def.repairables || [])]) addWithOutputs(b);
-            };
-            for (const e of this.player.getEntities(this.gameState)) addWithOutputs(e.name);
-            for (const e of this.gameState.entities || []) {
-                if (this.player.isVisible?.(e.q, e.r)) relevant.add(e.name);
-            }
-            return [...relevant].sort().join(',');
-        } catch {
-            return '*';
-        }
-    }
-
-    /**
-     * Builds a structured, hybrid system prompt combining Markdown rules
-     * and stringified JSON manifest data.
-     * @param {string} [manifestKey] relevant type names from relevantManifestKey();
-     *   '*' (or omitted) keeps the full manifest
-     * @returns {Promise<string>} The formatted system prompt string.
-     */
-    async buildCommandSystemPrompt(manifestKey) {
-        const manifestEntities = this.gameState.manifestData?.entities || this.gameState.manifestData || [];
-        const manifestList = Array.isArray(manifestEntities) ? manifestEntities : Object.values(manifestEntities);
-        const filtered = (!manifestKey || manifestKey === '*')
-            ? manifestList
-            : manifestList.filter(m => manifestKey.split(',').includes(m.name));
-        const manifestMd = manifestToMarkdown(filtered);
-        const absScoreToWin = this.gameState.settings?.winCondition?.absoluteScore;
-        const relScoreToWin = this.gameState.settings?.winCondition?.relativeScore;
-
-        const response = await fetch(CONFIG.COMMAND_PROMPT_URL);
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const systemPromptMarkdown = await response.text();
-        return systemPromptMarkdown
-            .replace('{NAME}', this.player.name)
-            .replace('{DESCRIPTION}', this.player.description ? `You are described as: ${this.player.description}` : '')
-            .replace('{ABS_SCORE_TO_WIN}', absScoreToWin)
-            .replace('{REL_SCORE_TO_WIN}', relScoreToWin)
-            .replace('{MANIFEST}', manifestMd);
-    }
-
-    /**
-     * Initiates a chat between two players.
-     * Handles both AI-to-AI background chat (capped at 20 exchanges)
-     * and AI-to-Human interactive chat (opens chat modal overlay).
-     * @param {Player} initiator
-     * @param {Player} receiver
-     * @param {string} [initialMessage]
-     */
-    async chat(initiator, receiver, initialMessage = null) {
+    async chat(initiator, receiver, initialMessage = null, maxExchanges = null) {
         console.log(`[Harness] chat() started between ${initiator.name} and ${receiver.name}`);
 
-        // Case 1: Both players are AI -> background chat loop (invisible to human)
-        if (initiator.isAI && receiver.isAI) {
-            const initiatorHarness = initiator.aiManager;
-            const receiverHarness = receiver.aiManager;
+        // Max back-and-forth exchanges per chat, from controller config (default 6).
+        const maxEx = maxExchanges ?? initiator.controller?.config?.maxChatExchanges ?? 6;
 
+        const initiatorHarness = await initiator.getAiManager();
+        const receiverHarness = await receiver.getAiManager();
+        // Case 1: Both players are AI -> background chat loop (invisible to human)
+        if (initiatorHarness && receiverHarness) {
             let firstMsg = initialMessage;
             if (!firstMsg) {
                 const opening = await initiatorHarness.generateChatReply(receiver, "Open diplomatic dialogue with an initial statement or proposal.");
@@ -322,7 +85,7 @@ export class Harness extends BaseManager {
             let currentSpeaker = receiver;
             let currentHarness = receiverHarness;
             let otherPlayer = initiator;
-            const maxExchanges = 20;
+            const maxExchanges = maxEx;
 
             for (let i = 0; i < maxExchanges; i++) {
                 const reply = await currentHarness.generateChatReply(otherPlayer);
@@ -349,9 +112,9 @@ export class Harness extends BaseManager {
         }
 
         // Case 2: One player is human -> open chat window
-        const aiPlayer = initiator.isAI ? initiator : receiver;
-        const humanPlayer = initiator.isAI ? receiver : initiator;
-        const aiHarness = aiPlayer.aiManager;
+        const aiPlayer = initiatorHarness ? initiator : receiver;
+        const humanPlayer = initiatorHarness ? receiver : initiator;
+        const aiHarness = initiatorHarness || receiverHarness;
 
         if (initiator.isAI) {
             // AI opening statement
@@ -373,6 +136,7 @@ export class Harness extends BaseManager {
      * @param {Player} otherPlayer
      * @returns {Promise<string>}
      */
+
     async buildChatSystemPrompt(otherPlayer) {
         const myScore = this.player.score;
         const otherScore = otherPlayer.score;
@@ -412,6 +176,7 @@ export class Harness extends BaseManager {
      * @param {string} [contextPrompt]
      * @returns {Promise<{ content: string, ended: boolean }>}
      */
+
     async generateChatReply(otherPlayer, contextPrompt = null) {
         const client = this.getLLMClient();
         const systemPrompt = await this.buildChatSystemPrompt(otherPlayer);
@@ -461,6 +226,7 @@ export class Harness extends BaseManager {
      * Summarizes the diplomatic conversation and saves a note to player history using the single client.
      * @param {Player} otherPlayer
      */
+
     async summarizeChatAndAddNote(otherPlayer) {
         const history = this.gameState.getChatHistory(this.player, otherPlayer);
         if (!history || history.length === 0) return;
@@ -691,15 +457,7 @@ export class Harness extends BaseManager {
      * "Attack red_knight_1 with knight_1", "Explore N with scout_1".
      * Each response carries an explicit command field (see response.schema.json).
      */
-    describeAction(r) {
-        const cmd = String(r.command || '').toUpperCase();
-        if (cmd === 'ATTACK') return `Attack ${r.targetId || 'unknown'} with ${r.attackerId || 'unknown'}`;
-        if (cmd === 'REPAIR') return `Repair ${r.targetId || 'unknown'} with ${r.repairerId || 'unknown'}`;
-        if (cmd === 'BUILD') return `Build ${r.entityName || 'unknown'} with ${r.builderId || 'unknown'}`;
-        if (cmd === 'EXPLORE') return `Explore ${r.direction || 'unexplored'} with ${r.explorerId || 'unknown'}`;
-        if (cmd === 'CHAT') return `Chat with ${r.targetPlayerId || 'unknown'}`;
-        if (cmd === 'END_TURN') return `End turn`;
-        return `Unknown action`;
-    }
 
 }
+
+export default LlmBaseManager;
