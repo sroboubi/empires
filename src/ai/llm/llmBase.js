@@ -19,28 +19,24 @@ export class LlmBaseManager extends BaseManager {
 
     /**
      * Retrieves or instantiates the single LLMClient for this AI player.
-     * Per-controller config (player.controller.config, see definitions/ai.json)
-     * takes precedence over the global settings.llm; ai.json baseConfig values
-     * are the fallback chain's middle link via settings.
-     * The setup UI (Phase 23) resolves provider keys to baseUrl/apiKey.
+     * All client settings come from the controller config (see
+     * definitions/ai.json) — there is no global fallback. The setup UI
+     * (Phase 23) resolves provider keys to baseUrl/apiKey.
      * @returns {LLMClient}
      */
 
     getLLMClient() {
         if (!this.llmClient) {
             const cc = this.player.controller?.config || {};
-            const settingsLlm = this.gameState.settings?.llm || {};
             const provider = cc.provider || '';
             const baseUrl = cc.baseUrl
-                || (typeof provider === 'string' && /^https?:\/\//.test(provider) ? provider : null)
-                || settingsLlm.baseUrl;
-            const model = cc.model || settingsLlm.orderedModels;
+                || (typeof provider === 'string' && /^https?:\/\//.test(provider) ? provider : null);
             this.llmClient = new LLMClient({
                 baseUrl,
-                apiKey: cc.apiKey || settingsLlm.apiKey,
-                orderedModels: model,
-                timeoutMs: cc.timeoutMs ?? settingsLlm.timeoutMs ?? 30000,
-                callDelayMs: cc.callDelayMs ?? settingsLlm.callDelayMs,
+                apiKey: cc.apiKey,
+                orderedModels: cc.model,
+                timeoutMs: cc.timeoutMs ?? 30000,
+                callDelayMs: cc.callDelayMs ?? 0,
                 generationConfig: {
                     temperature: 0.1,
                     maxOutputTokens: 8000,
