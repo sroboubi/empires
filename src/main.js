@@ -2108,7 +2108,7 @@ export async function closeChatModal() {
   const { humanPlayer, aiPlayer, resolvePromise } = currentChatSession;
   if (aiPlayer && humanPlayer) {
     // Requirement 7: When human exits chat, allow the AI player to add a note to summarize the chat
-    const mgr = await aiPlayer.ensureAiManager();
+    const mgr = await aiPlayer.getAiManager();
     if (mgr) await mgr.summarizeChatAndAddNote(humanPlayer);
   }
 
@@ -2152,23 +2152,25 @@ export async function sendChatMessage() {
   `;
 
   try {
-    const mgr = await aiPlayer.ensureAiManager();
-    const reply = await mgr.generateChatReply(humanPlayer);
+    const mgr = await aiPlayer.getAiManager();
+    if (mgr) {
+      const reply = await mgr.generateChatReply(humanPlayer);
 
-    // Add AI message to gameState
-    gameState.addChatMessage(aiPlayer, humanPlayer, reply.content);
-    renderChatMessages();
+      // Add AI message to gameState
+      gameState.addChatMessage(aiPlayer, humanPlayer, reply.content);
+      renderChatMessages();
 
-    if (reply.ended) {
-      // Summary note is added by closeChatModal() when the human closes the
-      // modal — summarizing here too would double the note and the LLM call.
-      statusIndicator.innerHTML = `<span style="color: #f1c40f;">[ ${aiPlayer.name} has concluded the negotiations. ]</span>`;
-      updatePlayersUI();
-    } else {
-      statusIndicator.innerHTML = '';
-      input.disabled = false;
-      sendBtn.disabled = false;
-      input.focus();
+      if (reply.ended) {
+        // Summary note is added by closeChatModal() when the human closes the
+        // modal — summarizing here too would double the note and the LLM call.
+        statusIndicator.innerHTML = `<span style="color: #f1c40f;">[ ${aiPlayer.name} has concluded the negotiations. ]</span>`;
+        updatePlayersUI();
+      } else {
+        statusIndicator.innerHTML = '';
+        input.disabled = false;
+        sendBtn.disabled = false;
+        input.focus();
+      }
     }
   } catch (err) {
     console.error('Error generating AI chat reply:', err);

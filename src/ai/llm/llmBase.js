@@ -15,7 +15,7 @@ export class LlmBaseManager extends BaseManager {
     constructor(player, gameState, controller) {
         super(player, gameState, controller);
         this.llmClient = null;
-            }
+    }
 
     /**
      * Retrieves or instantiates the single LLMClient for this AI player.
@@ -47,11 +47,10 @@ export class LlmBaseManager extends BaseManager {
     async chat(initiator, receiver, initialMessage = null) {
         console.log(`[Harness] chat() started between ${initiator.name} and ${receiver.name}`);
 
+        const initiatorHarness = await initiator.getAiManager();
+        const receiverHarness = await receiver.getAiManager();
         // Case 1: Both players are AI -> background chat loop (invisible to human)
-        if (initiator.isAI && receiver.isAI) {
-            const initiatorHarness = await initiator.ensureAiManager();
-            const receiverHarness = await receiver.ensureAiManager();
-
+        if (initiatorHarness && receiverHarness) {
             let firstMsg = initialMessage;
             if (!firstMsg) {
                 const opening = await initiatorHarness.generateChatReply(receiver, "Open diplomatic dialogue with an initial statement or proposal.");
@@ -89,9 +88,9 @@ export class LlmBaseManager extends BaseManager {
         }
 
         // Case 2: One player is human -> open chat window
-        const aiPlayer = initiator.isAI ? initiator : receiver;
-        const humanPlayer = initiator.isAI ? receiver : initiator;
-        const aiHarness = aiPlayer.aiManager;
+        const aiPlayer = initiatorHarness ? initiator : receiver;
+        const humanPlayer = initiatorHarness ? receiver : initiator;
+        const aiHarness = initiatorHarness || receiverHarness;
 
         if (initiator.isAI) {
             // AI opening statement

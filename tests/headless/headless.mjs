@@ -130,8 +130,8 @@ async function main() {
     // back into the resume dir itself is the whole point, so it is
     // exempt.)
     if (opts.checkpointDir &&
-        path.resolve(checkpointDir) !== path.resolve(path.dirname(resumePath)) &&
-        existsSync(path.join(checkpointDir, CHECKPOINT_FILE))) {
+      path.resolve(checkpointDir) !== path.resolve(path.dirname(resumePath)) &&
+      existsSync(path.join(checkpointDir, CHECKPOINT_FILE))) {
       throw new Error(`refusing resume: --checkpoint-dir ${checkpointDir} already holds a checkpoint from another run — resume without --checkpoint-dir to keep checkpointing into the resume dir`);
     }
   }
@@ -199,11 +199,11 @@ async function main() {
   if (cfg.barbarians) console.log(`[headless] Barbarians enabled`);
   if (cfg.llm?.orderedModels?.length) console.log(`[headless] LLM enabled: ${cfg.llm.orderedModels.join(', ')}`);
 
-  // AI managers are created lazily by Player.ensureAiManager() from each
+  // AI managers are created lazily by Player.getAiManager() from each
   // player's controller URL (see src/ai/managers.js) — no manual swapping
   // needed here. Eagerly resolve now so a bad controller URL fails fast.
   for (const p of gameState.players) {
-    if (p.controller) await p.ensureAiManager();
+    if (p.controller) await p.getAiManager();
   }
 
   assert(gameState.players.length === players.length, `expected ${players.length} players`);
@@ -228,7 +228,7 @@ async function main() {
       // then the AI turn (awaited). Errors are logged in step() and
       // rethrown here for the failure count.
       try {
-        await player.step(() => {});
+        await player.step(() => { });
       } catch (err) {
         console.error(`  ERROR in ${player.name} AI: ${err.message}`);
         failures++;
