@@ -266,3 +266,11 @@ Implement the game configuration loading system using the provided JSON architec
 5. When an AI player wants to chat with the human using the CHAT command, then follow the same procedure and bring up the chat window. 
 6. When an AI player wants to chat with another AI player using the CHAT command, allow them to chat in the background as part of the initiators turn. The human can not see the content.
 7. In all cases, when an AI player finishes chat either by the AI player triggering a chat termination, or by the human exiting the chat, allow the AI player to add a note to it's history to summarize the chat and any information it needs to remember.
+
+## Task: Phase 23 - AI selection ##
+
+1. replace game setup -> ai config with input fields to enter a key for each provider in ai.json (key is optiona, e.g. local doesn't need it)
+2. replace AI checkbox in player setup with dropdown selector to pick either "human" or a controller from ai.json.
+3. if a human is selected then the name field should be a text input (as current implementation), if an AI controller is selected change it to a dropdown selecting from leaders.json.
+4. on hover over of the leader, show the description/focus.
+5. For AI players, combine the leader info to the selected controller to set player.controller.
