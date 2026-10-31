@@ -11,22 +11,20 @@
       "id": 2,
       "name": "French Empire",
       "color": "#3399ff",
-      "description": "Likes to speak with an accent",
       "controller": {
-        "url": "./ai/standard/smartManager.js",        
-        "personality": "defensive",
-        "strategy": "economic focused"
+        "url": "./ai/standard/smartManager.js",
+        "description": "Likes to speak with an accent. A cautious leader who favors diplomacy and defense over rash attacks.",
+        "focus": ["diplomacy", "defense", "exploration"]
       }
     },
     {
       "id": 3,
       "name": "German Empire",
       "color": "#ffcc00",
-      "description": "Militaristic expansionist empire",
       "controller": {
-        "url": "./ai/llm/json/harness.js",        
-        "personality": "aggressive",
-        "strategy": "military focused"
+        "url": "./ai/llm/json/harness.js",
+        "description": "A militaristic expansionist who favors aggressive attacks and rapid territorial growth.",
+        "focus": ["military", "expansion", "exploration"]
       }
     }
   ],

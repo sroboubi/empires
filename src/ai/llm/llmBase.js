@@ -53,8 +53,8 @@ export class LlmBaseManager extends BaseManager {
 
     /**
      * Builds the leader-persona block for the system prompt from the
-     * controller (leader info combined in per Phase 23: description, focus,
-     * personality, strategy), falling back to the player's own description.
+     * controller (leader info combined in per Phase 23: description and
+     * focus), falling back to the player's own description.
      * @returns {string}
      */
     personaBlock() {
@@ -62,8 +62,6 @@ export class LlmBaseManager extends BaseManager {
         const parts = [];
         const desc = c.description || this.player.description;
         if (desc) parts.push(`You are described as: ${desc}`);
-        if (c.personality) parts.push(`Your personality: ${c.personality}.`);
-        if (c.strategy) parts.push(`Your strategy: ${c.strategy}.`);
         if (Array.isArray(c.focus) && c.focus.length) {
             parts.push(`Your strategic focus: ${c.focus.join(', ')}.`);
         }
