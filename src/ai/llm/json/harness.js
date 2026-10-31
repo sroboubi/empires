@@ -265,7 +265,7 @@ export class JsonHarness extends LlmBaseManager {
         const systemPromptMarkdown = await response.text();
         return systemPromptMarkdown
             .replace('{NAME}', this.player.name)
-            .replace('{DESCRIPTION}', this.player.description ? `You are described as: ${this.player.description}` : '')
+            .replace('{DESCRIPTION}', this.personaBlock())
             .replace('{ABS_SCORE_TO_WIN}', absScoreToWin)
             .replace('{REL_SCORE_TO_WIN}', relScoreToWin)
             .replace('{MANIFEST}', manifestMd);

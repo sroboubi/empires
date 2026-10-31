@@ -19,17 +19,28 @@ export class LlmBaseManager extends BaseManager {
 
     /**
      * Retrieves or instantiates the single LLMClient for this AI player.
+     * Per-controller config (player.controller.config, see definitions/ai.json)
+     * takes precedence over the global settings.llm; ai.json baseConfig values
+     * are the fallback chain's middle link via settings.
+     * The setup UI (Phase 23) resolves provider keys to baseUrl/apiKey.
      * @returns {LLMClient}
      */
 
     getLLMClient() {
         if (!this.llmClient) {
+            const cc = this.player.controller?.config || {};
+            const settingsLlm = this.gameState.settings?.llm || {};
+            const provider = cc.provider || '';
+            const baseUrl = cc.baseUrl
+                || (typeof provider === 'string' && /^https?:\/\//.test(provider) ? provider : null)
+                || settingsLlm.baseUrl;
+            const model = cc.model || settingsLlm.orderedModels;
             this.llmClient = new LLMClient({
-                baseUrl: this.gameState.settings?.llm?.baseUrl,
-                apiKey: this.gameState.settings?.llm?.apiKey,
-                orderedModels: this.gameState.settings?.llm?.orderedModels,
-                timeoutMs: this.gameState.settings?.llm?.timeoutMs ?? 30000,
-                callDelayMs: this.gameState.settings?.llm?.callDelayMs,
+                baseUrl,
+                apiKey: cc.apiKey || settingsLlm.apiKey,
+                orderedModels: model,
+                timeoutMs: cc.timeoutMs ?? settingsLlm.timeoutMs ?? 30000,
+                callDelayMs: cc.callDelayMs ?? settingsLlm.callDelayMs,
                 generationConfig: {
                     temperature: 0.1,
                     maxOutputTokens: 8000,
@@ -38,6 +49,25 @@ export class LlmBaseManager extends BaseManager {
             });
         }
         return this.llmClient;
+    }
+
+    /**
+     * Builds the leader-persona block for the system prompt from the
+     * controller (leader info combined in per Phase 23: description, focus,
+     * personality, strategy), falling back to the player's own description.
+     * @returns {string}
+     */
+    personaBlock() {
+        const c = this.player.controller || {};
+        const parts = [];
+        const desc = c.description || this.player.description;
+        if (desc) parts.push(`You are described as: ${desc}`);
+        if (c.personality) parts.push(`Your personality: ${c.personality}.`);
+        if (c.strategy) parts.push(`Your strategy: ${c.strategy}.`);
+        if (Array.isArray(c.focus) && c.focus.length) {
+            parts.push(`Your strategic focus: ${c.focus.join(', ')}.`);
+        }
+        return parts.join('\n');
     }
 
     /**
