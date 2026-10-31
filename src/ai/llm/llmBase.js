@@ -65,8 +65,11 @@ export class LlmBaseManager extends BaseManager {
      * Processes a player's turn by summarizing the game state and interacting with the AI controller.     
      */
 
-    async chat(initiator, receiver, initialMessage = null) {
+    async chat(initiator, receiver, initialMessage = null, maxExchanges = null) {
         console.log(`[Harness] chat() started between ${initiator.name} and ${receiver.name}`);
+
+        // Max back-and-forth exchanges per chat, from controller config (default 6).
+        const maxEx = maxExchanges ?? initiator.controller?.config?.maxChatExchanges ?? 6;
 
         const initiatorHarness = await initiator.getAiManager();
         const receiverHarness = await receiver.getAiManager();
@@ -82,7 +85,7 @@ export class LlmBaseManager extends BaseManager {
             let currentSpeaker = receiver;
             let currentHarness = receiverHarness;
             let otherPlayer = initiator;
-            const maxExchanges = 20;
+            const maxExchanges = maxEx;
 
             for (let i = 0; i < maxExchanges; i++) {
                 const reply = await currentHarness.generateChatReply(otherPlayer);
