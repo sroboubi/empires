@@ -16,23 +16,6 @@ export class MenuHarness extends LlmBaseManager {
         this.cachedMenuSystemPrompt = null;
     }
 
-    /** Orders that must be spent on non-chat actions before chat is allowed again. */
-    chatCooldownRemaining() {
-        return this.player._chatCooldownOrders ?? 0;
-    }
-
-    recordChat() {
-        const cooldown = this.player.controller?.config?.chatCooldownOrders ?? 2;
-        this.player._chatCooldownOrders = cooldown;
-    }
-
-    /** Call after any non-chat action that spent orders. */
-    tickChatCooldown(ordersUsed) {
-        if ((this.player._chatCooldownOrders ?? 0) > 0 && ordersUsed > 0) {
-            this.player._chatCooldownOrders = Math.max(0, this.player._chatCooldownOrders - ordersUsed);
-        }
-    }
-
     async getMenuSystemPrompt() {
         if (this.cachedMenuSystemPrompt) return this.cachedMenuSystemPrompt;
         const absScoreToWin = this.gameState.settings?.winCondition?.absoluteScore;
@@ -44,7 +27,7 @@ export class MenuHarness extends LlmBaseManager {
         const md = await response.text();
         this.cachedMenuSystemPrompt = md
             .replace('{NAME}', this.player.name)
-            .replace('{DESCRIPTION}', this.personaBlock())
+            .replace('{DESCRIPTION}', this.player.description ? `You are described as: ${this.player.description}` : '')
             .replace('{ABS_SCORE_TO_WIN}', absScoreToWin)
             .replace('{REL_SCORE_TO_WIN}', relScoreToWin);
         return this.cachedMenuSystemPrompt;
@@ -60,7 +43,7 @@ export class MenuHarness extends LlmBaseManager {
     async processTurn() {
         const client = this.getLLMClient();
         const menuSystemPrompt = await this.getMenuSystemPrompt();
-        const menuCfg = this.player.controller?.config || {};
+        const menuCfg = this.gameState.settings?.llm?.menu || {};
 
         let attempts = 4; // Safeguard against infinite loops
         let lastResponseError = null;
@@ -74,14 +57,7 @@ export class MenuHarness extends LlmBaseManager {
             const manifestList = Array.isArray(manifestEntities) ? manifestEntities : Object.values(manifestEntities);
             const stateMd = serializeStateToMarkdown(this.summarizeGameState(), manifestList);
             // Rebuild the menu every iteration: actions execute and the state changes.
-            let { options } = buildMenu(this.gameState, this.player, menuCfg);
-            // Harness-only chat cooldown (in orders): after chatting, the next N
-            // orders must go to non-chat actions. Filter chat options while the
-            // cooldown is active, then renumber so options stay dense.
-            if (this.chatCooldownRemaining() > 0) {
-                options = options.filter(opt => opt.action?.verb !== 'chat');
-                options.forEach((opt, i) => { opt.n = i + 1; });
-            }
+            const { options } = buildMenu(this.gameState, this.player, menuCfg);
             const terrainMd = summarizeTerrain(this.gameState, this.player);
             let userContent = renderMenuPrompt(stateMd, options);
             if (terrainMd) userContent += '\n\n' + terrainMd;
@@ -102,11 +78,7 @@ export class MenuHarness extends LlmBaseManager {
                     turnResponseLog.map((l, i) => `${i + 1}. ${l}`).join('\n');
             }
 
-            console.debug("system prompt:", menuSystemPrompt);
-            console.debug("user content:", userContent);
-
             const rawResponse = await client.generate(userContent, menuSystemPrompt, { responseSchema: menuResponseSchema });
-            console.debug("response:", rawResponse);
             if (!rawResponse) {
                 console.error(`Failed to process menu turn for player ${this.player.name}: No response received.`);
                 return;
@@ -144,7 +116,6 @@ export class MenuHarness extends LlmBaseManager {
                     details: `Initiated diplomatic chat with ${targetPlayer.name} (costs 1 order)`
                 });
                 console.log(`[Harness] ${this.player.name} initiated diplomatic chat with ${targetPlayer.name}`);
-                this.recordChat();
                 await this.chat(this.player, targetPlayer, thoughtProcess || null);
                 await onActionDone(this.gameState, null, `Chat with ${targetPlayer.name}`);
                 lastActionResult = `[completed] Concluded diplomatic session with ${targetPlayer.name}`;
@@ -160,8 +131,6 @@ export class MenuHarness extends LlmBaseManager {
                 lastFailedLabel = label;
                 continue;
             }
-            // Non-chat action spent orders: tick down the chat cooldown.
-            this.tickChatCooldown(outcome.ordersUsed);
             lastFailedLabel = null;
             lastActionResult = `[${outcome.result.status}] ${outcome.result.message}`;
             lastResponseError = null;

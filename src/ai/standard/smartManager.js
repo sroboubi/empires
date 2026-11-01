@@ -685,4 +685,3 @@ export class SmartManager extends BaseManager {
     }
 }
 
-export default SmartManager;

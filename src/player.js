@@ -1,4 +1,6 @@
 import { animateToTimeOfDay } from "./renderer.js";
+import { createAiManager } from "./ai/managers.js";
+import { CONFIG } from './config.js';
 
 const turnHours = { start: 7, end: 17 }
 const orderToResourceConversionRate = 3;
@@ -47,9 +49,16 @@ export class Player {
     // Each entry: { round, timestamp, category, entityName, entityId, details }
     this.history = new Map();
 
+    // Persistent AI controller manager instance (skip during replay).
+    // Created lazily via ensureAiManager(): player.controller holds a URL
+    // to a BaseManager implementation (see src/ai/managers.js); null means
+    // a human player.
+    this.aiManager = null;
+    this._aiManagerPromise = null;
+    this._isReplay = isReplay;
     // In replay mode we don't instantiate AI managers, but we still need to
     // know whether this player was AI-controlled for UI labelling.
-    this.isReplayAI = isReplay;
+    this._isReplayAI = isReplay && !!this.controller;
   }
 
   /**
@@ -57,15 +66,16 @@ export class Player {
    * player.controller to a BaseManager implementation. Returns null for
    * human players and replays.
    */
-  async getAiManager() {
-    if (this.aiManager) return this.aiManager;
-    if (!this.controller?.url || this.isReplayAI) return null;
-    const module = await import(this.controller.url);    
-    const ManagerClass = module.default;
-    if (!ManagerClass) {
-      throw new Error(`Default Class not found in module ${this.controller.url}`);
+  async ensureAiManager() {
+    if (!this.controller || this._isReplay) return null;
+    if (!this.aiManager) {
+      if (!this._aiManagerPromise) {
+        this._aiManagerPromise = createAiManager(this, this.gameState, this.controller)
+          .then(m => { this.aiManager = m; return m; })
+          .catch(err => { this._aiManagerPromise = null; throw err; });
+      }
+      await this._aiManagerPromise;
     }
-    this.aiManager = new ManagerClass(this, this.gameState, this.controller);
     return this.aiManager;
   }
 
@@ -74,7 +84,7 @@ export class Player {
    * @returns {boolean}
    */
   get isAI() {
-    return !!this.controller;
+    return (this.aiManager !== null && this.aiManager !== undefined) || this._isReplayAI === true;
   }
 
   /**
@@ -170,9 +180,12 @@ export class Player {
    * never imports nextTurn() from main.js (that import is what forced
    * headless harnesses to bypass step() entirely). The driver passes
    * its continuation as onTurnEnd: the browser passes nextTurn, and
-   * harnesses that drive turns explicitly pass a no-op. AI errors are 
-   * logged here and then rethrown, so the awaiting driver can count them; 
-   * the turn still advances via the finally callback.
+   * harnesses that drive turns explicitly pass a no-op. The AI turn
+   * runs only when a continuation is provided, so setup paths that
+   * pass nothing get the synchronous bookkeeping only, with no
+   * background AI turn. AI errors are logged here and then rethrown,
+   * so the awaiting driver can count them; the turn still advances
+   * via the finally callback.
    */
   async step(onTurnEnd) {
     this.refillOrders();
@@ -184,17 +197,17 @@ export class Player {
     this.updateVisibility();
     this.recalculateScore();
 
-    const aiManager = await this.getAiManager();
-    if (aiManager) {
+    if (this.controller) {
+      await this.ensureAiManager();
+    }
+    if (this.aiManager && typeof onTurnEnd === 'function') {
       try {
-        await aiManager.processTurn();
+        await this.aiManager.processTurn();
       } catch (err) {
         console.error(`Error during AI turn for player ${this.name}:`, err);
         throw err;
       } finally {
-        if (typeof onTurnEnd === 'function') {
-          onTurnEnd();
-        }
+        onTurnEnd();
       }
     }
   }

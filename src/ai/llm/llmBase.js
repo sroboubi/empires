@@ -15,25 +15,21 @@ export class LlmBaseManager extends BaseManager {
     constructor(player, gameState, controller) {
         super(player, gameState, controller);
         this.llmClient = null;
-    }
+            }
 
     /**
      * Retrieves or instantiates the single LLMClient for this AI player.
-     * All client settings come from the controller config (see
-     * definitions/ai.json) — there is no global fallback. The setup UI
-     * (Phase 23) resolves provider keys to baseUrl/apiKey.
      * @returns {LLMClient}
      */
 
     getLLMClient() {
         if (!this.llmClient) {
-            const cc = this.player.controller?.config || {};
             this.llmClient = new LLMClient({
-                baseUrl: cc.baseUrl,
-                apiKey: cc.apiKey,
-                orderedModels: cc.model,
-                timeoutMs: cc.timeoutMs ?? 30000,
-                callDelayMs: cc.callDelayMs ?? 0,
+                baseUrl: this.gameState.settings?.llm?.baseUrl,
+                apiKey: this.gameState.settings?.llm?.apiKey,
+                orderedModels: this.gameState.settings?.llm?.orderedModels,
+                timeoutMs: this.gameState.settings?.llm?.timeoutMs ?? 30000,
+                callDelayMs: this.gameState.settings?.llm?.callDelayMs,
                 generationConfig: {
                     temperature: 0.1,
                     maxOutputTokens: 8000,
@@ -45,36 +41,17 @@ export class LlmBaseManager extends BaseManager {
     }
 
     /**
-     * Builds the leader-persona block for the system prompt from the
-     * controller (leader info combined in per Phase 23: description and
-     * focus), falling back to the player's own description.
-     * @returns {string}
-     */
-    personaBlock() {
-        const c = this.player.controller || {};
-        const parts = [];
-        const desc = c.description || this.player.description;
-        if (desc) parts.push(`You are described as: ${desc}`);
-        if (Array.isArray(c.focus) && c.focus.length) {
-            parts.push(`Your strategic focus: ${c.focus.join(', ')}.`);
-        }
-        return parts.join('\n');
-    }
-
-    /**
      * Processes a player's turn by summarizing the game state and interacting with the AI controller.     
      */
 
-    async chat(initiator, receiver, initialMessage = null, maxExchanges = null) {
+    async chat(initiator, receiver, initialMessage = null) {
         console.log(`[Harness] chat() started between ${initiator.name} and ${receiver.name}`);
 
-        // Max back-and-forth exchanges per chat, from controller config (default 6).
-        const maxEx = maxExchanges ?? initiator.controller?.config?.maxChatExchanges ?? 6;
-
-        const initiatorHarness = await initiator.getAiManager();
-        const receiverHarness = await receiver.getAiManager();
         // Case 1: Both players are AI -> background chat loop (invisible to human)
-        if (initiatorHarness && receiverHarness) {
+        if (initiator.isAI && receiver.isAI) {
+            const initiatorHarness = await initiator.ensureAiManager();
+            const receiverHarness = await receiver.ensureAiManager();
+
             let firstMsg = initialMessage;
             if (!firstMsg) {
                 const opening = await initiatorHarness.generateChatReply(receiver, "Open diplomatic dialogue with an initial statement or proposal.");
@@ -85,7 +62,7 @@ export class LlmBaseManager extends BaseManager {
             let currentSpeaker = receiver;
             let currentHarness = receiverHarness;
             let otherPlayer = initiator;
-            const maxExchanges = maxEx;
+            const maxExchanges = 20;
 
             for (let i = 0; i < maxExchanges; i++) {
                 const reply = await currentHarness.generateChatReply(otherPlayer);
@@ -112,9 +89,9 @@ export class LlmBaseManager extends BaseManager {
         }
 
         // Case 2: One player is human -> open chat window
-        const aiPlayer = initiatorHarness ? initiator : receiver;
-        const humanPlayer = initiatorHarness ? receiver : initiator;
-        const aiHarness = initiatorHarness || receiverHarness;
+        const aiPlayer = initiator.isAI ? initiator : receiver;
+        const humanPlayer = initiator.isAI ? receiver : initiator;
+        const aiHarness = aiPlayer.aiManager;
 
         if (initiator.isAI) {
             // AI opening statement

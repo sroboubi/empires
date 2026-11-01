@@ -68,7 +68,6 @@
   "llm": {
     "callDelayMs": 0,
     "timeoutMs": 30000,
-    "interface": "json",
     "menu": {
       "attackTargets": 5,
       "attackOrders": 3,
