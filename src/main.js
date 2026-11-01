@@ -754,7 +754,7 @@ function setupAiConfigUI() {
     const input = document.createElement('input');
     input.type = 'password';
     input.className = 'form-input';
-    input.placeholder = name === 'local' ? 'No key needed' : `API key for ${name}`;
+    input.placeholder = `API key for ${name} (optional)`;
     input.value = setupProviderKeys[name] || '';
     input.style.flex = '1';
     input.addEventListener('input', (e) => {
