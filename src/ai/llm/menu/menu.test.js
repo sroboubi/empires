@@ -6,6 +6,11 @@
  * filtering, the 0-orders collapse, and response parsing — without a browser.
  */
 import { buildMenu, parseMenuResponse, renderMenuPrompt } from './menu.js';
+import { initAI } from '../../deps.js';
+import { HexGrid, DIRECTIONS_8 } from '../../../hexGrid.js';
+
+// The menu module reads HexGrid/DIRECTIONS_8 from the AI dependency registry.
+initAI({ HexGrid, DIRECTIONS_8 });
 
 let passed = 0, failed = 0;
 function test(name, fn) {

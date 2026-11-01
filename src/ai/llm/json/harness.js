@@ -5,13 +5,13 @@
  */
 import { LlmBaseManager } from '../llmBase.js';
 import responseSchema from './response.schema.json' with { type: 'json' };
-import { attack, support, build, explore, onActionDone } from '../../utils.js';
+import { attack, support, build, explore, onActionDone } from '../../actions.js';
 import { manifestToMarkdown, serializeStateToMarkdown, summarizeTerrain } from '../markdown.js';
-import { CONFIG } from '../../../config.js';
+import { DEFAULT_PROMPT_URLS } from '../promptUrls.js';
 
 export class JsonHarness extends LlmBaseManager {
-    constructor(player, gameState, controller) {
-        super(player, gameState, controller);
+    constructor(player, gameState, controller, deps = {}) {
+        super(player, gameState, controller, deps);
         this.cachedCommandSystemPrompt = null;
         this.cachedManifestKey = null;
     }
@@ -258,7 +258,8 @@ export class JsonHarness extends LlmBaseManager {
         const absScoreToWin = this.gameState.settings?.winCondition?.absoluteScore;
         const relScoreToWin = this.gameState.settings?.winCondition?.relativeScore;
 
-        const response = await fetch(CONFIG.COMMAND_PROMPT_URL);
+        const promptUrl = this.deps.config?.promptUrls?.command || DEFAULT_PROMPT_URLS.command;
+        const response = await fetch(promptUrl);
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }

@@ -6,14 +6,14 @@
  */
 import { BaseManager } from '../baseManager.js';
 import { LLMClient } from './client.js';
-import { HexGrid } from '../../hexGrid.js';
 import { manifestToMarkdown } from './markdown.js';
-import { findBuildCandidates, isCombatCapable } from '../utils.js';
-import { CONFIG } from '../../config.js';
+import { findBuildCandidates, isCombatCapable } from '../aiUtils.js';
+import { getHexGrid } from '../deps.js';
+import { DEFAULT_PROMPT_URLS } from './promptUrls.js';
 
 export class LlmBaseManager extends BaseManager {
-    constructor(player, gameState, controller) {
-        super(player, gameState, controller);
+    constructor(player, gameState, controller, deps = {}) {
+        super(player, gameState, controller, deps);
         this.llmClient = null;
     }
 
@@ -146,7 +146,8 @@ export class LlmBaseManager extends BaseManager {
             return [...m.entries()].map(([n, c]) => `${c} ${n}`).join(', ') || 'none';
         };
 
-        const response = await fetch(CONFIG.CHAT_PROMPT_URL);
+        const promptUrl = this.deps.config?.promptUrls?.chat || DEFAULT_PROMPT_URLS.chat;
+        const response = await fetch(promptUrl);
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -235,7 +236,8 @@ export class LlmBaseManager extends BaseManager {
         // (closeChatModal awaits this before resolving the chat promise).
         try {
             const recent = history.filter(m => m.round === this.gameState.currentRound).map(m => `${m.sender}: ${m.content}`).join('\n');
-            const response = await fetch(CONFIG.CHAT_SUMMATION_PROMPT_URL);
+            const promptUrl = this.deps.config?.promptUrls?.chatSummation || DEFAULT_PROMPT_URLS.chatSummation;
+            const response = await fetch(promptUrl);
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
@@ -263,6 +265,7 @@ export class LlmBaseManager extends BaseManager {
     }
 
     summarizeGameState() {
+        const HexGrid = this.deps.HexGrid || getHexGrid();
         const opponents = this.player.getOpponents(this.gameState);
         Object.values(opponents).forEach(opp => {
             opp.entities = (opp.entities || []).map(e => this.summarizeEntity(e));
@@ -323,6 +326,7 @@ export class LlmBaseManager extends BaseManager {
     }
 
     summarizeEntity(entity) {
+        const HexGrid = this.deps.HexGrid || getHexGrid();
         const summary = {
             id: entity.id,
             name: entity.name,

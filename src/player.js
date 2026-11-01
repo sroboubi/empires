@@ -1,4 +1,5 @@
 import { animateToTimeOfDay } from "./renderer.js";
+import { createAIDeps } from './aiDeps.js';
 
 const turnHours = { start: 7, end: 17 }
 const orderToResourceConversionRate = 3;
@@ -65,7 +66,7 @@ export class Player {
     if (!ManagerClass) {
       throw new Error(`Default Class not found in module ${this.controller.url}`);
     }
-    this.aiManager = new ManagerClass(this, this.gameState, this.controller);
+    this.aiManager = new ManagerClass(this, this.gameState, this.controller, createAIDeps());
     return this.aiManager;
   }
 

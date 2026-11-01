@@ -7,12 +7,12 @@ import { LlmBaseManager } from '../llmBase.js';
 import menuResponseSchema from './menu.response.schema.json' with { type: 'json' };
 import { buildMenu, executeMenuAction, renderMenuPrompt, parseMenuResponse } from './menu.js';
 import { serializeStateToMarkdown, summarizeTerrain } from '../markdown.js';
-import { onActionDone } from '../../utils.js';
-import { CONFIG } from '../../../config.js';
+import { onActionDone } from '../../actions.js';
+import { DEFAULT_PROMPT_URLS } from '../promptUrls.js';
 
 export class MenuHarness extends LlmBaseManager {
-    constructor(player, gameState, controller) {
-        super(player, gameState, controller);
+    constructor(player, gameState, controller, deps = {}) {
+        super(player, gameState, controller, deps);
         this.cachedMenuSystemPrompt = null;
     }
 
@@ -37,7 +37,8 @@ export class MenuHarness extends LlmBaseManager {
         if (this.cachedMenuSystemPrompt) return this.cachedMenuSystemPrompt;
         const absScoreToWin = this.gameState.settings?.winCondition?.absoluteScore;
         const relScoreToWin = this.gameState.settings?.winCondition?.relativeScore;
-        const response = await fetch(CONFIG.MENU_PROMPT_URL);
+        const promptUrl = this.deps.config?.promptUrls?.menu || DEFAULT_PROMPT_URLS.menu;
+        const response = await fetch(promptUrl);
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }

@@ -4,6 +4,8 @@ import {
     support,
     explore,
     onActionDone,
+} from '../actions.js';
+import {
     aiLog,
     isBuilder,
     isRepairer,
@@ -14,10 +16,15 @@ import {
     getEntitiesByCapability,
     getEntitiesSortedByPower,
     selectCandidateCombatUnits,
-} from '../utils.js';
-import { HexGrid } from '../../hexGrid.js';
-import { camelToTitle } from '../../utils.js';
+} from '../aiUtils.js';
+import { getHexGrid, getAIHooks } from '../deps.js';
 import { BaseManager } from '../baseManager.js';
+
+/** Injected title-casing hook (falls back to the raw name). */
+function camelToTitle(text) {
+    const hook = getAIHooks().camelToTitle;
+    return typeof hook === 'function' ? hook(text) : text;
+}
 
 /**
  * Smart AI Manager
@@ -234,6 +241,7 @@ async function handleCriticalDeficits(player, gameState, manifest, myEntities, e
  * Engages with dedicated military units with extensive diagnostic logging.
  */
 async function handleCombatAndThreats(player, gameState, manifest, myEntities, involvedCells) {
+    const HexGrid = getHexGrid();
     // A. Detect visible opponent entities strictly via player.getOpponents(gameState) (Guideline 19)
     const opponents = player.getOpponents ? player.getOpponents(gameState) : {};
     const visibleOpponents = [];
@@ -602,8 +610,8 @@ async function handleExploration(player, gameState, manifest, myEntities, target
 }
 
 export class SmartManager extends BaseManager {
-    constructor(player, gameState, controller) {
-        super(player, gameState, controller);
+    constructor(player, gameState, controller, deps = {}) {
+        super(player, gameState, controller, deps);
     }
 
     async processTurn() {

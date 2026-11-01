@@ -1,8 +1,5 @@
-import { HexGrid } from '../../hexGrid.js';
-import { attack } from '../utils.js';
-import { onActionDone } from '../utils.js';
-import { reconcileEntities } from '../../renderer.js';
-import Entity from '../../entity.js';
+import { attack, onActionDone } from '../actions.js';
+import { getHexGrid, getAIHooks, initAI } from '../deps.js';
 
 /**
  * Returns all border cells on the hex grid (cells with fewer than 6 neighbors).
@@ -27,7 +24,8 @@ export function getBorderCells(hexGrid) {
  * @returns {Object|null}
  */
 export function findOppositeBorderCell(fromCell, hexGrid, entity = null) {
-  if (!hexGrid || !fromCell) return null;
+  const HexGrid = getHexGrid();
+  if (!hexGrid || !fromCell || !HexGrid) return null;
 
   const targetQ = -fromCell.q;
   const targetR = -fromCell.r;
@@ -63,8 +61,11 @@ export function findOppositeBorderCell(fromCell, hexGrid, entity = null) {
  * @param {GameState} gameState
  * @param {Object} [config] - Barbarian configuration settings containing horde definitions
  */
-export async function manageBarbarians(gameState, config) {
+export async function manageBarbarians(gameState, config, deps = {}) {
   if (!gameState || !gameState.hexGrid || !config) return;
+  initAI(deps);
+  const HexGrid = getHexGrid();
+  const hooks = getAIHooks();
 
   const hordeConfig = config.horde;
   const barbarianUnitNames = new Set(Object.keys(hordeConfig));
@@ -115,7 +116,9 @@ export async function manageBarbarians(gameState, config) {
           }
 
           const meta = gameState.manifestData?.entities?.[unitName];
-          const dummy = new Entity(meta, null, gameState, null);
+          const dummy = typeof hooks.createEntity === 'function'
+            ? hooks.createEntity(meta, null, gameState, null)
+            : null;
 
           const spawnCellIndex = candidateBorderCells.findIndex(cell => {
             if (!dummy || typeof dummy.canStandOn !== 'function') return false;
@@ -234,5 +237,5 @@ export async function manageBarbarians(gameState, config) {
   }
 
   // ensure entities are in the right place after all moves (e.g. in case SHOW_ALL is true)
-  reconcileEntities(gameState);
+  if (typeof hooks.reconcileEntities === 'function') hooks.reconcileEntities(gameState);
 }

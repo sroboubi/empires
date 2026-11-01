@@ -13,16 +13,16 @@
  * unit "Move" action) — the same ones attack() already uses for staging.
  * No engine rules change.
  */
-import { HexGrid, DIRECTIONS_8 } from '../../../hexGrid.js';
+import { getHexGrid, getDirections8 } from '../../deps.js';
+import { attack, support, build, explore, moveAlongPath } from '../../actions.js';
 import {
-    attack, support, build, explore,
-    findWalkablePath, moveAlongPath, findReachableCells,
+    findWalkablePath, findReachableCells,
     isCombatCapable, isDedicatedMilitary, aiLog,
-} from '../../utils.js';
+} from '../../aiUtils.js';
 
 function dist(a, b) {
     const ac = a.cell || a, bc = b.cell || b;
-    return HexGrid.distance(ac, bc);
+    return getHexGrid().distance(ac, bc);
 }
 
 /** Short human-readable entity reference, e.g. "Red swordsman" / "your worker". */
@@ -167,7 +167,7 @@ export function buildMenu(gameState, player, cfg = {}) {
                 push(`Move ${entLabel(unit, player)} towards ${entLabel(t, player)} (${distLabel(d)})`,
                     { verb: 'move', actorId: unit.id, targetId: t.id });
             }
-            for (const dir of DIRECTIONS_8) {
+            for (const dir of getDirections8()) {
                 push(`Move ${entLabel(unit, player)} ${dir}`,
                     { verb: 'move', actorId: unit.id, direction: dir });
             }
@@ -243,9 +243,9 @@ function moveUnitToward(gameState, player, unit, dest) {
 }
 
 /**
- * Execute a menu action. Same {ordersUsed, result} shape as the utils in
- * ../utils.js. Chat and end-turn are handled by the harness (they need the
- * harness's chat flow / history wiring).
+ * Execute a menu action. Same {ordersUsed, result} shape as the actions in
+ * ../../actions.js. Chat and end-turn are handled by the harness (they need
+ * the harness's chat flow / history wiring).
  */
 export function executeMenuAction(gameState, player, action) {
     const fail = (message) => ({ ordersUsed: 0, result: { status: 'failed', message } });
