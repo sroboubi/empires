@@ -397,7 +397,10 @@ function renderSetupPlayers() {
     row.className = 'dynamic-row';
 
     // Phase 23.2: controller dropdown (human or a controller from ai.json).
-    const ctrlKey = controllerKeyFor(p.controller);
+    // The picked key is stored explicitly on the player: several controllers
+    // can share one harness URL, so re-deriving the key from the URL alone
+    // would collapse them to the first match.
+    const ctrlKey = p.controllerKey || controllerKeyFor(p.controller);
     const isAI = ctrlKey !== 'human';
     const ctrlOpts = `<option value="human"${!isAI ? ' selected' : ''}>Human</option>` +
       Object.keys(aiJson?.controllers || {}).map(k =>
@@ -409,15 +412,15 @@ function renderSetupPlayers() {
       const leaderOpts = `<option value="" disabled${!leadersJson.some(l => l.name === p.name) ? ' selected' : ''}>Select leader…</option>` +
         leadersJson.map(l =>
           `<option value="${l.name}"${p.name === l.name ? ' selected' : ''}>${l.name}</option>`).join('');
-      nameField = `<select class="form-input leader-select" style="flex: 1;" title="${leaderTitle(p.name)}">${leaderOpts}</select>`;
+      nameField = `<select name="leader" class="form-input leader-select" style="flex: 1;" title="${leaderTitle(p.name)}">${leaderOpts}</select>`;
     } else {
-      nameField = `<input type="text" class="form-input" value="${p.name}" placeholder="Player Name" style="flex: 1;">`;
+      nameField = `<input name="player-name" type="text" class="form-input" value="${p.name}" placeholder="Player Name" style="flex: 1;">`;
     }
 
     row.innerHTML = `
-      <input type="color" value="${p.color}" title="Choose color">
+      <input name="player-color" type="color" value="${p.color}" title="Choose color">
       ${nameField}
-      <select class="form-input controller-select" style="max-width: 320px;" title="Controller">${ctrlOpts}</select>
+      <select name="controller" class="form-input controller-select" style="max-width: 320px;" title="Controller">${ctrlOpts}</select>
       <button type="button" class="btn btn-danger btn-small" ${setupPlayers.length <= 1 ? 'disabled style="opacity:0.3;cursor:not-allowed;"' : ''}>✕</button>
     `;
 
@@ -445,6 +448,7 @@ function renderSetupPlayers() {
     }
     ctrlSelect.addEventListener('change', (e) => {
       const key = e.target.value;
+      p.controllerKey = key;
       if (key === 'human') {
         p.controller = null;
       } else {
@@ -753,6 +757,7 @@ function setupAiConfigUI() {
     label.textContent = name;
     const input = document.createElement('input');
     input.type = 'password';
+    input.name = `provider-key-${name}`;
     input.className = 'form-input';
     input.placeholder = `API key for ${name} (optional)`;
     input.value = setupProviderKeys[name] || '';
