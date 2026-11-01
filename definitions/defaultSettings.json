@@ -24,7 +24,12 @@
       "controller": {
         "url": "./ai/llm/json/harness.js",
         "description": "A militaristic expansionist who favors aggressive attacks and rapid territorial growth.",
-        "focus": ["military", "expansion", "exploration"]
+        "focus": ["military", "expansion", "exploration"],
+        "config": {
+          "provider": "http://localhost:1234/v1",
+          "model": "google/gemma-4-e4b",
+          "timeoutMs": 30000
+        }
       }
     }
   ],
@@ -73,16 +78,5 @@
     "spawnFrequencyTurns": 5,
     "maxNumber": 20,
     "maxAge": 25
-  },
-  "llm": {
-    "callDelayMs": 0,
-    "timeoutMs": 30000,
-    "menu": {
-      "attackTargets": 5,
-      "attackOrders": 3,
-      "repairTargets": 5,
-      "repairOrders": 3,
-      "moveTargets": 3
-    }
   }
 }

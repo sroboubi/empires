@@ -43,7 +43,7 @@ export class MenuHarness extends LlmBaseManager {
     async processTurn() {
         const client = this.getLLMClient();
         const menuSystemPrompt = await this.getMenuSystemPrompt();
-        const menuCfg = { ...(this.gameState.settings?.llm?.menu || {}), ...(this.player.controller?.config || {}) };
+        const menuCfg = this.player.controller?.config || {};
 
         let attempts = 4; // Safeguard against infinite loops
         let lastResponseError = null;
