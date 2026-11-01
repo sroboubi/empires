@@ -27,7 +27,7 @@ export class MenuHarness extends LlmBaseManager {
         const md = await response.text();
         this.cachedMenuSystemPrompt = md
             .replace('{NAME}', this.player.name)
-            .replace('{DESCRIPTION}', this.player.description ? `You are described as: ${this.player.description}` : '')
+            .replace('{DESCRIPTION}', this.personaBlock())
             .replace('{ABS_SCORE_TO_WIN}', absScoreToWin)
             .replace('{REL_SCORE_TO_WIN}', relScoreToWin);
         return this.cachedMenuSystemPrompt;
@@ -43,7 +43,7 @@ export class MenuHarness extends LlmBaseManager {
     async processTurn() {
         const client = this.getLLMClient();
         const menuSystemPrompt = await this.getMenuSystemPrompt();
-        const menuCfg = this.gameState.settings?.llm?.menu || {};
+        const menuCfg = { ...(this.gameState.settings?.llm?.menu || {}), ...(this.player.controller?.config || {}) };
 
         let attempts = 4; // Safeguard against infinite loops
         let lastResponseError = null;
