@@ -2,19 +2,26 @@
  * BaseManager
  * Abstract base class for AI turn controllers (e.g. SmartManager, Harness).
  * Provides unified interface and access to player and gameState references.
+ *
+ * The optional `helper` is the engine's `AiHelper` instance: the AI module's
+ * only channel to engine features (hex distance, config, renderer callbacks,
+ * etc.). A user-provided manager may ignore it, but the built-in managers rely
+ * on it. It is optional so a custom manager can still be constructed with the
+ * original three arguments.
  */
 export class BaseManager {
     /**
-     * @param {Player} player
-     * @param {GameState} gameState
+     * @param {Player} player    
+     * @param {import('../aiHelper.js').AiHelper} [helper]
      */
-    constructor(player, gameState, controller) {
-        if (!player || !gameState) {
-            throw new Error('BaseManager requires both player and gameState references.');
+    constructor(player, helper) {
+        if (!player || !helper) {
+            throw new Error('BaseManager requires both player and helper references.');
         }
         this.player = player;
-        this.gameState = gameState;
-        this.controller = controller;
+        this.helper = helper;
+        this.gameState = helper.getGameState();
+        this.controller = player.controller;        
     }
 
     /**

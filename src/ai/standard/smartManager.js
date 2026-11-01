@@ -1,28 +1,9 @@
-import {
-    attack,
-    build,
-    support,
-    explore,
-    onActionDone,
-    aiLog,
-    isBuilder,
-    isRepairer,
-    isCombatCapable,
-    isMobile,
-    getCombatPower,
-    isDedicatedMilitary,
-    getEntitiesByCapability,
-    getEntitiesSortedByPower,
-    selectCandidateCombatUnits,
-} from '../utils.js';
-import { HexGrid } from '../../hexGrid.js';
-import { camelToTitle } from '../../utils.js';
 import { BaseManager } from '../baseManager.js';
 
 /**
  * Smart AI Manager
  * Fully dynamic, configuration-driven AI controller for Empires.
- * 
+ *
  * Key Principles (from src/ai/spec.md):
  * 1. Zero hardcoded entity names or magic elevation numbers (derives all types dynamically).
  * 2. Continuous resource deficit prevention with dynamic recursive dependency chain resolution.
@@ -39,8 +20,8 @@ import { BaseManager } from '../baseManager.js';
 /**
  * Evaluates current player resource stocks, incomes, upkeeps, and target thresholds.
  * Hardcodes ONLY "orders" resource filtering per guideline 20.
- * @param {Player} player 
- * @param {GameState} gameState 
+ * @param {Player} player
+ * @param {GameState} gameState
  * @returns {Object}
  */
 function evaluateResources(player, gameState) {
@@ -105,15 +86,16 @@ function evaluateResources(player, gameState) {
 /**
  * Resolves a recursive dependency chain to find an immediate executable build action
  * for a desired target entity.
- * 
- * @param {Player} player 
- * @param {GameState} gameState 
- * @param {string} targetName 
- * @param {Object} manifest 
+ *
+ * @param {Player} player
+ * @param {GameState} gameState
+ * @param {string} targetName
+ * @param {Object} manifest
+ * @param {Object} helper
  * @param {Set<string>} [visited]
  * @returns {{builderEntity: Object, targetName: string, directTarget: string}|null}
  */
-function resolveProductionPath(player, gameState, targetName, manifest, visited = new Set()) {
+function resolveProductionPath(player, gameState, targetName, manifest, helper, visited = new Set()) {
     const targetLower = targetName.toLowerCase();
     if (visited.has(targetLower)) return null;
     visited.add(targetLower);
@@ -133,7 +115,7 @@ function resolveProductionPath(player, gameState, targetName, manifest, visited 
 
     // 1. Direct match: Check if we currently own an active builder of one of these types
     for (const bName of potentialBuilderNames) {
-        const owned = myActiveEntities.find(e => e.name.toLowerCase() === bName.toLowerCase() && isBuilder(e));
+        const owned = myActiveEntities.find(e => e.name.toLowerCase() === bName.toLowerCase() && helper.isBuilder(e));
         if (owned) {
             return {
                 builderEntity: owned,
@@ -145,7 +127,7 @@ function resolveProductionPath(player, gameState, targetName, manifest, visited 
 
     // 2. Recursive match: We don't have the builder, recursively resolve how to produce the builder
     for (const bName of potentialBuilderNames) {
-        const subStep = resolveProductionPath(player, gameState, bName, manifest, visited);
+        const subStep = resolveProductionPath(player, gameState, bName, manifest, helper, visited);
         if (subStep) {
             return {
                 builderEntity: subStep.builderEntity,
@@ -160,8 +142,8 @@ function resolveProductionPath(player, gameState, targetName, manifest, visited 
 
 /**
  * Finds all construct definitions yielding a given resource, ranked by yield efficiency.
- * @param {Object} manifest 
- * @param {string} resKey 
+ * @param {Object} manifest
+ * @param {string} resKey
  * @returns {Array<{name: string, meta: Object, yieldAmt: number, efficiency: number}>}
  */
 function findProducersForResource(manifest, resKey) {
@@ -184,7 +166,7 @@ function findProducersForResource(manifest, resKey) {
  * Fixes negative income or depleted resources. If resources are insufficient for the needed
  * build step, registers the needed amounts into reservedResources so proactive growth doesn't spend them.
  */
-async function handleCriticalDeficits(player, gameState, manifest, myEntities, evalRes, reservedResources, involvedCells) {
+async function handleCriticalDeficits(player, gameState, manifest, myEntities, evalRes, reservedResources, involvedCells, helper) {
     const urgentNeeds = [...evalRes.deficits, ...evalRes.lowStock];
     if (urgentNeeds.length === 0) return false;
 
@@ -192,10 +174,10 @@ async function handleCriticalDeficits(player, gameState, manifest, myEntities, e
         const producers = findProducersForResource(manifest, need.res);
         if (producers.length === 0) continue;
 
-        aiLog(player, 'econ', `Addressing ${need.res} deficit (net: ${need.net}, stock: ${need.stock}/${need.target}). Candidate producers: [${producers.map(p => `${p.name}(+${p.yieldAmt})`).join(', ')}]`);
+        helper.aiLog(player, 'econ', `Addressing ${need.res} deficit (net: ${need.net}, stock: ${need.stock}/${need.target}). Candidate producers: [${producers.map(p => `${p.name}(+${p.yieldAmt})`).join(', ')}]`);
 
         for (const prod of producers) {
-            const step = resolveProductionPath(player, gameState, prod.name, manifest, new Set());
+            const step = resolveProductionPath(player, gameState, prod.name, manifest, helper, new Set());
             if (!step) continue;
 
             const builder = step.builderEntity;
@@ -208,13 +190,13 @@ async function handleCriticalDeficits(player, gameState, manifest, myEntities, e
                 for (const [resKey, amount] of Object.entries(spawnCost)) {
                     reservedResources[resKey] = Math.max(reservedResources[resKey] || 0, amount);
                 }
-                aiLog(player, 'econ', `Deficit resolution step ${target} via ${builder.name} at (${builder.q},${builder.r}) requires ${JSON.stringify(spawnCost)}. Reserving these resources from proactive spending.`);
+                helper.aiLog(player, 'econ', `Deficit resolution step ${target} via ${builder.name} at (${builder.q},${builder.r}) requires ${JSON.stringify(spawnCost)}. Reserving these resources from proactive spending.`);
                 continue;
             }
 
             const startingCell = { q: builder.q, r: builder.r };
-            aiLog(player, 'build', `STABILIZE: Using ${builder.name} at (${builder.q},${builder.r}) to build ${camelToTitle(target)}${step.directTarget !== target ? ` (prerequisite for ${camelToTitle(step.directTarget)})` : ''} to resolve ${need.res} shortage.`);
-            const { ordersUsed } = build(gameState, builder, target);
+            helper.aiLog(player, 'build', `STABILIZE: Using ${builder.name} at (${builder.q},${builder.r}) to build ${helper.camelToTitle(target)}${step.directTarget !== target ? ` (prerequisite for ${helper.camelToTitle(step.directTarget)})` : ''} to resolve ${need.res} shortage.`);
+            const { ordersUsed } = helper.build(gameState, builder, target);
             if (ordersUsed > 0) {
                 involvedCells.push(startingCell, builder.cell);
                 return true;
@@ -233,7 +215,7 @@ async function handleCriticalDeficits(player, gameState, manifest, myEntities, e
  * Detects visible opponents strictly via player.getOpponents(gameState) and attackers in player history.
  * Engages with dedicated military units with extensive diagnostic logging.
  */
-async function handleCombatAndThreats(player, gameState, manifest, myEntities, involvedCells) {
+async function handleCombatAndThreats(player, gameState, manifest, myEntities, involvedCells, helper) {
     // A. Detect visible opponent entities strictly via player.getOpponents(gameState) (Guideline 19)
     const opponents = player.getOpponents ? player.getOpponents(gameState) : {};
     const visibleOpponents = [];
@@ -286,13 +268,13 @@ async function handleCombatAndThreats(player, gameState, manifest, myEntities, i
         return false;
     }
 
-    aiLog(player, 'combat', `Threat Evaluation: ${visibleOpponents.length} visible opponent unit(s) detected via getOpponents(), ${revengeTargets.length} active revenge target(s) from history. Opponents: [${visibleOpponents.map(h => `${h.name}#${h.id.slice(-4)} (${h.owner?.name || 'Enemy'}, HP:${Math.round(h.health)}/${h.maxHealth} at (${h.q},${h.r}))`).join('; ')}]`);
+    helper.aiLog(player, 'combat', `Threat Evaluation: ${visibleOpponents.length} visible opponent unit(s) detected via getOpponents(), ${revengeTargets.length} active revenge target(s) from history. Opponents: [${visibleOpponents.map(h => `${h.name}#${h.id.slice(-4)} (${h.owner?.name || 'Enemy'}, HP:${Math.round(h.health)}/${h.maxHealth} at (${h.q},${h.r}))`).join('; ')}]`);
 
     // C. Identify all military-capable friendly units
-    const combatCapable = getEntitiesByCapability(myEntities, 'combat');
-    const dedicatedMilitary = getEntitiesSortedByPower(getEntitiesByCapability(combatCapable, 'military', manifest), manifest);
+    const combatCapable = helper.getEntitiesByCapability(myEntities, 'combat');
+    const dedicatedMilitary = helper.getEntitiesSortedByPower(helper.getEntitiesByCapability(combatCapable, 'military', manifest), manifest);
 
-    aiLog(player, 'detail', `Combat Readiness: ${dedicatedMilitary.length} dedicated military unit(s) [${dedicatedMilitary.map(m => `${m.name}#${m.id.slice(-4)} (HP:${Math.round(m.health)}, AP:${m.actionPoints}/${m.maxActionPoints} at (${m.q},${m.r}))`).join(', ') || 'None'}], ${combatCapable.length} total combat-capable.`);
+    helper.aiLog(player, 'detail', `Combat Readiness: ${dedicatedMilitary.length} dedicated military unit(s) [${dedicatedMilitary.map(m => `${m.name}#${m.id.slice(-4)} (HP:${Math.round(m.health)}, AP:${m.actionPoints}/${m.maxActionPoints} at (${m.q},${m.r}))`).join(', ') || 'None'}], ${combatCapable.length} total combat-capable.`);
 
     // D. Priority 1: Retaliate against visible revenge targets
     if (revengeTargets.length > 0) {
@@ -300,30 +282,30 @@ async function handleCombatAndThreats(player, gameState, manifest, myEntities, i
         const target = topRevenge.entity;
 
         // Select candidate combat units ordered primarily by proximity to the target (Guideline 15)
-        const candidates = selectCandidateCombatUnits(myEntities, target, manifest);
+        const candidates = helper.selectCandidateCombatUnits(myEntities, target, manifest);
 
         if (candidates.length > 0) {
-            aiLog(player, 'combat', `Retaliation target identified: ${target.name}#${target.id.slice(-4)} (${target.owner?.name || 'Enemy'}) at (${target.q},${target.r}) (Target dealt ${topRevenge.damageDealt.toFixed(0)} damage to us). Candidates by proximity: [${candidates.map(c => `${c.name}#${c.id.slice(-4)} (dist:${HexGrid.distance(c, target)}, AP:${c.actionPoints})`).join(', ')}]`);
+            helper.aiLog(player, 'combat', `Retaliation target identified: ${target.name}#${target.id.slice(-4)} (${target.owner?.name || 'Enemy'}) at (${target.q},${target.r}) (Target dealt ${topRevenge.damageDealt.toFixed(0)} damage to us). Candidates by proximity: [${candidates.map(c => `${c.name}#${c.id.slice(-4)} (dist:${helper.distance(c, target)}, AP:${c.actionPoints})`).join(', ')}]`);
 
             for (const warrior of candidates) {
-                const dist = HexGrid.distance(warrior, target);
+                const dist = helper.distance(warrior, target);
                 if (warrior.actionPoints !== undefined && warrior.actionPoints <= 0) {
-                    aiLog(player, 'detail', `Closer candidate ${warrior.name} at (${warrior.q},${warrior.r}) (dist: ${dist}) ran out of AP (0 remaining). Checking farther units...`);
+                    helper.aiLog(player, 'detail', `Closer candidate ${warrior.name} at (${warrior.q},${warrior.r}) (dist: ${dist}) ran out of AP (0 remaining). Checking farther units...`);
                     continue;
                 }
 
                 const startingCell = { q: warrior.q, r: warrior.r };
-                aiLog(player, 'combat', `Retaliating: Deploying closer unit ${warrior.name} at (${warrior.q},${warrior.r}) (dist: ${dist}, AP: ${warrior.actionPoints}) against revenge target ${target.name} at (${target.q},${target.r}).`);
-                const { ordersUsed } = attack(gameState, warrior, target, player.orders);
+                helper.aiLog(player, 'combat', `Retaliating: Deploying closer unit ${warrior.name} at (${warrior.q},${warrior.r}) (dist: ${dist}, AP: ${warrior.actionPoints}) against revenge target ${target.name} at (${target.q},${target.r}).`);
+                const { ordersUsed } = helper.attack(gameState, warrior, target, player.orders);
                 if (ordersUsed > 0) {
                     const status = target.destroyed || target.health <= 0
                         ? 'TARGET DESTROYED'
                         : `Target HP: ${Math.round(target.health)}/${target.maxHealth}`;
-                    aiLog(player, 'combat', `Retaliation attack executed by ${warrior.name}. Orders used: ${ordersUsed}. Outcome: ${status}.`);
+                    helper.aiLog(player, 'combat', `Retaliation attack executed by ${warrior.name}. Orders used: ${ordersUsed}. Outcome: ${status}.`);
                     involvedCells.push(startingCell, warrior.cell);
                     return true;
                 } else {
-                    aiLog(player, 'detail', `Retaliation attack by ${warrior.name} against ${target.name} used 0 orders (target out of reach or impassable terrain). Trying next candidate.`);
+                    helper.aiLog(player, 'detail', `Retaliation attack by ${warrior.name} against ${target.name} used 0 orders (target out of reach or impassable terrain). Trying next candidate.`);
                 }
             }
         }
@@ -331,49 +313,49 @@ async function handleCombatAndThreats(player, gameState, manifest, myEntities, i
 
     // E. Priority 2: Engage visible enemy threats
     if (visibleOpponents.length > 0) {
-        const enemyMilitary = visibleOpponents.filter(e => isDedicatedMilitary(e, manifest));
+        const enemyMilitary = visibleOpponents.filter(e => helper.isDedicatedMilitary(e, manifest));
         const targetPool = enemyMilitary.length > 0 ? enemyMilitary : visibleOpponents;
 
         // Check if we have any dedicated military units among our forces
-        const dedicatedMilitaryUnits = myEntities.filter(e => e.active && !e.destroyed && isDedicatedMilitary(e, manifest));
+        const dedicatedMilitaryUnits = myEntities.filter(e => e.active && !e.destroyed && helper.isDedicatedMilitary(e, manifest));
 
         if (dedicatedMilitaryUnits.length > 0) {
             // Sort target threats by minimum proximity to our dedicated military forces (closest threats first)
             const sortedTargets = [...targetPool].sort((a, b) => {
-                const minDistA = Math.min(...dedicatedMilitaryUnits.map(m => HexGrid.distance(m, a)));
-                const minDistB = Math.min(...dedicatedMilitaryUnits.map(m => HexGrid.distance(m, b)));
+                const minDistA = Math.min(...dedicatedMilitaryUnits.map(m => helper.distance(m, a)));
+                const minDistB = Math.min(...dedicatedMilitaryUnits.map(m => helper.distance(m, b)));
                 if (minDistA !== minDistB) return minDistA - minDistB;
-                const powerA = getCombatPower(a, manifest?.entities?.[a.name]);
-                const powerB = getCombatPower(b, manifest?.entities?.[b.name]);
+                const powerA = helper.getCombatPower(a, manifest?.entities?.[a.name]);
+                const powerB = helper.getCombatPower(b, manifest?.entities?.[b.name]);
                 return powerB - powerA;
             });
 
             for (const target of sortedTargets) {
                 // Select candidate combat units ordered primarily by proximity to this specific target
-                const candidates = selectCandidateCombatUnits(myEntities, target, manifest);
+                const candidates = helper.selectCandidateCombatUnits(myEntities, target, manifest);
                 if (candidates.length === 0) continue;
 
-                aiLog(player, 'combat', `Tactical Engagement: Target ${target.owner?.name || 'Enemy'}'s ${target.name} at (${target.q},${target.r}). Candidate combat units by proximity: [${candidates.map(c => `${c.name}#${c.id.slice(-4)} (dist:${HexGrid.distance(c, target)}, AP:${c.actionPoints})`).join(', ')}]`);
+                helper.aiLog(player, 'combat', `Tactical Engagement: Target ${target.owner?.name || 'Enemy'}'s ${target.name} at (${target.q},${target.r}). Candidate combat units by proximity: [${candidates.map(c => `${c.name}#${c.id.slice(-4)} (dist:${helper.distance(c, target)}, AP:${c.actionPoints})`).join(', ')}]`);
 
                 for (const warrior of candidates) {
-                    const dist = HexGrid.distance(warrior, target);
+                    const dist = helper.distance(warrior, target);
                     if (warrior.actionPoints !== undefined && warrior.actionPoints <= 0) {
-                        aiLog(player, 'detail', `Closer unit ${warrior.name} at (${warrior.q},${warrior.r}) (dist: ${dist}) ran out of AP (0 remaining). Checking farther units...`);
+                        helper.aiLog(player, 'detail', `Closer unit ${warrior.name} at (${warrior.q},${warrior.r}) (dist: ${dist}) ran out of AP (0 remaining). Checking farther units...`);
                         continue;
                     }
 
                     const startingCell = { q: warrior.q, r: warrior.r };
-                    aiLog(player, 'combat', `Tactical Strike: Deploying closer unit ${warrior.name} at (${warrior.q},${warrior.r}) (dist: ${dist}, AP: ${warrior.actionPoints}) targeting ${target.owner?.name || 'Enemy'}'s ${target.name} at (${target.q},${target.r}).`);
-                    const { ordersUsed } = attack(gameState, warrior, target, player.orders);
+                    helper.aiLog(player, 'combat', `Tactical Strike: Deploying closer unit ${warrior.name} at (${warrior.q},${warrior.r}) (dist: ${dist}, AP: ${warrior.actionPoints}) targeting ${target.owner?.name || 'Enemy'}'s ${target.name} at (${target.q},${target.r}).`);
+                    const { ordersUsed } = helper.attack(gameState, warrior, target, player.orders);
                     if (ordersUsed > 0) {
                         const status = target.destroyed || target.health <= 0
                             ? 'TARGET DESTROYED'
                             : `Target HP: ${Math.round(target.health)}/${target.maxHealth}`;
-                        aiLog(player, 'combat', `Tactical strike executed by ${warrior.name}. Orders used: ${ordersUsed}. Outcome: ${status}.`);
+                        helper.aiLog(player, 'combat', `Tactical strike executed by ${warrior.name}. Orders used: ${ordersUsed}. Outcome: ${status}.`);
                         involvedCells.push(startingCell, warrior.cell);
                         return true;
                     } else {
-                        aiLog(player, 'detail', `Tactical strike by ${warrior.name} against ${target.name} used 0 orders (cannot reach or blocked). Trying next candidate.`);
+                        helper.aiLog(player, 'detail', `Tactical strike by ${warrior.name} against ${target.name} used 0 orders (cannot reach or blocked). Trying next candidate.`);
                     }
                 }
             }
@@ -382,17 +364,17 @@ async function handleCombatAndThreats(player, gameState, manifest, myEntities, i
             // Dynamically resolve production of military defender
             const militaryMetaRanked = Object.entries(manifest.entities)
                 .filter(([_, meta]) => !meta.spawnConditions && (meta.score?.military >= 5 || meta.damage?.value >= 20))
-                .sort((a, b) => getCombatPower(null, b[1]) - getCombatPower(null, a[1]));
+                .sort((a, b) => helper.getCombatPower(null, b[1]) - helper.getCombatPower(null, a[1]));
 
             for (const [milName] of militaryMetaRanked) {
-                const step = resolveProductionPath(player, gameState, milName, manifest, new Set());
+                const step = resolveProductionPath(player, gameState, milName, manifest, helper, new Set());
                 if (step) {
                     const builder = step.builderEntity;
                     const target = step.targetName;
                     const cost = manifest.entities[target]?.spawnCost || {};
                     if (player.hasResources && player.hasResources(cost)) {
-                        aiLog(player, 'combat', `Threat Defense: Lack military to engage threats! Spawning military defender ${camelToTitle(target)} via ${builder.name} at (${builder.q},${builder.r}).`);
-                        const { ordersUsed } = build(gameState, builder, target);
+                        helper.aiLog(player, 'combat', `Threat Defense: Lack military to engage threats! Spawning military defender ${helper.camelToTitle(target)} via ${builder.name} at (${builder.q},${builder.r}).`);
+                        const { ordersUsed } = helper.build(gameState, builder, target);
                         if (ordersUsed > 0) return true;
                     }
                 }
@@ -400,26 +382,26 @@ async function handleCombatAndThreats(player, gameState, manifest, myEntities, i
 
             // Emergency close-quarters defense if enemy is directly adjacent (distance <= 1)
             // Pick candidate units closest to the threat first
-            const adjacentThreats = visibleOpponents.filter(h => myEntities.some(my => HexGrid.distance(my, h) <= 1));
+            const adjacentThreats = visibleOpponents.filter(h => myEntities.some(my => helper.distance(my, h) <= 1));
             if (adjacentThreats.length > 0) {
                 for (const adj of adjacentThreats) {
-                    const candidates = selectCandidateCombatUnits(myEntities, adj, manifest);
+                    const candidates = helper.selectCandidateCombatUnits(myEntities, adj, manifest);
                     for (const fighter of candidates) {
-                        const dist = HexGrid.distance(fighter, adj);
+                        const dist = helper.distance(fighter, adj);
                         if (dist > 1) continue; // Only adjacent for emergency
                         if (fighter.actionPoints !== undefined && fighter.actionPoints <= 0) {
-                            aiLog(player, 'detail', `Emergency defender ${fighter.name} at (${fighter.q},${fighter.r}) has 0 AP. Checking other adjacent defenders...`);
+                            helper.aiLog(player, 'detail', `Emergency defender ${fighter.name} at (${fighter.q},${fighter.r}) has 0 AP. Checking other adjacent defenders...`);
                             continue;
                         }
 
                         const startingCell = { q: fighter.q, r: fighter.r };
-                        aiLog(player, 'warn', `Emergency Defense: Adjacent enemy ${adj.name} at (${adj.q},${adj.r})! Fighting back with ${fighter.name} at (${fighter.q},${fighter.r}) (AP: ${fighter.actionPoints}).`);
-                        const { ordersUsed } = attack(gameState, fighter, adj, player.orders);
+                        helper.aiLog(player, 'warn', `Emergency Defense: Adjacent enemy ${adj.name} at (${adj.q},${adj.r})! Fighting back with ${fighter.name} at (${fighter.q},${fighter.r}) (AP: ${fighter.actionPoints}).`);
+                        const { ordersUsed } = helper.attack(gameState, fighter, adj, player.orders);
                         if (ordersUsed > 0) {
                             const status = adj.destroyed || adj.health <= 0
                                 ? 'TARGET DESTROYED'
                                 : `Target HP: ${Math.round(adj.health)}/${adj.maxHealth}`;
-                            aiLog(player, 'combat', `Emergency defense executed by ${fighter.name}. Orders used: ${ordersUsed}. Outcome: ${status}.`);
+                            helper.aiLog(player, 'combat', `Emergency defense executed by ${fighter.name}. Orders used: ${ordersUsed}. Outcome: ${status}.`);
                             involvedCells.push(startingCell, fighter.cell);
                             return true;
                         }
@@ -436,11 +418,11 @@ async function handleCombatAndThreats(player, gameState, manifest, myEntities, i
  * 3. MAINTENANCE & REPAIR:
  * Repairs heavily damaged friendly structures/units (<50% HP).
  */
-async function handleHeavyRepairs(player, gameState, myEntities, involvedCells) {
+async function handleHeavyRepairs(player, gameState, myEntities, involvedCells, helper) {
     const heavilyDamaged = myEntities.filter(e => e.active && e.health < (e.maxHealth * 0.5));
     if (heavilyDamaged.length === 0) return false;
 
-    const repairers = myEntities.filter(e => e.active && isRepairer(e) && (e.actionPoints === undefined || e.actionPoints > 0));
+    const repairers = myEntities.filter(e => e.active && helper.isRepairer(e) && (e.actionPoints === undefined || e.actionPoints > 0));
     if (repairers.length === 0) return false;
 
     heavilyDamaged.sort((a, b) => (a.health / a.maxHealth) - (b.health / b.maxHealth));
@@ -448,8 +430,8 @@ async function handleHeavyRepairs(player, gameState, myEntities, involvedCells) 
     for (const repairer of repairers) {
         for (const target of heavilyDamaged) {
             const startingCell = { q: repairer.q, r: repairer.r };
-            aiLog(player, 'build', `Repairing critical damage: ${repairer.name} at (${repairer.q},${repairer.r}) restoring ${target.name} at (${target.q},${target.r}) (HP: ${Math.round(target.health)}/${target.maxHealth})`);
-            const { ordersUsed } = support(gameState, repairer, target, "Repair", player.orders);
+            helper.aiLog(player, 'build', `Repairing critical damage: ${repairer.name} at (${repairer.q},${repairer.r}) restoring ${target.name} at (${target.q},${target.r}) (HP: ${Math.round(target.health)}/${target.maxHealth})`);
+            const { ordersUsed } = helper.support(gameState, repairer, target, "Repair", player.orders);
             if (ordersUsed > 0) {
                 involvedCells.push(startingCell, repairer.cell);
                 return true;
@@ -465,13 +447,13 @@ async function handleHeavyRepairs(player, gameState, myEntities, involvedCells) 
  * Uses surplus resources to build new constructs, mobile units, settlements, and economy.
  * Respects reservedResources to prevent starving pending deficit remedies.
  */
-async function handleProactiveGrowth(player, gameState, manifest, myEntities, evalRes, reservedResources, involvedCells) {
+async function handleProactiveGrowth(player, gameState, manifest, myEntities, evalRes, reservedResources, involvedCells, helper) {
     const stock = player.resources || {};
     const profile = evalRes.profile;
 
     const buildCandidates = [];
     for (const builder of myEntities) {
-        if (!builder.active || !isBuilder(builder)) continue;
+        if (!builder.active || !helper.isBuilder(builder)) continue;
         const buildables = builder.state?.buildables || builder.data?.buildables || [];
         for (const targetName of buildables) {
             buildCandidates.push({ builder, targetName });
@@ -501,7 +483,7 @@ async function handleProactiveGrowth(player, gameState, manifest, myEntities, ev
             }
         }
         if (violatesReservation) {
-            aiLog(player, 'detail', `Skipping proactive build of ${cand.targetName}: would spend reserved ${JSON.stringify(reservedResources)} needed for deficit recovery.`);
+            helper.aiLog(player, 'detail', `Skipping proactive build of ${cand.targetName}: would spend reserved ${JSON.stringify(reservedResources)} needed for deficit recovery.`);
             continue;
         }
 
@@ -555,8 +537,8 @@ async function handleProactiveGrowth(player, gameState, manifest, myEntities, ev
     if (bestCandidate) {
         const { builder, targetName, roi } = bestCandidate;
         const startingCell = { q: builder.q, r: builder.r };
-        aiLog(player, 'build', `Proactive Expansion: ${builder.name} at (${builder.q},${builder.r}) building ${camelToTitle(targetName)} (ROI: ${roi.toFixed(2)}).`);
-        const { ordersUsed } = build(gameState, builder, targetName);
+        helper.aiLog(player, 'build', `Proactive Expansion: ${builder.name} at (${builder.q},${builder.r}) building ${helper.camelToTitle(targetName)} (ROI: ${roi.toFixed(2)}).`);
+        const { ordersUsed } = helper.build(gameState, builder, targetName);
         if (ordersUsed > 0) {
             involvedCells.push(startingCell, builder.cell);
             return true;
@@ -571,11 +553,11 @@ async function handleProactiveGrowth(player, gameState, manifest, myEntities, ev
  * Sends the best-suited explorer (non-builder mobile unit) out using explore(),
  * which moves at most 1 order per call. Strictly excludes builder units.
  */
-async function handleExploration(player, gameState, manifest, myEntities, targetedCells, involvedCells) {
+async function handleExploration(player, gameState, manifest, myEntities, targetedCells, involvedCells, helper) {
     // Strictly filter out builder units, constructs, inactive units, or units with 0 AP
     const explorers = myEntities.filter(e => {
-        if (!e.active || !isMobile(e)) return false;
-        if (isBuilder(e)) return false;
+        if (!e.active || !helper.isMobile(e)) return false;
+        if (helper.isBuilder(e)) return false;
         if (e.actionPoints !== undefined && e.actionPoints <= 0) return false;
         return true;
     });
@@ -591,7 +573,7 @@ async function handleExploration(player, gameState, manifest, myEntities, target
 
     for (const explorer of explorers) {
         const startingCell = { q: explorer.q, r: explorer.r };
-        const { ordersUsed } = explore(gameState, explorer, null, false, targetedCells);
+        const { ordersUsed } = helper.explore(gameState, explorer, null, false, targetedCells);
         if (ordersUsed > 0) {
             involvedCells.push(startingCell, explorer.cell);
             return true;
@@ -602,20 +584,21 @@ async function handleExploration(player, gameState, manifest, myEntities, target
 }
 
 export class SmartManager extends BaseManager {
-    constructor(player, gameState, controller) {
-        super(player, gameState, controller);
+    constructor(player, helper) {
+        super(player, helper);
     }
 
     async processTurn() {
         const player = this.player;
         const gameState = this.gameState;
+        const helper = this.helper;
 
         if (!player || player.orders <= 0) return;
 
         const manifest = gameState?.manifestData;
         if (!manifest || !manifest.entities) return;
 
-        aiLog(player, 'turn', `=== Turn Start (Round ${gameState.currentRound || 1}) | Orders: ${player.orders}/${player.maxOrders} | Military: ${player.score?.military || 0}, Econ: ${player.score?.economic || 0}, Expl: ${player.score?.exploration || 0} ===`);
+        helper.aiLog(player, 'turn', `=== Turn Start (Round ${gameState.currentRound || 1}) | Orders: ${player.orders}/${player.maxOrders} | Military: ${player.score?.military || 0}, Econ: ${player.score?.economic || 0}, Expl: ${player.score?.exploration || 0} ===`);
 
         const targetedExplorationCells = new Set();
         const reservedResources = {}; // Tracks resources needed by pending critical deficit remedies
@@ -627,7 +610,7 @@ export class SmartManager extends BaseManager {
 
             const myEntities = player.getEntities ? player.getEntities(gameState).filter(e => e.active) : [];
             if (myEntities.length === 0) {
-                aiLog(player, 'warn', `No active entities available to perform actions.`);
+                helper.aiLog(player, 'warn', `No active entities available to perform actions.`);
                 break;
             }
 
@@ -635,42 +618,42 @@ export class SmartManager extends BaseManager {
             let involvedCells = [];
 
             // 1. Critical Deficit Recovery (Stabilize negative burn before units starve, reserving scarce resources)
-            if (await handleCriticalDeficits(player, gameState, manifest, myEntities, evalRes, reservedResources, involvedCells)) {
+            if (await handleCriticalDeficits(player, gameState, manifest, myEntities, evalRes, reservedResources, involvedCells, helper)) {
                 actionExecuted = true;
-                await onActionDone(gameState, involvedCells, 'Critical Deficit Recovery');
+                await helper.onActionDone(gameState, involvedCells, 'Critical Deficit Recovery');
                 continue;
             }
 
             // 2. Combat & Defense (Retaliate against attackers and eliminate immediate threats)
-            if (await handleCombatAndThreats(player, gameState, manifest, myEntities, involvedCells)) {
+            if (await handleCombatAndThreats(player, gameState, manifest, myEntities, involvedCells, helper)) {
                 actionExecuted = true;
-                await onActionDone(gameState, involvedCells, 'Combat & Defense');
+                await helper.onActionDone(gameState, involvedCells, 'Combat & Defense');
                 continue;
             }
 
             // 3. Heavy Repairs (Restore heavily damaged constructs/units < 50% HP)
-            if (await handleHeavyRepairs(player, gameState, myEntities, involvedCells)) {
+            if (await handleHeavyRepairs(player, gameState, myEntities, involvedCells, helper)) {
                 actionExecuted = true;
-                await onActionDone(gameState, involvedCells, 'Heavy Repairs');
+                await helper.onActionDone(gameState, involvedCells, 'Heavy Repairs');
                 continue;
             }
 
             // 4. Proactive Growth (Expand economy, settlements, units using surplus resources; respects reservedResources)
-            if (await handleProactiveGrowth(player, gameState, manifest, myEntities, evalRes, reservedResources, involvedCells)) {
+            if (await handleProactiveGrowth(player, gameState, manifest, myEntities, evalRes, reservedResources, involvedCells, helper)) {
                 actionExecuted = true;
-                await onActionDone(gameState, involvedCells, 'Proactive Growth');
+                await helper.onActionDone(gameState, involvedCells, 'Proactive Growth');
                 continue;
             }
 
             // 5. Exploration (Scout closest unexplored hexes using BFS and multi-step moves; strictly excludes builders)
-            if (await handleExploration(player, gameState, manifest, myEntities, targetedExplorationCells, involvedCells)) {
+            if (await handleExploration(player, gameState, manifest, myEntities, targetedExplorationCells, involvedCells, helper)) {
                 actionExecuted = true;
-                await onActionDone(gameState, involvedCells, 'Exploration');
+                await helper.onActionDone(gameState, involvedCells, 'Exploration');
                 continue;
             }
         }
 
-        aiLog(player, 'turn', `=== Turn Ended | Remaining Orders: ${player.orders} ===`);
+        helper.aiLog(player, 'turn', `=== Turn Ended | Remaining Orders: ${player.orders} ===`);
     }
 
     async summarizeChatAndAddNote(otherPlayer) {

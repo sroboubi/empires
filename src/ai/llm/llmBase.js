@@ -6,14 +6,12 @@
  */
 import { BaseManager } from '../baseManager.js';
 import { LLMClient } from './client.js';
-import { HexGrid } from '../../hexGrid.js';
 import { manifestToMarkdown } from './markdown.js';
-import { findBuildCandidates, isCombatCapable } from '../utils.js';
-import { CONFIG } from '../../config.js';
+import { DEFAULT_PROMPT_URLS } from './promptUrls.js';
 
 export class LlmBaseManager extends BaseManager {
-    constructor(player, gameState, controller) {
-        super(player, gameState, controller);
+    constructor(player, helper) {
+        super(player, helper);
         this.llmClient = null;
     }
 
@@ -146,7 +144,7 @@ export class LlmBaseManager extends BaseManager {
             return [...m.entries()].map(([n, c]) => `${c} ${n}`).join(', ') || 'none';
         };
 
-        const response = await fetch(CONFIG.CHAT_PROMPT_URL);
+        const response = await fetch(DEFAULT_PROMPT_URLS.chat);
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -235,7 +233,7 @@ export class LlmBaseManager extends BaseManager {
         // (closeChatModal awaits this before resolving the chat promise).
         try {
             const recent = history.filter(m => m.round === this.gameState.currentRound).map(m => `${m.sender}: ${m.content}`).join('\n');
-            const response = await fetch(CONFIG.CHAT_SUMMATION_PROMPT_URL);
+            const response = await fetch(DEFAULT_PROMPT_URLS.chatSummation);
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
@@ -263,6 +261,7 @@ export class LlmBaseManager extends BaseManager {
     }
 
     summarizeGameState() {
+        const helper = this.helper;
         const opponents = this.player.getOpponents(this.gameState);
         Object.values(opponents).forEach(opp => {
             opp.entities = (opp.entities || []).map(e => this.summarizeEntity(e));
@@ -284,7 +283,7 @@ export class LlmBaseManager extends BaseManager {
             if (e.destroyed || !e.cell) continue;
             if (e.owner && e.owner.id === this.player.id) continue;
             if (!this.player.isVisible?.(e.q, e.r)) continue;
-            const neighbor = ownUnits.find(o => o.cell && HexGrid.distance(o.cell, e.cell) === 1);
+            const neighbor = ownUnits.find(o => o.cell && helper.distance(o.cell, e.cell) === 1);
             if (neighbor) threats.push({ id: e.id, name: e.name, adjacentTo: neighbor.id });
         }
         // Deficit remedies: for each depleting resource, the best-yield producer
@@ -316,19 +315,20 @@ export class LlmBaseManager extends BaseManager {
             opponents: opponents,
             knownPlayers: (this.gameState.players || []).filter(p => p !== this.player).map(p => ({ name: p.name, score: p.score })),
             mapSize: this.gameState.settings?.mapSize,
-            exploredPercent: this.gameState.hexGrid?.cells?.size ? Math.round((this.player.exploredCells?.size || 0) / this.gameState.hexGrid.cells.size * 100) : null,
+            exploredPercent: helper.getCellCount() ? Math.round((this.player.exploredCells?.size || 0) / helper.getCellCount() * 100) : null,
             threats: threats,
             deficitRemedies: remedies
         };
     }
 
     summarizeEntity(entity) {
+        const helper = this.helper;
         const summary = {
             id: entity.id,
             name: entity.name,
             fromStart: entity.cell ? {
-                direction: this.gameState.hexGrid.directionTo(this.player.startCoord, entity.cell, true).fromSource,
-                distance: HexGrid.distance(this.player.startCoord, entity.cell)
+                direction: helper.directionTo(this.player.startCoord, entity.cell, true).fromSource,
+                distance: helper.distance(this.player.startCoord, entity.cell)
             } : null,
             terrain: entity.cell?.terrain?.name,
             health: entity.health,
@@ -368,7 +368,7 @@ export class LlmBaseManager extends BaseManager {
                         // now when the engine finds at least one valid site.
                         // Otherwise the model burns orders discovering this
                         // through failed Build commands.
-                        const { candidates } = findBuildCandidates(this.gameState, entity, b);
+                        const { candidates } = helper.findBuildCandidates(this.gameState, entity, b);
                         if (candidates.length > 0) {
                             summary.buildableNow.push(b);
                         } else {
@@ -397,16 +397,16 @@ export class LlmBaseManager extends BaseManager {
                     };
                     // Position + reachability from this repairer's point of view (own units only).
                     if (entity.owner?.id === this.player.id && entity.cell && e.cell) {
-                        entry.distance = HexGrid.distance(entity.cell, e.cell);
-                        entry.direction = this.gameState.hexGrid.directionTo(entity.cell, e.cell, true).fromSource;
+                        entry.distance = helper.distance(entity.cell, e.cell);
+                        entry.direction = helper.directionTo(entity.cell, e.cell, true).fromSource;
                         // Reachable this turn: cheapest adjacent staging cell within AP, reserving 1 AP for the repair itself.
                         const ap = entity.actionPoints ?? 0;
                         let minCost = null;
-                        for (const nb of this.gameState.hexGrid.getNeighbors(e.q, e.r)) {
+                        for (const nb of helper.getNeighbors(e.q, e.r)) {
                             const costFunc = typeof entity.getMovementCost === 'function'
                                 ? entity.getMovementCost.bind(entity)
                                 : (terrain) => terrain.movementCost || 1;
-                            const res = this.gameState.hexGrid.movementCostTo(entity.cell, nb, costFunc);
+                            const res = helper.movementCostTo(entity.cell, nb, costFunc);
                             if (res && (minCost === null || res.cost < minCost)) minCost = res.cost;
                         }
                         entry.reachable = minCost !== null && minCost + 1 <= ap;
@@ -423,8 +423,8 @@ export class LlmBaseManager extends BaseManager {
             let nearestEnemy = null, nearestAlly = null;
             for (const e of this.gameState.entities || []) {
                 if (e.destroyed || e.id === entity.id || !e.cell) continue;
-                const d = HexGrid.distance(entity.cell, e.cell);
-                const dir = this.gameState.hexGrid.directionTo(entity.cell, e.cell, true).fromSource;
+                const d = helper.distance(entity.cell, e.cell);
+                const dir = helper.directionTo(entity.cell, e.cell, true).fromSource;
                 if (e.owner && e.owner.id === this.player.id) {
                     if (!nearestAlly || d < nearestAlly.distance) nearestAlly = { id: e.id, distance: d, direction: dir };
                 } else if (this.player.isVisible?.(e.q, e.r)) {
@@ -433,7 +433,7 @@ export class LlmBaseManager extends BaseManager {
             }
             if (nearestEnemy) summary.nearestEnemy = nearestEnemy;
             if (nearestAlly) summary.nearestAlly = nearestAlly;
-            if (entity.active && (entity.actionPoints ?? 0) >= 1 && isCombatCapable(entity)) {
+            if (entity.active && (entity.actionPoints ?? 0) >= 1 && helper.isCombatCapable(entity)) {
                 const range = entity.range && typeof entity.range === 'object'
                     ? { min: entity.range.minCells ?? 1, max: entity.range.maxCells ?? 1 }
                     : { min: 1, max: 1 };
@@ -442,7 +442,7 @@ export class LlmBaseManager extends BaseManager {
                     if (e.destroyed || !e.cell) continue;
                     if (e.owner && e.owner.id === this.player.id) continue;
                     if (!this.player.isVisible?.(e.q, e.r)) continue;
-                    const d = HexGrid.distance(entity.cell, e.cell);
+                    const d = helper.distance(entity.cell, e.cell);
                     if (d >= range.min && d <= range.max) targets.push(e.id);
                 }
                 if (targets.length) summary.canAttackNow = targets;

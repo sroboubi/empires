@@ -1,18 +1,12 @@
-import { HexGrid } from '../../hexGrid.js';
-import { attack } from '../utils.js';
-import { onActionDone } from '../utils.js';
-import { reconcileEntities } from '../../renderer.js';
-import Entity from '../../entity.js';
-
 /**
  * Returns all border cells on the hex grid (cells with fewer than 6 neighbors).
- * @param {HexGrid} hexGrid
+ * @param {Object} helper - AiHelper instance
  * @returns {Array<Object>}
  */
-export function getBorderCells(hexGrid) {
-  if (!hexGrid) return [];
-  return hexGrid.getCellsArray().filter(cell => {
-    const neighbors = hexGrid.getNeighbors(cell.q, cell.r);
+export function getBorderCells(helper) {
+  if (!helper) return [];
+  return helper.getCellsArray().filter(cell => {
+    const neighbors = helper.getNeighbors(cell.q, cell.r);
     return neighbors.length < 6;
   });
 }
@@ -22,34 +16,34 @@ export function getBorderCells(hexGrid) {
  * Uses only entity.canStandOn() to evaluate traversability.
  *
  * @param {Object} fromCell - Source cell or coordinate {q, r}
- * @param {HexGrid} hexGrid
+ * @param {Object} helper - AiHelper instance
  * @param {BaseEntity} [entity] - Entity used for canStandOn checks
  * @returns {Object|null}
  */
-export function findOppositeBorderCell(fromCell, hexGrid, entity = null) {
-  if (!hexGrid || !fromCell) return null;
+export function findOppositeBorderCell(fromCell, helper, entity = null) {
+  if (!helper || !fromCell) return null;
 
   const targetQ = -fromCell.q;
   const targetR = -fromCell.r;
   const targetCoord = { q: targetQ, r: targetR };
 
-  const borderCells = getBorderCells(hexGrid);
+  const borderCells = getBorderCells(helper);
   const passableBorders = borderCells.filter(c => {
     return entity && typeof entity.canStandOn === 'function' ? entity.canStandOn(c) : false;
   });
 
   if (passableBorders.length > 0) {
-    passableBorders.sort((a, b) => HexGrid.distance(a, targetCoord) - HexGrid.distance(b, targetCoord));
+    passableBorders.sort((a, b) => helper.distance(a, targetCoord) - helper.distance(b, targetCoord));
     return passableBorders[0];
   }
 
   // Fallback to any passable cell in the grid closest to opposite coordinate
-  const allPassable = hexGrid.getCellsArray().filter(c => {
+  const allPassable = helper.getCellsArray().filter(c => {
     return entity && typeof entity.canStandOn === 'function' ? entity.canStandOn(c) : false;
   });
 
   if (allPassable.length > 0) {
-    allPassable.sort((a, b) => HexGrid.distance(a, targetCoord) - HexGrid.distance(b, targetCoord));
+    allPassable.sort((a, b) => helper.distance(a, targetCoord) - helper.distance(b, targetCoord));
     return allPassable[0];
   }
 
@@ -60,12 +54,13 @@ export function findOppositeBorderCell(fromCell, hexGrid, entity = null) {
  * Manages barbarian lifecycle, spawning, combat, and movement dynamically
  * based on the provided settings configuration.
  *
- * @param {GameState} gameState
  * @param {Object} [config] - Barbarian configuration settings containing horde definitions
+ * @param {Object} helper - AiHelper instance
  */
-export async function manageBarbarians(gameState, config) {
-  if (!gameState || !gameState.hexGrid || !config) return;
+export async function manageBarbarians(config, helper) {
+  if (!config || !helper) return;
 
+  const gameState = helper.getGameState();
   const hordeConfig = config.horde;
   const barbarianUnitNames = new Set(Object.keys(hordeConfig));
 
@@ -104,7 +99,7 @@ export async function manageBarbarians(gameState, config) {
         toSpawn.sort(() => Math.random() - 0.5);
 
         // Get unoccupied border cells and shuffle them
-        const borderCells = getBorderCells(gameState.hexGrid);
+        const borderCells = getBorderCells(helper);
         const candidateBorderCells = borderCells.filter(c => !gameState.getEntityAt(c.q, c.r));
         candidateBorderCells.sort(() => Math.random() - 0.5);
 
@@ -115,7 +110,7 @@ export async function manageBarbarians(gameState, config) {
           }
 
           const meta = gameState.manifestData?.entities?.[unitName];
-          const dummy = new Entity(meta, null, gameState, null);
+          const dummy = helper.createEntity(meta, null, gameState, null);
 
           const spawnCellIndex = candidateBorderCells.findIndex(cell => {
             if (!dummy || typeof dummy.canStandOn !== 'function') return false;
@@ -127,7 +122,7 @@ export async function manageBarbarians(gameState, config) {
             const entity = gameState.spawnEntity(unitName, spawnCell, null);
             if (entity) {
               availableSlots--;
-              const target = findOppositeBorderCell(spawnCell, gameState.hexGrid, entity);
+              const target = findOppositeBorderCell(spawnCell, helper, entity);
               if (target) {
                 entity.targetCell = target;
                 entity.state.targetCell = { q: target.q, r: target.r };
@@ -172,23 +167,23 @@ export async function manageBarbarians(gameState, config) {
     if (visibleEnemies.length > 0) {
       // Attack closest visible enemy, or weakest at same distance, using attack() with unlimited orders (constrained only by AP)
       visibleEnemies.sort((a, b) => {
-        const distDiff = HexGrid.distance(entity, a) - HexGrid.distance(entity, b);
+        const distDiff = helper.distance(entity, a) - helper.distance(entity, b);
         if (distDiff !== 0) return distDiff;
         return a.health - b.health;
       });
       const targetEnemy = visibleEnemies[0];
       console.debug(`[Barbarians] ${entity.name} at (${entity.q}, ${entity.r}) attacking ${targetEnemy.name} (Owner: ${targetEnemy.owner?.name || 'neutral'}) at (${targetEnemy.q}, ${targetEnemy.r})`);
-      attack(gameState, entity, targetEnemy, Infinity);
-      await onActionDone(gameState, [entity.cell, targetEnemy.cell], `${entity.name} attacked ${targetEnemy.name}`);
+      helper.attack(gameState, entity, targetEnemy, Infinity);
+      await helper.onActionDone(gameState, [entity.cell, targetEnemy.cell], `${entity.name} attacked ${targetEnemy.name}`);
     } else {
       // Restore target cell reference if needed
       if (!entity.targetCell && entity.state.targetCell) {
-        entity.targetCell = gameState.hexGrid.getCell(entity.state.targetCell.q, entity.state.targetCell.r);
+        entity.targetCell = helper.getCell(entity.state.targetCell.q, entity.state.targetCell.r);
       }
 
       // If target reached (closer than 5 cells) or none assigned, pick new target on opposite side
-      if (!entity.targetCell || HexGrid.distance(entity, entity.targetCell) < 5) {
-        entity.targetCell = findOppositeBorderCell(entity.cell || entity, gameState.hexGrid, entity);
+      if (!entity.targetCell || helper.distance(entity, entity.targetCell) < 5) {
+        entity.targetCell = findOppositeBorderCell(entity.cell || entity, helper, entity);
         if (entity.targetCell) {
           entity.state.targetCell = { q: entity.targetCell.q, r: entity.targetCell.r };
           console.debug(`[Barbarians] ${entity.name} at (${entity.q}, ${entity.r}) assigned new target cell at (${entity.targetCell.q}, ${entity.targetCell.r})`);
@@ -200,16 +195,16 @@ export async function manageBarbarians(gameState, config) {
         if (moveAction) {
           // Move towards target cell while action points remain
           while (entity.actionPoints > 0 && !entity.destroyed) {
-            const currentDist = HexGrid.distance(entity, entity.targetCell);
+            const currentDist = helper.distance(entity, entity.targetCell);
             if (currentDist < 5) {
-              entity.targetCell = findOppositeBorderCell(entity.cell || entity, gameState.hexGrid, entity);
+              entity.targetCell = findOppositeBorderCell(entity.cell || entity, helper, entity);
               if (entity.targetCell) {
                 entity.state.targetCell = { q: entity.targetCell.q, r: entity.targetCell.r };
                 console.debug(`[Barbarians] ${entity.name} reached proximity of target. New target assigned at (${entity.targetCell.q}, ${entity.targetCell.r})`);
               }
             }
 
-            const neighbors = gameState.hexGrid.getNeighbors(entity.q, entity.r);
+            const neighbors = helper.getNeighbors(entity.q, entity.r);
             const validCandidates = neighbors.filter(nb => {
               if (gameState.getEntityAt(nb.q, nb.r)) return false;
               const check = moveAction.canDo(nb, null);
@@ -219,12 +214,12 @@ export async function manageBarbarians(gameState, config) {
             if (validCandidates.length === 0) break;
 
             // Sort candidate neighbors by proximity to targetCell
-            validCandidates.sort((a, b) => HexGrid.distance(a, entity.targetCell) - HexGrid.distance(b, entity.targetCell));
+            validCandidates.sort((a, b) => helper.distance(a, entity.targetCell) - helper.distance(b, entity.targetCell));
             const bestNeighbor = validCandidates[0];
 
             const moved = moveAction.do(bestNeighbor, null);
             if (!moved) break;
-            await onActionDone(gameState, [entity.cell], `${entity.name} moved to (${bestNeighbor.q}, ${bestNeighbor.r})`);
+            await helper.onActionDone(gameState, [entity.cell], `${entity.name} moved to (${bestNeighbor.q}, ${bestNeighbor.r})`);
 
             console.debug(`[Barbarians] ${entity.name} moved to (${bestNeighbor.q}, ${bestNeighbor.r}) (Target: (${entity.targetCell.q}, ${entity.targetCell.r}), Remaining AP: ${entity.actionPoints})`);
           }
@@ -234,5 +229,5 @@ export async function manageBarbarians(gameState, config) {
   }
 
   // ensure entities are in the right place after all moves (e.g. in case SHOW_ALL is true)
-  reconcileEntities(gameState);
+  helper.reconcileEntities(gameState);
 }
