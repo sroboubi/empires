@@ -36,7 +36,7 @@
                 "repairOrders": 3,
                 "moveTargets": 3,
                 "maxChatExchanges": 6,
-                "chatCooldownTurns": 2
+                "chatCooldownOrders": 2
             }
         },
         "llm-menu-gemma-4": {
@@ -50,7 +50,7 @@
                 "repairOrders": 3,
                 "moveTargets": 3,
                 "maxChatExchanges": 6,
-                "chatCooldownTurns": 2
+                "chatCooldownOrders": 2
             }
         },
         "llm-menu-qwen-3.5": {
@@ -64,7 +64,7 @@
                 "repairOrders": 3,
                 "moveTargets": 3,
                 "maxChatExchanges": 6,
-                "chatCooldownTurns": 2
+                "chatCooldownOrders": 2
             }
         },
         "llm-menu-phi-4": {
@@ -78,7 +78,7 @@
                 "repairOrders": 3,
                 "moveTargets": 3,
                 "maxChatExchanges": 6,
-                "chatCooldownTurns": 2
+                "chatCooldownOrders": 2
             }
         }
     },
