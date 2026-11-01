@@ -417,7 +417,7 @@ function renderSetupPlayers() {
     row.innerHTML = `
       <input type="color" value="${p.color}" title="Choose color">
       ${nameField}
-      <select class="form-input controller-select" style="max-width: 132px;" title="Controller">${ctrlOpts}</select>
+      <select class="form-input controller-select" style="max-width: 320px;" title="Controller">${ctrlOpts}</select>
       <button type="button" class="btn btn-danger btn-small" ${setupPlayers.length <= 1 ? 'disabled style="opacity:0.3;cursor:not-allowed;"' : ''}>✕</button>
     `;
 
