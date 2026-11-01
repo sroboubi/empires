@@ -105,6 +105,21 @@ export class MenuHarness extends LlmBaseManager {
             console.debug("system prompt:", menuSystemPrompt);
             console.debug("user content:", userContent);
 
+            // File-based prompt dump for large-model testing (Claude/Astra).
+            // Set controller.config.dumpPrompts to a directory path to enable.
+            const dumpDir = this.player.controller?.config?.dumpPrompts;
+            if (dumpDir) {
+                try {
+                    const fs = await import('fs');
+                    const path = await import('path');
+                    fs.mkdirSync(dumpDir, { recursive: true });
+                    const ts = Date.now();
+                    const fname = `prompt-${this.player.name}-r${this.gameState.currentRound}-${ts}.md`;
+                    const content = `# System Prompt\n\n${menuSystemPrompt}\n\n---\n\n# User Content\n\n${userContent}\n`;
+                    fs.writeFileSync(path.join(dumpDir, fname), content);
+                } catch (e) { /* best effort */ }
+            }
+
             const rawResponse = await client.generate(userContent, menuSystemPrompt, { responseSchema: menuResponseSchema });
             console.debug("response:", rawResponse);
             if (!rawResponse) {
