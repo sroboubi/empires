@@ -8,6 +8,7 @@
 
 ## Game ##
 
+- support different LLM models/providers per AI player
 - faction description and special abilities (Asymmetric faction twists. The most praised engagement mechanic in modern 4X (Endless Legend's rule-breaking factions). 2–3 JSON-authored twists per faction)
 - hide resource info and history for AI players unless SHOW_ALL=true
 

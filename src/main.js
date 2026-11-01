@@ -27,7 +27,6 @@ import { HexGrid } from './hexGrid.js';
 import { collectResourceModelEntries } from './resources.js';
 import { audio } from './audio.js';
 import { saveGame, loadGame, listSaves, deleteSave, pruneAutoSaves } from './saveManager.js';
-import { Harness } from './ai/llm/harness.js';
 import { Player } from './player.js';
 import { ReplayRecorder, ReplayPlayer, exportReplayToJSON, readReplayFile } from './replayManager.js';
 
@@ -47,9 +46,6 @@ let pointerDownTime = 0;
 // Local setup state before starting game
 let setupPlayers = [];
 let setupStartingUnits = {};
-let setupLlmBaseUrl = 'https://openrouter.ai/api/v1';
-let setupLlmApiKey = '';
-let setupLlmModels = []; // Array<{ id: string, name: string, enabled: boolean }>
 
 /**
  * Initializes the application.
@@ -289,8 +285,12 @@ async function init() {
     // Barbarian setup UI bindings
     setupBarbarianUI();
 
-    // LLM setup UI bindings
-    setupLlmUI();
+    // AI setup UI bindings (Phase 23): load definitions, then build
+    // provider keys + controller/leader selectors.
+    loadAiDefinitions().then(() => {
+      setupAiConfigUI();
+      renderSetupPlayers();
+    }).catch(e => console.warn('Failed to load AI definitions:', e));
 
     // Open Setup Modal automatically on initial load, or the replay file
     // selector when REPLAY_MODE is enabled.
@@ -381,33 +381,6 @@ function openSetupModal(canClose = true) {
   // Initialize custom spinner buttons
   initNumberInputSpinners();
 
-  // Restore LLM configuration from session storage if available
-  try {
-    const savedLlm = sessionStorage.getItem('empires_llm_config') || sessionStorage.getItem('empires_openrouter_config');
-    if (savedLlm) {
-      const parsed = JSON.parse(savedLlm);
-      if (parsed.baseUrl) {
-        setupLlmBaseUrl = parsed.baseUrl;
-      }
-      const baseUrlInput = document.getElementById('setup-llm-base-url');
-      if (baseUrlInput) baseUrlInput.value = setupLlmBaseUrl;
-
-      if (parsed.apiKey !== undefined) {
-        setupLlmApiKey = parsed.apiKey;
-        const keyInput = document.getElementById('setup-llm-api-key');
-        if (keyInput) keyInput.value = setupLlmApiKey;
-      }
-      if (Array.isArray(parsed.models)) {
-        setupLlmModels = parsed.models;
-      } else if (Array.isArray(parsed.orderedModels)) {
-        setupLlmModels = parsed.orderedModels.map(id => ({ id, name: id, enabled: true }));
-      }
-    }
-  } catch (e) {
-    console.warn('Failed to load LLM config from session storage:', e);
-  }
-  renderLlmModelList();
-
   overlay.classList.add('active');
 }
 
@@ -423,28 +396,72 @@ function renderSetupPlayers() {
     const row = document.createElement('div');
     row.className = 'dynamic-row';
 
-    const isAI = p.controller !== null && p.controller !== undefined;
+    // Phase 23.2: controller dropdown (human or a controller from ai.json).
+    // The picked key is stored explicitly on the player: several controllers
+    // can share one harness URL, so re-deriving the key from the URL alone
+    // would collapse them to the first match.
+    const ctrlKey = p.controllerKey || controllerKeyFor(p.controller);
+    const isAI = ctrlKey !== 'human';
+    const ctrlOpts = `<option value="human"${!isAI ? ' selected' : ''}>Human</option>` +
+      Object.keys(aiJson?.controllers || {}).map(k =>
+        `<option value="${k}"${ctrlKey === k ? ' selected' : ''}>${k}</option>`).join('');
+
+    // Phase 23.3: name is a text input for humans, a leader picker for AI.
+    let nameField;
+    if (isAI) {
+      const leaderOpts = `<option value="" disabled${!leadersJson.some(l => l.name === p.name) ? ' selected' : ''}>Select leader…</option>` +
+        leadersJson.map(l =>
+          `<option value="${l.name}"${p.name === l.name ? ' selected' : ''}>${l.name}</option>`).join('');
+      nameField = `<select name="leader" class="form-input leader-select" style="flex: 1;" title="${leaderTitle(p.name)}">${leaderOpts}</select>`;
+    } else {
+      nameField = `<input name="player-name" type="text" class="form-input" value="${p.name}" placeholder="Player Name" style="flex: 1;">`;
+    }
 
     row.innerHTML = `
-      <input type="color" value="${p.color}" title="Choose color">
-      <input type="text" class="form-input" value="${p.name}" placeholder="Player Name" style="flex: 1;">
-      <label style="font-size: 12px; display: flex; align-items: center; gap: 4px; cursor: pointer;">
-        <input type="checkbox" class="ai-checkbox" ${isAI ? 'checked' : ''}> AI
-      </label>
+      <input name="player-color" type="color" value="${p.color}" title="Choose color">
+      ${nameField}
+      <select name="controller" class="form-input controller-select" style="max-width: 320px;" title="Controller">${ctrlOpts}</select>
       <button type="button" class="btn btn-danger btn-small" ${setupPlayers.length <= 1 ? 'disabled style="opacity:0.3;cursor:not-allowed;"' : ''}>✕</button>
     `;
 
     // Event listeners for fields
     const colorInput = row.querySelector('input[type="color"]');
     const nameInput = row.querySelector('input[type="text"]');
-    const aiCheckbox = row.querySelector('.ai-checkbox');
+    const leaderSelect = row.querySelector('.leader-select');
+    const ctrlSelect = row.querySelector('.controller-select');
     const removeBtn = row.querySelector('.btn-danger');
 
     colorInput.addEventListener('change', (e) => { p.color = e.target.value; });
-    nameInput.addEventListener('input', (e) => { p.name = e.target.value; });
-    aiCheckbox.addEventListener('change', (e) => {
-      // If AI selected, set controller to empty object as requested by user
-      p.controller = e.target.checked ? {} : null;
+    if (nameInput) {
+      nameInput.addEventListener('input', (e) => { p.name = e.target.value; });
+    }
+    if (leaderSelect) {
+      leaderSelect.addEventListener('change', (e) => {
+        const leader = leadersJson.find(l => l.name === e.target.value);
+        if (leader && p.controller) {
+          p.controller.description = leader.description;
+          p.controller.focus = [...leader.focus];
+          p.name = leader.name;
+          leaderSelect.title = leaderTitle(leader.name);
+        }
+      });
+    }
+    ctrlSelect.addEventListener('change', (e) => {
+      const key = e.target.value;
+      p.controllerKey = key;
+      if (key === 'human') {
+        p.controller = null;
+      } else {
+        const def = aiJson.controllers[key];
+        p.controller = { url: def.url, config: JSON.parse(JSON.stringify(def.config || {})) };
+        const leader = leadersJson.find(l => l.name === p.name) || leadersJson[0];
+        if (leader) {
+          p.controller.description = leader.description;
+          p.controller.focus = [...leader.focus];
+          p.name = leader.name;
+        }
+      }
+      renderSetupPlayers();
     });
 
     removeBtn.addEventListener('click', () => {
@@ -685,343 +702,92 @@ function updateAllRangeFills() {
 }
 
 /* --------------------------------------------------------------------------
-   LLM SETUP UI: OpenAI-Compatible Interface, API Key, fetch models & priority ordering
+   AI SETUP UI (Phase 23): provider keys, controller + leader selection.
+   Definitions: definitions/ai.json (providers, controllers),
+   definitions/leaders.json (leader personas).
    -------------------------------------------------------------------------- */
 
-let draggedModelIndex = null;
-let llmSearchQuery = '';
+let aiJson = null;          // { providers, controllers, baseConfig }
+let leadersJson = [];       // [{ name, description, focus[] }]
+let setupProviderKeys = {}; // { providerName: apiKey }
 
-function getModelsUrl(baseUrl) {
-  return baseUrl.trim().replace(/\/+$/, '') + `/models`;
+async function loadAiDefinitions() {
+  if (!aiJson) {
+    const [aiRes, leadersRes] = await Promise.all([
+      fetch('./definitions/ai.json'),
+      fetch('./definitions/leaders.json')
+    ]);
+    if (!aiRes.ok) throw new Error(`ai.json: HTTP ${aiRes.status}`);
+    if (!leadersRes.ok) throw new Error(`leaders.json: HTTP ${leadersRes.status}`);
+    aiJson = await aiRes.json();
+    leadersJson = await leadersRes.json();
+  }
+  return { aiJson, leadersJson };
 }
 
-function setupLlmUI() {
-  const baseUrlInput = document.getElementById('setup-llm-base-url');
-  const keyInput = document.getElementById('setup-llm-api-key');
-  const toggleBtn = document.getElementById('btn-toggle-llm-key');
-  const fetchBtn = document.getElementById('btn-fetch-llm-models');
-  const statusEl = document.getElementById('setup-llm-status');
-  const searchInput = document.getElementById('setup-llm-search');
-  const freeOnlyCheckbox = document.getElementById('setup-llm-free-only');
+/** Controller key for a setup player's controller object (matched by URL). */
+function controllerKeyFor(controller) {
+  if (!controller || !aiJson) return 'human';
+  const key = Object.keys(aiJson.controllers || {}).find(
+    k => aiJson.controllers[k].url === controller.url
+  );
+  return key || 'human';
+}
 
-  if (!keyInput || !fetchBtn) return;
+/** Hover/selected-leader tooltip text (Phase 23.4). */
+function leaderTitle(name) {
+  const l = leadersJson.find(x => x.name === name);
+  return l ? `${l.description} Focus: ${l.focus.join(', ')}.` : '';
+}
 
-  // Toggle API key visibility
-  if (toggleBtn) {
-    toggleBtn.addEventListener('click', () => {
-      keyInput.type = keyInput.type === 'password' ? 'text' : 'password';
-      toggleBtn.textContent = keyInput.type === 'password' ? '👁' : '🔒';
+/** Phase 23.1: one key input per provider from ai.json. */
+function setupAiConfigUI() {
+  const container = document.getElementById('setup-provider-keys');
+  if (!container || !aiJson) return;
+  container.innerHTML = '';
+  try {
+    const saved = sessionStorage.getItem('empires_provider_keys');
+    if (saved) setupProviderKeys = JSON.parse(saved) || {};
+  } catch (e) { /* ignore */ }
+  for (const [name, prov] of Object.entries(aiJson.providers || {})) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;';
+    const label = document.createElement('label');
+    label.style.cssText = 'font-size:12px;min-width:90px;text-transform:capitalize;color:var(--text-muted);font-weight:600;';
+    label.textContent = name;
+    const input = document.createElement('input');
+    input.type = 'password';
+    input.name = `provider-key-${name}`;
+    input.className = 'form-input';
+    input.placeholder = `API key for ${name} (optional)`;
+    input.value = setupProviderKeys[name] || '';
+    input.style.flex = '1';
+    input.addEventListener('input', (e) => {
+      setupProviderKeys[name] = e.target.value.trim();
+      try { sessionStorage.setItem('empires_provider_keys', JSON.stringify(setupProviderKeys)); }
+      catch (err) { /* ignore */ }
     });
+    row.appendChild(label);
+    row.appendChild(input);
+    container.appendChild(row);
   }
-
-  // Update base URL on input
-  if (baseUrlInput) {
-    baseUrlInput.addEventListener('input', (e) => {
-      setupLlmBaseUrl = e.target.value.trim();
-    });
-  }
-
-  // Update key on input
-  keyInput.addEventListener('input', (e) => {
-    setupLlmApiKey = e.target.value.trim();
-  });
-
-  // Search input — filter the rendered list on the frontend
-  if (searchInput) {
-    searchInput.addEventListener('input', (e) => {
-      llmSearchQuery = e.target.value.trim().toLowerCase();
-      renderLlmModelList();
-    });
-  }
-
-  // Fetch models from OpenAI-compatible endpoint
-  fetchBtn.addEventListener('click', async () => {
-    if (baseUrlInput) {
-      setupLlmBaseUrl = baseUrlInput.value.trim() || 'https://openrouter.ai/api/v1';
-    }
-    setupLlmApiKey = keyInput.value.trim();
-    const freeOnly = freeOnlyCheckbox?.checked ?? true;
-    const isOpenRouter = setupLlmBaseUrl.toLowerCase().includes('openrouter.ai');
-
-    statusEl.style.color = 'var(--text-muted)';
-    statusEl.textContent = `Fetching models from ${setupLlmBaseUrl}...`;
-    fetchBtn.disabled = true;
-
-    try {
-      const headers = {
-        'Content-Type': 'application/json'
-      };
-      if (isOpenRouter) {
-        headers['HTTP-Referer'] = window.location.origin || 'http://localhost:3000';
-        headers['X-Title'] = '4X Strategy Game';
-      }
-      if (setupLlmApiKey) {
-        headers['Authorization'] = `Bearer ${setupLlmApiKey}`;
-      }
-
-      let url = getModelsUrl(setupLlmBaseUrl);
-      if (isOpenRouter) {
-        url += '?sort=intelligence-high-to-low';
-        if (freeOnly) {
-          url += '&max_price=0&min_price=0';
-        }
-      }
-
-      const response = await fetch(url, { headers });
-
-      if (!response.ok) {
-        let errDetails = '';
-        try {
-          const errJson = await response.json();
-          errDetails = errJson.error?.message || errJson.message || JSON.stringify(errJson);
-        } catch {
-          errDetails = await response.text().catch(() => '');
-        }
-        throw new Error(`HTTP ${response.status}${errDetails ? `: ${errDetails}` : ''}`);
-      }
-
-      const json = await response.json();
-      const rawModels = Array.isArray(json.data)
-        ? json.data
-        : (Array.isArray(json)
-          ? json
-          : (Array.isArray(json.models) ? json.models : []));
-
-      if (rawModels.length === 0) {
-        statusEl.style.color = '#f1c40f';
-        statusEl.textContent = 'No models returned by server.';
-      } else {
-        // Preserve prior enabled flags and selection order when re-fetching
-        const existingEnabled = new Map(setupLlmModels.map(m => [m.id, m.enabled]));
-        setupLlmModels = rawModels.map(m => {
-          const id = m.id || m.name || String(m);
-          const name = m.name || m.id || String(m);
-          return {
-            id,
-            name,
-            enabled: existingEnabled.has(id) ? existingEnabled.get(id) : false
-          };
-        });
-
-        statusEl.style.color = '#2ecc71';
-        statusEl.textContent = `Successfully fetched ${setupLlmModels.length} models.`;
-
-        const picker = document.getElementById('setup-llm-model-picker');
-        if (picker) picker.style.display = 'flex';
-
-        // Clear search
-        llmSearchQuery = '';
-        if (searchInput) searchInput.value = '';
-
-        renderLlmModelList();
-      }
-    } catch (err) {
-      console.error('Failed to fetch LLM models:', err);
-      statusEl.style.color = '#ff4d4d';
-      statusEl.textContent = `Fetch error: ${err.message || err}`;
-    } finally {
-      fetchBtn.disabled = false;
-    }
-  });
 }
 
 /**
- * Returns a sorted view of setupLlmModels with selected (enabled) models first,
- * preserving relative order within each group. Maps each entry to its original
- * index in setupLlmModels so mutations target the canonical array.
+ * Phase 23.5: resolve a setup controller to its runtime form —
+ * provider key -> baseUrl + the session key for that provider.
  */
-function getSortedModelView() {
-  const indexed = setupLlmModels.map((m, i) => ({ model: m, originalIndex: i }));
-  const selected = indexed.filter(e => e.model.enabled);
-  const unselected = indexed.filter(e => !e.model.enabled);
-  return [...selected, ...unselected];
-}
-
-function renderLlmModelList() {
-  const container = document.getElementById('setup-llm-priority-list');
-  const picker = document.getElementById('setup-llm-model-picker');
-  const countEl = document.getElementById('setup-llm-selection-count');
-  if (!container) return;
-
-  if (setupLlmModels.length > 0 && picker) {
-    picker.style.display = 'flex';
+function resolveSetupController(controller) {
+  if (!controller) return null;
+  const c = JSON.parse(JSON.stringify(controller));
+  const cfg = c.config || {};
+  const provDef = aiJson?.providers?.[cfg.provider];
+  if (provDef) {
+    cfg.baseUrl = provDef.url;
+    if (setupProviderKeys[cfg.provider]) cfg.apiKey = setupProviderKeys[cfg.provider];
   }
-
-  container.innerHTML = '';
-
-  // Update selection counter
-  const selectedCount = setupLlmModels.filter(m => m.enabled).length;
-  if (countEl) {
-    countEl.textContent = `${selectedCount} selected`;
-    countEl.style.color = selectedCount > 0 ? '#2ecc71' : 'var(--accent-color)';
-  }
-
-  if (setupLlmModels.length === 0) {
-    container.innerHTML = `<div style="font-size: 12px; color: var(--text-muted); padding: 4px 0;">No models fetched yet. Click "Fetch Models" above.</div>`;
-    return;
-  }
-
-  // Get sorted view: selected first, then unselected
-  const sortedView = getSortedModelView();
-
-  // Apply search filter
-  const filteredView = llmSearchQuery
-    ? sortedView.filter(entry => {
-      const q = llmSearchQuery;
-      return entry.model.name.toLowerCase().includes(q) || entry.model.id.toLowerCase().includes(q);
-    })
-    : sortedView;
-
-  if (filteredView.length === 0) {
-    container.innerHTML = `<div style="font-size: 12px; color: var(--text-muted); padding: 4px 0;">No models match your search.</div>`;
-    return;
-  }
-
-  // Track selected items for priority badge numbering
-  let selectedRank = 0;
-
-  filteredView.forEach((entry, displayIdx) => {
-    const { model, originalIndex } = entry;
-    const isEnabled = !!model.enabled;
-
-    if (isEnabled) selectedRank++;
-
-    const row = document.createElement('div');
-    row.className = 'dynamic-row draggable-row';
-    row.dataset.originalIndex = String(originalIndex);
-    row.style.alignItems = 'center';
-    row.style.padding = '6px 10px';
-    row.style.gap = '8px';
-
-    // Only selected models are draggable
-    if (isEnabled) {
-      row.draggable = true;
-      row.style.cursor = 'grab';
-    } else {
-      row.draggable = false;
-      row.style.cursor = 'default';
-      row.style.opacity = '0.7';
-    }
-
-    // Priority badge only for selected models
-    const badgeHtml = isEnabled
-      ? `<span class="priority-badge" style="background: rgba(52, 152, 219, 0.2); color: #3498db; border: 1px solid rgba(52, 152, 219, 0.4); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 700; min-width: 24px; text-align: center;">#${selectedRank}</span>`
-      : `<span style="min-width: 24px;"></span>`;
-
-    // Drag handle only for selected models
-    const dragHandleHtml = isEnabled
-      ? `<span class="drag-handle" title="Drag to reorder">⋮⋮</span>`
-      : `<span style="width: 18px;"></span>`;
-
-    // Up/Down buttons only for selected models — operate within the selected group
-    const selectedOriginalIndices = setupLlmModels
-      .map((m, i) => m.enabled ? i : -1)
-      .filter(i => i >= 0);
-    const posInSelected = selectedOriginalIndices.indexOf(originalIndex);
-    const isFirstSelected = posInSelected === 0;
-    const isLastSelected = posInSelected === selectedOriginalIndices.length - 1;
-
-    const upDownHtml = isEnabled
-      ? `<div style="display: flex; gap: 4px;">
-          <button type="button" class="btn btn-secondary btn-small btn-model-up" style="width: 24px; padding: 2px 0;" ${isFirstSelected ? 'disabled style="opacity:0.3;cursor:not-allowed;"' : ''} title="Move up">▲</button>
-          <button type="button" class="btn btn-secondary btn-small btn-model-down" style="width: 24px; padding: 2px 0;" ${isLastSelected ? 'disabled style="opacity:0.3;cursor:not-allowed;"' : ''} title="Move down">▼</button>
-        </div>`
-      : '';
-
-    row.innerHTML = `
-      ${dragHandleHtml}
-      ${badgeHtml}
-      <input type="checkbox" class="llm-model-check" style="cursor: pointer;" ${isEnabled ? 'checked' : ''} title="${isEnabled ? 'Deselect model' : 'Select model'}">
-      <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
-        <span style="font-size: 12px; font-weight: 600; color: ${isEnabled ? '#fff' : 'var(--text-muted)'}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${model.name}</span>
-        <span style="font-size: 10px; font-family: monospace; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${model.id}</span>
-      </div>
-      ${upDownHtml}
-    `;
-
-    // Checkbox toggle (no max limit)
-    const checkbox = row.querySelector('.llm-model-check');
-    if (checkbox) {
-      checkbox.addEventListener('change', (e) => {
-        model.enabled = e.target.checked;
-        renderLlmModelList();
-      });
-    }
-
-    // Up / Down buttons — swap within the canonical setupLlmModels array
-    if (isEnabled) {
-      const upBtn = row.querySelector('.btn-model-up');
-      const downBtn = row.querySelector('.btn-model-down');
-
-      if (upBtn && !isFirstSelected) {
-        upBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const prevOrigIdx = selectedOriginalIndices[posInSelected - 1];
-          // Swap in the canonical array
-          const temp = setupLlmModels[prevOrigIdx];
-          setupLlmModels[prevOrigIdx] = setupLlmModels[originalIndex];
-          setupLlmModels[originalIndex] = temp;
-          renderLlmModelList();
-        });
-      }
-
-      if (downBtn && !isLastSelected) {
-        downBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const nextOrigIdx = selectedOriginalIndices[posInSelected + 1];
-          // Swap in the canonical array
-          const temp = setupLlmModels[nextOrigIdx];
-          setupLlmModels[nextOrigIdx] = setupLlmModels[originalIndex];
-          setupLlmModels[originalIndex] = temp;
-          renderLlmModelList();
-        });
-      }
-
-      // Drag and drop — only among selected models
-      row.addEventListener('dragstart', (e) => {
-        draggedModelIndex = originalIndex;
-        row.classList.add('dragging');
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', String(originalIndex));
-      });
-
-      row.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-        row.classList.add('drag-over');
-      });
-
-      row.addEventListener('dragleave', () => {
-        row.classList.remove('drag-over');
-      });
-
-      row.addEventListener('drop', (e) => {
-        e.preventDefault();
-        row.classList.remove('drag-over');
-        if (draggedModelIndex !== null && draggedModelIndex !== originalIndex) {
-          // Only allow dropping onto other selected models
-          if (model.enabled) {
-            const [movedItem] = setupLlmModels.splice(draggedModelIndex, 1);
-            // Recalculate target index since splice shifted indices
-            const targetIdx = setupLlmModels.indexOf(model);
-            setupLlmModels.splice(targetIdx >= 0 ? targetIdx : originalIndex, 0, movedItem);
-            draggedModelIndex = null;
-            renderLlmModelList();
-          }
-        }
-      });
-
-      row.addEventListener('dragend', () => {
-        draggedModelIndex = null;
-        container.querySelectorAll('.draggable-row').forEach(r => {
-          r.classList.remove('dragging');
-          r.classList.remove('drag-over');
-        });
-      });
-    }
-
-    container.appendChild(row);
-  });
+  c.config = cfg;
+  return c;
 }
 
 
@@ -1119,41 +885,16 @@ function handleStartGameClicked() {
     winCondition.relativeScore = parseFloat(document.getElementById('setup-win-relative-value').value) || 2;
   }
 
-  // LLM settings & session storage persistence
-  const baseUrlInput = document.getElementById('setup-llm-base-url');
-  if (baseUrlInput) {
-    setupLlmBaseUrl = baseUrlInput.value.trim() || 'https://openrouter.ai/api/v1';
-  }
-  const keyInput = document.getElementById('setup-llm-api-key');
-  if (keyInput) {
-    setupLlmApiKey = keyInput.value.trim();
-  }
-  const orderedModels = setupLlmModels.filter(m => m.enabled).map(m => m.id);
-
-  try {
-    sessionStorage.setItem('empires_llm_config', JSON.stringify({
-      baseUrl: setupLlmBaseUrl,
-      apiKey: setupLlmApiKey,
-      models: setupLlmModels
-    }));
-    sessionStorage.setItem('empires_openrouter_config', JSON.stringify({
-      baseUrl: setupLlmBaseUrl,
-      apiKey: setupLlmApiKey,
-      models: setupLlmModels
-    }));
-  } catch (e) {
-    console.warn('Failed to save LLM config to session storage:', e);
-  }
+  // Phase 23.5: provider keys were captured live into setupProviderKeys.
 
   const settings = {
     mapSize: parseInt(document.getElementById('setup-map-size').value, 10),
     players: setupPlayers.map((p, i) => {
-      let controller = p.controller;
       return {
         id: i + 1,
         name: p.name.trim() || `Player ${i + 1}`,
         color: p.color,
-        controller: controller
+        controller: resolveSetupController(p.controller)
       };
     }),
     initialization: {
@@ -1190,13 +931,7 @@ function handleStartGameClicked() {
         };
       })()
       : null,
-    winCondition: Object.keys(winCondition).length > 0 ? winCondition : null,
-    llm: {
-      ...(defaultSettings?.llm || {}),
-      baseUrl: setupLlmBaseUrl,
-      apiKey: setupLlmApiKey,
-      orderedModels: orderedModels
-    }
+    winCondition: Object.keys(winCondition).length > 0 ? winCondition : null
   };
 
 
@@ -2109,7 +1844,8 @@ export async function closeChatModal() {
   const { humanPlayer, aiPlayer, resolvePromise } = currentChatSession;
   if (aiPlayer && humanPlayer) {
     // Requirement 7: When human exits chat, allow the AI player to add a note to summarize the chat
-    await aiPlayer.aiManager.summarizeChatAndAddNote(humanPlayer);
+    const mgr = await aiPlayer.getAiManager();
+    if (mgr) await mgr.summarizeChatAndAddNote(humanPlayer);
   }
 
   updatePlayersUI();
@@ -2152,22 +1888,25 @@ export async function sendChatMessage() {
   `;
 
   try {
-    const reply = await aiPlayer.aiManager.generateChatReply(humanPlayer);
+    const mgr = await aiPlayer.getAiManager();
+    if (mgr) {
+      const reply = await mgr.generateChatReply(humanPlayer);
 
-    // Add AI message to gameState
-    gameState.addChatMessage(aiPlayer, humanPlayer, reply.content);
-    renderChatMessages();
+      // Add AI message to gameState
+      gameState.addChatMessage(aiPlayer, humanPlayer, reply.content);
+      renderChatMessages();
 
-    if (reply.ended) {
-      // Summary note is added by closeChatModal() when the human closes the
-      // modal — summarizing here too would double the note and the LLM call.
-      statusIndicator.innerHTML = `<span style="color: #f1c40f;">[ ${aiPlayer.name} has concluded the negotiations. ]</span>`;
-      updatePlayersUI();
-    } else {
-      statusIndicator.innerHTML = '';
-      input.disabled = false;
-      sendBtn.disabled = false;
-      input.focus();
+      if (reply.ended) {
+        // Summary note is added by closeChatModal() when the human closes the
+        // modal — summarizing here too would double the note and the LLM call.
+        statusIndicator.innerHTML = `<span style="color: #f1c40f;">[ ${aiPlayer.name} has concluded the negotiations. ]</span>`;
+        updatePlayersUI();
+      } else {
+        statusIndicator.innerHTML = '';
+        input.disabled = false;
+        sendBtn.disabled = false;
+        input.focus();
+      }
     }
   } catch (err) {
     console.error('Error generating AI chat reply:', err);

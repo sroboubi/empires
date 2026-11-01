@@ -1,0 +1,12 @@
+[
+    {
+        "name": "Anselm",        
+        "description": "A wise and strategic leader, known for his diplomatic skills and ability to maintain peace.",        
+        "focus": ["exploration", "diplomacy", "defense"]
+    },
+    {
+        "name": "Yrsa",        
+        "description": "A fierce and determined leader, known for her military prowess and unwavering loyalty.",        
+        "focus": ["exploration", "military", "expansion"]
+    }
+]

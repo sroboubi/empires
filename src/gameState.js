@@ -244,11 +244,13 @@ export class GameState {
    *   so they don't surface as unhandled rejections in the browser.
    */
   startTurn(onTurnEnd) {
-    if (this.activePlayer) {
-      // step() is async and always returns a promise; AI errors are
-      // already logged in Player.step(), so swallow here to keep them
-      // from surfacing as unhandled rejections in the browser.
-      this.activePlayer.step(onTurnEnd).catch(() => {});
+    if (this.activePlayer) {      
+      this.activePlayer.step(onTurnEnd).catch((err) => {
+        console.error(`Error during step for player ${this.name}:`, err);
+        if (typeof onTurnEnd === 'function') {
+          onTurnEnd();
+        }
+      });
     }
   }
 
