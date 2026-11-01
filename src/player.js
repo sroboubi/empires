@@ -184,20 +184,18 @@ export class Player {
 
     this.updateVisibility();
     this.recalculateScore();
-
-    const aiManager = await this.getAiManager();
-    if (aiManager) {
-      try {
-        await aiManager.processTurn();
-      } catch (err) {
-        console.error(`Error during AI turn for player ${this.name}:`, err);
-        throw err;
-      } finally {
-        if (typeof onTurnEnd === 'function') {
-          onTurnEnd();
-        }
+    
+    try {
+      const aiManager = await this.getAiManager();
+      if (aiManager) await aiManager.processTurn();
+    } catch (err) {
+      console.error(`Error during step for player ${this.name}:`, err);
+      throw err;
+    } finally {
+      if (typeof onTurnEnd === 'function' && this.isAI) {
+        onTurnEnd();
       }
-    }
+    }  
   }
 
   /**
