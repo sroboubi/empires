@@ -258,7 +258,7 @@ async function init() {
           details: `Initiated diplomatic chat with ${targetAi.name} (costs 1 order)`
         });
 
-        updatePlayersUI(gameState);
+        updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
         openChatModal(activeP, targetAi);
       });
     }
@@ -970,7 +970,7 @@ function startNewGame(settings) {
   drawGrid(gameState);
   reconcileEntities(gameState);
   buildCellResources(gameState);
-  updatePlayersUI(gameState);
+  updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
 
   // Focus camera on center of mass of active player's entities
   if (gameState.activePlayer && gameState.entities.length > 0) {
@@ -1128,7 +1128,7 @@ async function doLoadGame(saveName) {
     drawGrid(gameState);
     reconcileEntities(gameState);
     buildCellResources(gameState);
-    updatePlayersUI(gameState);
+    updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
 
     // Focus camera on center of mass of active player's entities
     if (gameState.activePlayer && gameState.entities.length > 0) {
@@ -1256,7 +1256,7 @@ function updateReplayUI(state) {
     playBtn.textContent = state.isPlaying ? '⏸ Pause' : '▶ Play';
   }
 
-  updatePlayersUI(gameState);
+  updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
 }
 
 // exitReplayMode removed - users refresh the page to exit replay mode
@@ -1296,7 +1296,7 @@ export async function nextTurn() {
   updateHexFog(gameState);
   reconcileEntities(gameState);
   reconcileCellResources(gameState);
-  updatePlayersUI(gameState);
+  updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
 
   // Focus camera on center of mass of active player's entities
   if (gameState.activePlayer && gameState.entities.length > 0 &&
@@ -1556,7 +1556,7 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
         updateHexFog(gameState);
         reconcileEntities(gameState);
         reconcileCellResources(gameState);
-        updatePlayersUI(gameState);
+        updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
 
         if (selectedEntity && !gameState.entities.includes(selectedEntity)) {
           deselectEntity();
@@ -1726,7 +1726,7 @@ export async function closeChatModal() {
     if (mgr) await mgr.summarizeChatAndAddNote(humanPlayer);
   }
 
-  updatePlayersUI(gameState);
+  updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
 
   if (resolvePromise) {
     resolvePromise();
@@ -1778,7 +1778,7 @@ export async function sendChatMessage() {
         // Summary note is added by closeChatModal() when the human closes the
         // modal — summarizing here too would double the note and the LLM call.
         statusIndicator.innerHTML = `<span style="color: #f1c40f;">[ ${aiPlayer.name} has concluded the negotiations. ]</span>`;
-        updatePlayersUI(gameState);
+        updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
       } else {
         statusIndicator.innerHTML = '';
         input.disabled = false;

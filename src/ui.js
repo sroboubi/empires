@@ -7,8 +7,11 @@ let playerHoverTimer = null;
  * Update the players UI list.
  * Moved from main.js to break up the file.
  * @param {Object} gameState - The active GameState
+ * @param {Object} [callbacks] - Optional callbacks: { onContextMenu(x, y, player) }
+ *   Context menu lives in main.js (entangled with chat/game state), so it's
+ *   injected rather than imported to keep ui.js isolated.
  */
-export function updatePlayersUI(gameState) {
+export function updatePlayersUI(gameState, callbacks = {}) {
   const container = document.getElementById('players-list');
   container.innerHTML = '';
 
@@ -121,7 +124,9 @@ export function updatePlayersUI(gameState) {
       if (!player.isAI) return;
       if (activeP && activeP.id === player.id) return;
 
-      showPlayerContextMenu(ev.clientX, ev.clientY, player);
+      if (callbacks.onContextMenu) {
+        callbacks.onContextMenu(ev.clientX, ev.clientY, player);
+      }
     });
 
     container.appendChild(li);
