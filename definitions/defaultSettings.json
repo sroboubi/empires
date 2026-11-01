@@ -4,18 +4,29 @@
     {
       "id": 1,
       "name": "English Empire",
-      "color": "#ff4d4d",
-      "description": "Aggressive expansionist empire",
+      "color": "#ff4d4d",      
       "controller": null
     },
     {
       "id": 2,
       "name": "French Empire",
       "color": "#3399ff",
-      "description": "Strategic maritime alliance",
+      "description": "Likes to speak with an accent",
       "controller": {
+        "url": "./ai/standard/smartManager.js",        
         "personality": "defensive",
         "strategy": "economic focused"
+      }
+    },
+    {
+      "id": 3,
+      "name": "German Empire",
+      "color": "#ffcc00",
+      "description": "Militaristic expansionist empire",
+      "controller": {
+        "url": "./ai/llm/json/harness.js",        
+        "personality": "aggressive",
+        "strategy": "military focused"
       }
     }
   ],

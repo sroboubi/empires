@@ -59,11 +59,11 @@ export class Player {
    */
   async getAiManager() {
     if (this.aiManager) return this.aiManager;
-    if (!this.controller?.url || !this.controller?.name || this.isReplayAI) return null;
-    const module = await import(this.controller.url);
-    const ManagerClass = module[this.controller?.name] || module.default;
+    if (!this.controller?.url || this.isReplayAI) return null;
+    const module = await import(this.controller.url);    
+    const ManagerClass = module.default;
     if (!ManagerClass) {
-      throw new Error(`Class "${!this.controller?.name}" not found in module.`);
+      throw new Error(`Default Class not found in module ${this.controller.url}`);
     }
     this.aiManager = new ManagerClass(this, this.gameState, this.controller);
     return this.aiManager;
@@ -170,12 +170,9 @@ export class Player {
    * never imports nextTurn() from main.js (that import is what forced
    * headless harnesses to bypass step() entirely). The driver passes
    * its continuation as onTurnEnd: the browser passes nextTurn, and
-   * harnesses that drive turns explicitly pass a no-op. The AI turn
-   * runs only when a continuation is provided, so setup paths that
-   * pass nothing get the synchronous bookkeeping only, with no
-   * background AI turn. AI errors are logged here and then rethrown,
-   * so the awaiting driver can count them; the turn still advances
-   * via the finally callback.
+   * harnesses that drive turns explicitly pass a no-op. AI errors are 
+   * logged here and then rethrown, so the awaiting driver can count them; 
+   * the turn still advances via the finally callback.
    */
   async step(onTurnEnd) {
     this.refillOrders();
@@ -187,14 +184,17 @@ export class Player {
     this.updateVisibility();
     this.recalculateScore();
 
-    if (this.getAiManager() && typeof onTurnEnd === 'function') {
+    const aiManager = await this.getAiManager();
+    if (aiManager) {
       try {
-        await this.getAiManager().processTurn();
+        await aiManager.processTurn();
       } catch (err) {
         console.error(`Error during AI turn for player ${this.name}:`, err);
         throw err;
       } finally {
-        onTurnEnd();
+        if (typeof onTurnEnd === 'function') {
+          onTurnEnd();
+        }
       }
     }
   }
