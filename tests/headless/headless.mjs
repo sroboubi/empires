@@ -108,8 +108,20 @@ async function main() {
     { id: 2, name: 'Red', color: '#ff0000', controller: 'ai', description: '' },
   ];
   // Ensure every player has a controller field (null = human/no AI)
+  // Map string shortcuts to controller objects (Player.getAiManager requires controller.url)
   for (const p of players) {
     if (p.controller === undefined) p.controller = 'ai';
+    if (p.controller === 'ai') {
+      p.controller = { url: './ai/standard/smartManager.js' };
+    } else if (p.controller === 'llm') {
+      // LLM controller needs full config from the config file; if only the
+      // string was given, fall back to the menu harness with local defaults.
+      p.controller = {
+        url: './ai/llm/menu/harness.js',
+        config: p.controllerConfig || {},
+      };
+      delete p.controllerConfig;
+    }
   }
 
   // Checkpoint wiring: --resume <dir|file> loads the latest checkpoint;
@@ -200,7 +212,7 @@ async function main() {
   if (cfg.llm?.orderedModels?.length) console.log(`[headless] LLM enabled: ${cfg.llm.orderedModels.join(', ')}`);
 
   // AI managers are created lazily by Player.getAiManager() from each
-  // player's controller URL (see src/ai/managers.js) — no manual swapping
+  // player's controller URL — no manual swapping
   // needed here. Eagerly resolve now so a bad controller URL fails fast.
   for (const p of gameState.players) {
     if (p.controller) await p.getAiManager();

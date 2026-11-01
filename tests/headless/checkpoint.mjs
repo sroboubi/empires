@@ -51,7 +51,10 @@ export function saveCheckpoint(dir, gameState) {
   mkdirSync(dir, { recursive: true });
   const data = JSON.parse(gameState.serialize());
   // Never persist credentials in checkpoint files (see header).
-  if (data.settings?.llm) delete data.settings.llm.apiKey;
+  // API keys live per-player at players[].controller.config.apiKey.
+  for (const p of data.players || []) {
+    if (p.controller?.config?.apiKey) delete p.controller.config.apiKey;
+  }
   const payload = JSON.stringify(data);
   const tmp = path.join(dir, `.${CHECKPOINT_FILE}.tmp-${process.pid}`);
   const final = path.join(dir, CHECKPOINT_FILE);
