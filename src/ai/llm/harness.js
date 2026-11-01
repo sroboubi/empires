@@ -1,7 +1,7 @@
 import { BaseManager } from "../baseManager.js";
 import { LLMClient } from "./client.js";
 import responseSchema from './response.schema.json' with { type: 'json' };
-import { attack, support, build, explore, onActionDone, findBuildCandidates, isCombatCapable } from "../utils.js";
+import { attack, support, build, explore, onActionDone, findBuildCandidates } from "../utils.js";
 import { HexGrid } from '../../hexGrid.js';
 import { manifestToMarkdown, serializeStateToMarkdown, summarizeTerrain } from "./markdown.js";
 import { CONFIG } from "../../config.js";
@@ -11,7 +11,6 @@ export class Harness extends BaseManager {
         super(player, gameState, controller);
         this.llmClient = null;
         this.cachedCommandSystemPrompt = null;
-        this.lastCallStartMs = 0;
     }
 
     /**
@@ -24,7 +23,7 @@ export class Harness extends BaseManager {
                 baseUrl: this.gameState.settings?.llm?.baseUrl,
                 apiKey: this.gameState.settings?.llm?.apiKey,
                 orderedModels: this.gameState.settings?.llm?.orderedModels,
-                timeoutMs: this.gameState.settings?.llm?.timeoutMs ?? 30000,
+                timeoutMs: 30000,
                 callDelayMs: this.gameState.settings?.llm?.callDelayMs,
                 generationConfig: {
                     temperature: 0.1,
@@ -39,22 +38,6 @@ export class Harness extends BaseManager {
     /**
      * Processes a player's turn by summarizing the game state and interacting with the AI controller.     
      */
-    /**
-     * Enforces a minimum interval between LLM call starts (config
-     * llm.callDelayMs, 0 = no pacing). Generation time counts toward
-     * the interval, so a 4500ms interval with ~3s generations adds
-     * only ~1.5s of waiting per call. Keeps burst-prone providers
-     * (e.g. Gemini free tier, 15 RPM) under their rate limit.
-     * Applied to the command loop only; chat/summary calls are rare.
-     */
-    async paceCall() {
-        const intervalMs = this.gameState.settings?.llm?.callDelayMs || 0;
-        if (!intervalMs) return;
-        const waitMs = intervalMs - (Date.now() - this.lastCallStartMs);
-        if (waitMs > 0) await new Promise(r => setTimeout(r, waitMs));
-        this.lastCallStartMs = Date.now();
-    }
-
     async processTurn() {
         const client = this.getLLMClient();
         const commandSystemPrompt = await this.getCommandSystemPrompt();
@@ -100,7 +83,6 @@ export class Harness extends BaseManager {
             console.debug("system prompt:", commandSystemPrompt);
             console.debug("user content:", userContent);
 
-            await this.paceCall();
             response = await client.generate(userContent, commandSystemPrompt, { responseSchema });
             console.debug("response:", response);
 
@@ -190,7 +172,7 @@ export class Harness extends BaseManager {
                 lastResponseError = null;
 
                 // Action successfully executed: reconcile and render
-                await onActionDone(this.gameState, null, this.describeAction(response));
+                await onActionDone(this.gameState);
                 turnResponseLog.push(response);
             } else if (command === 'CHAT') {
                 if (this.player.orders <= 0) {
@@ -223,7 +205,7 @@ export class Harness extends BaseManager {
                 console.log(`[Harness] ${this.player.name} initiated diplomatic chat with ${targetPlayer.name}`);
                 await this.chat(this.player, targetPlayer, response.message || response.thoughtProcess);
 
-                await onActionDone(this.gameState, null, `Chat with ${targetPlayer.name}`);
+                await onActionDone(this.gameState);
                 lastActionResult = `[completed] Concluded diplomatic session with ${targetPlayer.name}`;
                 lastResponseError = null;
                 turnResponseLog.push(response);
@@ -394,11 +376,6 @@ export class Harness extends BaseManager {
     async buildChatSystemPrompt(otherPlayer) {
         const myScore = this.player.score;
         const otherScore = otherPlayer.score;
-        const summarizeUnitCounts = (list) => {
-            const m = new Map();
-            for (const e of list || []) m.set(e.name, (m.get(e.name) || 0) + 1);
-            return [...m.entries()].map(([n, c]) => `${c} ${n}`).join(', ') || 'none';
-        };
 
         const response = await fetch(CONFIG.CHAT_PROMPT_URL);
         if (!response.ok) {
@@ -418,10 +395,7 @@ export class Harness extends BaseManager {
             .replace('{OTHER_MIL}', otherScore.military)
             .replace('{OTHER_ECON}', otherScore.economic)
             .replace('{OTHER_EXP}', otherScore.exploration)
-            .replace('{OTHER_TOTAL}', otherScore.total)
-            .replace('{MY_RESOURCES}', Object.entries(this.player.resources || {}).map(([k, v]) => `${k} ${Math.round(v)}`).join(', ') || 'none')
-            .replace('{MY_UNITS}', summarizeUnitCounts(this.player.getEntities(this.gameState)))
-            .replace('{OTHER_UNITS}', summarizeUnitCounts((this.gameState.entities || []).filter(e => e.owner === otherPlayer && this.player.isVisible?.(e.q, e.r))));
+            .replace('{OTHER_TOTAL}', otherScore.total);
     }
 
     /**
@@ -520,57 +494,28 @@ export class Harness extends BaseManager {
             opp.entities = (opp.entities || []).map(e => this.summarizeEntity(e));
         });
 
-        const resourceProfile = this.player.getResourceProfile(this.gameState);
-        const ownSummaries = this.player.getEntities(this.gameState).map(e => this.summarizeEntity(e));
         const history = {};
         for (let roundNum = this.gameState.currentRound; roundNum > Math.max(this.gameState.currentRound - 3, 1); roundNum--) {
             const h = this.player.history.get(roundNum);
             if (h) history[roundNum] = h;
         }
 
-        // Threats: visible enemies adjacent to any own unit (melee range; ranged
-        // enemies threaten from farther, but adjacency is the certain threat).
-        const ownUnits = this.player.getEntities(this.gameState);
-        const threats = [];
-        for (const e of this.gameState.entities || []) {
-            if (e.destroyed || !e.cell) continue;
-            if (e.owner && e.owner.id === this.player.id) continue;
-            if (!this.player.isVisible?.(e.q, e.r)) continue;
-            const neighbor = ownUnits.find(o => o.cell && HexGrid.distance(o.cell, e.cell) === 1);
-            if (neighbor) threats.push({ id: e.id, name: e.name, adjacentTo: neighbor.id });
-        }
-        // Deficit remedies: for each depleting resource, the best-yield producer
-        // buildable now by an owned unit (producers already in buildableNow).
-        const manifestEntities = this.gameState.manifestData?.entities || this.gameState.manifestData || {};
-        const manifestList = Array.isArray(manifestEntities) ? manifestEntities : Object.values(manifestEntities);
-        const byName = new Map(manifestList.map(m => [m.name, m]));
-        const remedies = [];
-        for (const [res, net] of Object.entries(resourceProfile.netIncome || {})) {
-            if (!(net < 0)) continue;
-            let best = null;
-            for (const sm of ownSummaries) {
-                for (const b of sm.buildableNow || []) {
-                    const y = byName.get(b)?.yields?.[res];
-                    if (y > 0 && (!best || y > best.yield)) best = { producer: b, builderId: sm.id, yield: y };
-                }
-            }
-            if (best) remedies.push({ resource: res, net, ...best });
-        }
+        const visibleCellsList = Array.from(this.player.visibleCells || []);
+        const exploredOnly = Array.from(this.player.exploredCells || []).filter(c => !this.player.visibleCells.has(c));
 
         return {
             turn: this.gameState.currentRound,
             orders: this.player.orders,
             maxOrders: this.player.maxOrders,
-            resources: resourceProfile,
+            resources: this.player.getResourceProfile(this.gameState),
             score: this.player.score,
             history: history,
-            entities: ownSummaries,
-            opponents: opponents,
-            knownPlayers: (this.gameState.players || []).filter(p => p !== this.player).map(p => ({ name: p.name, score: p.score })),
-            mapSize: this.gameState.settings?.mapSize,
-            exploredPercent: this.gameState.hexGrid?.cells?.size ? Math.round((this.player.exploredCells?.size || 0) / this.gameState.hexGrid.cells.size * 100) : null,
-            threats: threats,
-            deficitRemedies: remedies
+            // cells: {
+            //     visible: visibleCellsList.map(cellKey => this.getCellInfo(cellKey)).filter(Boolean),
+            //     explored: exploredOnly.map(cellKey => this.getCellInfo(cellKey)).filter(Boolean)
+            // },
+            entities: this.player.getEntities(this.gameState).map(e => this.summarizeEntity(e)),
+            opponents: opponents
         };
     }
 
@@ -586,7 +531,6 @@ export class Harness extends BaseManager {
             health: entity.health,
             maxHealth: entity.maxHealth,
             actionPoints: entity.actionPoints,
-            active: entity.active,
             damage: entity.damage,
             armor: entity.armor
         };
@@ -641,63 +585,13 @@ export class Harness extends BaseManager {
                     if (!repairables.includes(e.name)) continue;
                     if (e.health === undefined || e.maxHealth === undefined || e.health >= e.maxHealth) continue;
                     if (e.q === undefined || !this.player.isVisible?.(e.q, e.r)) continue;
-                    const entry = {
+                    summary.damagedRepairables.push({
                         id: e.id,
                         name: e.name,
                         health: Math.round(e.health),
                         maxHealth: e.maxHealth
-                    };
-                    // Position + reachability from this repairer's point of view (own units only).
-                    if (entity.owner?.id === this.player.id && entity.cell && e.cell) {
-                        entry.distance = HexGrid.distance(entity.cell, e.cell);
-                        entry.direction = this.gameState.hexGrid.directionTo(entity.cell, e.cell, true).fromSource;
-                        // Reachable this turn: cheapest adjacent staging cell within AP, reserving 1 AP for the repair itself.
-                        const ap = entity.actionPoints ?? 0;
-                        let minCost = null;
-                        for (const nb of this.gameState.hexGrid.getNeighbors(e.q, e.r)) {
-                            const costFunc = typeof entity.getMovementCost === 'function'
-                                ? entity.getMovementCost.bind(entity)
-                                : (terrain) => terrain.movementCost || 1;
-                            const res = this.gameState.hexGrid.movementCostTo(entity.cell, nb, costFunc);
-                            if (res && (minCost === null || res.cost < minCost)) minCost = res.cost;
-                        }
-                        entry.reachable = minCost !== null && minCost + 1 <= ap;
-                    }
-                    summary.damagedRepairables.push(entry);
+                    });
                 }
-            }
-        }
-
-        // Spatial awareness for own units: nearest visible enemy/ally + what can be struck now.
-        // Pairwise hex distances only — no map scans. Ranged bands honored (bowman 1-3, tower 2-4);
-        // sight/obstruction is not modeled here, so a flagged target can still fail on obstruction.
-        if (entity.owner?.id === this.player.id && entity.cell) {
-            let nearestEnemy = null, nearestAlly = null;
-            for (const e of this.gameState.entities || []) {
-                if (e.destroyed || e.id === entity.id || !e.cell) continue;
-                const d = HexGrid.distance(entity.cell, e.cell);
-                const dir = this.gameState.hexGrid.directionTo(entity.cell, e.cell, true).fromSource;
-                if (e.owner && e.owner.id === this.player.id) {
-                    if (!nearestAlly || d < nearestAlly.distance) nearestAlly = { id: e.id, distance: d, direction: dir };
-                } else if (this.player.isVisible?.(e.q, e.r)) {
-                    if (!nearestEnemy || d < nearestEnemy.distance) nearestEnemy = { id: e.id, distance: d, direction: dir };
-                }
-            }
-            if (nearestEnemy) summary.nearestEnemy = nearestEnemy;
-            if (nearestAlly) summary.nearestAlly = nearestAlly;
-            if (entity.active && (entity.actionPoints ?? 0) >= 1 && isCombatCapable(entity)) {
-                const range = entity.range && typeof entity.range === 'object'
-                    ? { min: entity.range.minCells ?? 1, max: entity.range.maxCells ?? 1 }
-                    : { min: 1, max: 1 };
-                const targets = [];
-                for (const e of this.gameState.entities || []) {
-                    if (e.destroyed || !e.cell) continue;
-                    if (e.owner && e.owner.id === this.player.id) continue;
-                    if (!this.player.isVisible?.(e.q, e.r)) continue;
-                    const d = HexGrid.distance(entity.cell, e.cell);
-                    if (d >= range.min && d <= range.max) targets.push(e.id);
-                }
-                if (targets.length) summary.canAttackNow = targets;
             }
         }
 
@@ -720,4 +614,19 @@ export class Harness extends BaseManager {
         return `Unknown action`;
     }
 
+    getCellInfo(cellCoordStr) {
+        if (typeof cellCoordStr === 'string') {
+            const [q, r] = cellCoordStr.split(',').map(Number);
+            const cell = this.gameState.hexGrid.getCell(q, r);
+            if (!cell) return null;
+            return this.cellToString(cell);
+        }
+        return null;
+    }
+
+    cellToString(cell) {
+        if (!cell) return '';
+        const tName = cell.terrain?.name || 'Unknown';
+        return `${cell.q},${cell.r}:${tName}`;
+    }
 }
