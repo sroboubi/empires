@@ -13,7 +13,7 @@ import { HexGrid, DIRECTIONS_8 } from './hexGrid.js';
 import { camelToTitle, sleep, calculateAttackMultiplier } from './utils.js';
 import { applyResourceYieldBonus } from './resources.js';
 import { reconcileEntities } from './renderer.js';
-import * as mainModule from './main.js';
+import { updatePlayersUI } from './ui.js';
 import Entity from './entity.js';
 import { CONFIG } from './config.js';
 
@@ -979,7 +979,7 @@ export class AiHelper {
         }
         console.debug("AI action done (visible)");
         this.reconcileEntities(gameState);
-        mainModule.updatePlayersUI?.();
+        updatePlayersUI(this.gameState);
         await this.sleep(config.actionSleepMs ?? 0);
     }
 }
