@@ -28,11 +28,8 @@ export class LlmBaseManager extends BaseManager {
     getLLMClient() {
         if (!this.llmClient) {
             const cc = this.player.controller?.config || {};
-            const provider = cc.provider || '';
-            const baseUrl = cc.baseUrl
-                || (typeof provider === 'string' && /^https?:\/\//.test(provider) ? provider : null);
             this.llmClient = new LLMClient({
-                baseUrl,
+                baseUrl: cc.baseUrl,
                 apiKey: cc.apiKey,
                 orderedModels: cc.model,
                 timeoutMs: cc.timeoutMs ?? 30000,
