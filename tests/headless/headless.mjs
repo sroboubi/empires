@@ -132,7 +132,7 @@ async function main() {
     if (opts.checkpointDir &&
       path.resolve(checkpointDir) !== path.resolve(path.dirname(resumePath)) &&
       existsSync(path.join(checkpointDir, CHECKPOINT_FILE))) {
-      throw new Error(`refusing resume: --checkpoint-dir ${checkpointDir} already holds a checkpoint from another run — resume without --checkpoint-dir to keep checkpointing into the resume dir`);
+        throw new Error(`refusing resume: --checkpoint-dir ${checkpointDir} already holds a checkpoint from another run — resume without --checkpoint-dir to keep checkpointing into the resume dir`);
     }
   }
 
