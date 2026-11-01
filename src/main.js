@@ -397,10 +397,8 @@ function renderSetupPlayers() {
     row.className = 'dynamic-row';
 
     // Phase 23.2: controller dropdown (human or a controller from ai.json).
-    // The picked key is stored explicitly on the player: several controllers
-    // can share one harness URL, so re-deriving the key from the URL alone
-    // would collapse them to the first match.
-    const ctrlKey = p.controllerKey || controllerKeyFor(p.controller);
+    // The picked key is stored explicitly on the player.
+    const ctrlKey = p.controllerKey || 'human';
     const isAI = ctrlKey !== 'human';
     const ctrlOpts = `<option value="human"${!isAI ? ' selected' : ''}>Human</option>` +
       Object.keys(aiJson?.controllers || {}).map(k =>
@@ -438,9 +436,7 @@ function renderSetupPlayers() {
     if (leaderSelect) {
       leaderSelect.addEventListener('change', (e) => {
         const leader = leadersJson.find(l => l.name === e.target.value);
-        if (leader && p.controller) {
-          p.controller.description = leader.description;
-          p.controller.focus = [...leader.focus];
+        if (leader) {
           p.name = leader.name;
           leaderSelect.title = leaderTitle(leader.name);
         }
@@ -449,17 +445,10 @@ function renderSetupPlayers() {
     ctrlSelect.addEventListener('change', (e) => {
       const key = e.target.value;
       p.controllerKey = key;
-      if (key === 'human') {
-        p.controller = null;
-      } else {
-        const def = aiJson.controllers[key];
-        p.controller = { url: def.url, config: JSON.parse(JSON.stringify(def.config || {})) };
+      if (key !== 'human') {
+        // Default to first leader if current name isn't a leader
         const leader = leadersJson.find(l => l.name === p.name) || leadersJson[0];
-        if (leader) {
-          p.controller.description = leader.description;
-          p.controller.focus = [...leader.focus];
-          p.name = leader.name;
-        }
+        if (leader) p.name = leader.name;
       }
       renderSetupPlayers();
     });
@@ -483,7 +472,7 @@ function addSetupPlayerRow() {
     id: newId,
     name: `Player ${newId}`,
     color: color,
-    controller: {} // Default to AI controller
+    controllerKey: 'human'
   });
   renderSetupPlayers();
 }
@@ -726,14 +715,6 @@ async function loadAiDefinitions() {
 }
 
 /** Controller key for a setup player's controller object (matched by URL). */
-function controllerKeyFor(controller) {
-  if (!controller || !aiJson) return 'human';
-  const key = Object.keys(aiJson.controllers || {}).find(
-    k => aiJson.controllers[k].url === controller.url
-  );
-  return key || 'human';
-}
-
 /** Hover/selected-leader tooltip text (Phase 23.4). */
 function leaderTitle(name) {
   const l = leadersJson.find(x => x.name === name);
@@ -774,20 +755,37 @@ function setupAiConfigUI() {
 }
 
 /**
- * Phase 23.5: resolve a setup controller to its runtime form —
- * provider key -> baseUrl + the session key for that provider.
+ * Build a runtime controller from a controller key and player name.
+ * Looks up the controller definition in ai.json, resolves the provider
+ * URL, adds the API key from session storage if present, and overlays
+ * the leader's description/focus based on the player name.
+ * Returns null for 'human'.
  */
-function resolveSetupController(controller) {
-  if (!controller) return null;
-  const c = JSON.parse(JSON.stringify(controller));
-  const cfg = c.config || {};
-  const provDef = aiJson?.providers?.[cfg.provider];
+function buildController(key, playerName) {
+  if (!key || key === 'human' || !aiJson) return null;
+  const def = aiJson.controllers?.[key];
+  if (!def) return null;
+  const controller = {
+    url: def.url,
+    config: JSON.parse(JSON.stringify(def.config || {})),
+  };
+  // Overlay leader description/focus if player name matches a leader
+  const leader = leadersJson.find(l => l.name === playerName);
+  if (leader) {
+    controller.description = leader.description;
+    controller.focus = [...leader.focus];
+  } else if (def.description) {
+    controller.description = def.description;
+    controller.focus = def.focus ? [...def.focus] : undefined;
+  }
+  // Resolve provider: config.provider is a provider name in ai.json
+  const cfg = controller.config;
+  const provDef = aiJson.providers?.[cfg.provider];
   if (provDef) {
     cfg.baseUrl = provDef.url;
     if (setupProviderKeys[cfg.provider]) cfg.apiKey = setupProviderKeys[cfg.provider];
   }
-  c.config = cfg;
-  return c;
+  return controller;
 }
 
 
@@ -894,7 +892,7 @@ function handleStartGameClicked() {
         id: i + 1,
         name: p.name.trim() || `Player ${i + 1}`,
         color: p.color,
-        controller: resolveSetupController(p.controller)
+        controller: buildController(p.controllerKey, p.name)
       };
     }),
     initialization: {
