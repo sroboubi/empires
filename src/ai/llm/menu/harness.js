@@ -102,7 +102,11 @@ export class MenuHarness extends LlmBaseManager {
                     turnResponseLog.map((l, i) => `${i + 1}. ${l}`).join('\n');
             }
 
+            console.debug("system prompt:", menuSystemPrompt);
+            console.debug("user content:", userContent);
+
             const rawResponse = await client.generate(userContent, menuSystemPrompt, { responseSchema: menuResponseSchema });
+            console.debug("response:", rawResponse);
             if (!rawResponse) {
                 console.error(`Failed to process menu turn for player ${this.player.name}: No response received.`);
                 return;
