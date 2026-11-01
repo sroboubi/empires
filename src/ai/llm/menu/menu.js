@@ -13,16 +13,9 @@
  * unit "Move" action) — the same ones attack() already uses for staging.
  * No engine rules change.
  */
-import { getHexGrid, getDirections8 } from '../../deps.js';
-import { attack, support, build, explore, moveAlongPath } from '../../actions.js';
-import {
-    findWalkablePath, findReachableCells,
-    isCombatCapable, isDedicatedMilitary, aiLog,
-} from '../../aiUtils.js';
-
-function dist(a, b) {
+function dist(a, b, helper) {
     const ac = a.cell || a, bc = b.cell || b;
-    return getHexGrid().distance(ac, bc);
+    return helper.distance(ac, bc);
 }
 
 /** Short human-readable entity reference, e.g. "Red swordsman" / "your worker". */
@@ -41,7 +34,7 @@ function distLabel(d) {
  * @returns {{ options: Array<{n:number,label:string,action:Object}> }}
  * action is machine-readable: { verb, actorId, targetId?, itemName?, direction?, playerName? }
  */
-export function buildMenu(gameState, player, cfg = {}) {
+export function buildMenu(gameState, player, cfg = {}, helper) {
     const X_ATK = cfg.attackTargets ?? 5;
     const Y_ATK = cfg.attackOrders ?? 3;
     const X_REP = cfg.repairTargets ?? 5;
@@ -87,7 +80,7 @@ export function buildMenu(gameState, player, cfg = {}) {
     // the real staging and reports failure if unreachable.
     const withinOrders = (unit, target, range, orders) => {
         const maxAP = unit.maxActionPoints ?? unit.actionPoints ?? 1;
-        return dist(unit, target) <= range + orders * maxAP;
+        return dist(unit, target, helper) <= range + orders * maxAP;
     };
 
     for (const unit of myEntities) {
@@ -96,14 +89,14 @@ export function buildMenu(gameState, player, cfg = {}) {
         const def = manifestList.find(m => m.name === unit.name);
 
         // Attack: X closest visible enemies attackable within Y orders.
-        if (isCombatCapable(unit)) {
+        if (helper.isCombatCapable(unit)) {
             const range = attackRangeOf(unit);
             const cands = visibleEnemies
                 .filter(e => withinOrders(unit, e, range, Y_ATK))
-                .sort((a, b) => dist(unit, a) - dist(unit, b))
+                .sort((a, b) => dist(unit, a, helper) - dist(unit, b, helper))
                 .slice(0, X_ATK);
             for (const t of cands) {
-                const d = dist(unit, t);
+                const d = dist(unit, t, helper);
                 push(`Attack ${entLabel(t, player)} (${distLabel(d)}) with ${entLabel(unit, player)}`,
                     { verb: 'attack', actorId: unit.id, targetId: t.id });
             }
@@ -134,7 +127,7 @@ export function buildMenu(gameState, player, cfg = {}) {
                 if (typeof player.isVisible === 'function' && !player.isVisible(e.q, e.r)) return false;
                 return withinOrders(unit, e, 1, Y_REP);
             })
-                .sort((a, b) => dist(unit, a) - dist(unit, b))
+                .sort((a, b) => dist(unit, a, helper) - dist(unit, b, helper))
                 .slice(0, X_REP);
             for (const t of damaged) {
                 push(`Repair ${entLabel(t, player)} (${Math.round(t.health)}/${t.maxHealth} HP) with ${entLabel(unit, player)}`,
@@ -154,20 +147,20 @@ export function buildMenu(gameState, player, cfg = {}) {
         // Move towards: X closest targets (friendly or enemy) + 8 compass
         // directions. The direction move is the escape hatch for distant
         // fronts: reposition this turn, attack/repair next turn.
-        if (isDedicatedMilitary(unit, manifest) || isCombatCapable(unit)) {
+        if (helper.isDedicatedMilitary(unit, manifest) || helper.isCombatCapable(unit)) {
             const others = allEntities.filter(e =>
                 !e.destroyed && e.cell && e.id !== unit.id &&
                 (typeof player.isVisible !== 'function' || player.isVisible(e.q, e.r)));
             const cands = others
-                .sort((a, b) => dist(unit, a) - dist(unit, b))
+                .sort((a, b) => dist(unit, a, helper) - dist(unit, b, helper))
                 .slice(0, X_MOV);
             for (const t of cands) {
-                const d = dist(unit, t);
+                const d = dist(unit, t, helper);
                 if (d === 0) continue;
                 push(`Move ${entLabel(unit, player)} towards ${entLabel(t, player)} (${distLabel(d)})`,
                     { verb: 'move', actorId: unit.id, targetId: t.id });
             }
-            for (const dir of getDirections8()) {
+            for (const dir of helper.getDirections8()) {
                 push(`Move ${entLabel(unit, player)} ${dir}`,
                     { verb: 'move', actorId: unit.id, direction: dir });
             }
@@ -205,7 +198,7 @@ function findEntity(gameState, id) {
  * Move a unit toward a target entity/cell or a compass direction.
  * Uses existing engine movement primitives only.
  */
-function moveUnitToward(gameState, player, unit, dest) {
+function moveUnitToward(gameState, player, unit, dest, helper) {
     const fail = (message) => ({ ordersUsed: 0, result: { status: 'failed', message } });
     const actions = unit.getActions ? unit.getActions() : [];
     const moveAction = actions.find(a => a.name === 'Move');
@@ -214,12 +207,12 @@ function moveUnitToward(gameState, player, unit, dest) {
     let path = null;
     if (dest.direction) {
         // Best reachable cell in the requested compass direction.
-        const reachable = findReachableCells(gameState, unit);
+        const reachable = helper.findReachableCells(gameState, unit);
         let best = null, bestScore = -1;
         for (const { cell, path: p } of reachable.values()) {
             if (!p || p.length === 0) continue;
-            const dir = gameState.hexGrid?.directionTo?.(unit.cell, cell, true)?.fromSource
-                || gameState.hexGrid?.directionTo?.(unit.cell, cell);
+            const dir = helper.directionTo(unit.cell, cell, true)?.fromSource
+                || helper.directionTo(unit.cell, cell);
             const dirName = typeof dir === 'string' ? dir : dir?.name;
             if (dirName !== dest.direction) continue;
             if (p.length > bestScore) { bestScore = p.length; best = p; }
@@ -231,14 +224,14 @@ function moveUnitToward(gameState, player, unit, dest) {
         const coord = target?.cell || dest;
         if (coord.q === undefined) return fail('Move target has no position.');
         if (unit.q === coord.q && unit.r === coord.r) return fail(`${entLabel(unit, player)} is already there.`);
-        path = findWalkablePath(gameState, unit, coord);
+        path = helper.findWalkablePath(gameState, unit, coord);
         if (!path || path.length === 0) return fail(`No walkable path toward target.`);
     }
 
-    const moved = moveAlongPath(player, unit, moveAction, path, gameState, 'move',
+    const moved = helper.moveAlongPath(player, unit, moveAction, path, gameState, 'move',
         `menu move for ${player.name}`);
     if (!moved) return fail(`Could not move ${entLabel(unit, player)}.`);
-    aiLog(player, 'move', `Menu: moved ${entLabel(unit, player)}.`);
+    helper.aiLog(player, 'move', `Menu: moved ${entLabel(unit, player)}.`);
     return { ordersUsed: 1, result: { status: 'completed', message: `Moved ${entLabel(unit, player)}.` } };
 }
 
@@ -247,7 +240,7 @@ function moveUnitToward(gameState, player, unit, dest) {
  * ../../actions.js. Chat and end-turn are handled by the harness (they need
  * the harness's chat flow / history wiring).
  */
-export function executeMenuAction(gameState, player, action) {
+export function executeMenuAction(gameState, player, action, helper) {
     const fail = (message) => ({ ordersUsed: 0, result: { status: 'failed', message } });
     const unit = action.actorId ? findEntity(gameState, action.actorId) : null;
     if (action.verb !== 'end' && action.verb !== 'chat') {
@@ -259,19 +252,19 @@ export function executeMenuAction(gameState, player, action) {
         case 'attack': {
             const target = findEntity(gameState, action.targetId);
             if (!target) return fail(`Target entity not found: ${action.targetId}`);
-            return attack(gameState, unit, target, maxOrders);
+            return helper.attack(gameState, unit, target, maxOrders);
         }
         case 'repair': {
             const target = findEntity(gameState, action.targetId);
             if (!target) return fail(`Target entity not found: ${action.targetId}`);
-            return support(gameState, unit, target, 'Repair', maxOrders);
+            return helper.support(gameState, unit, target, 'Repair', maxOrders);
         }
         case 'build':
-            return build(gameState, unit, action.itemName);
+            return helper.build(gameState, unit, action.itemName);
         case 'explore':
-            return explore(gameState, unit, null, true);
+            return helper.explore(gameState, unit, null, true);
         case 'move':
-            return moveUnitToward(gameState, player, unit, action);
+            return moveUnitToward(gameState, player, unit, action, helper);
         default:
             return fail(`Unknown menu verb: ${action.verb}`);
     }

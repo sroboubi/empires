@@ -1,7 +1,7 @@
 import { HexGrid } from './hexGrid.js';
 import { Player } from './player.js';
 import { manageBarbarians } from './ai/barbarians/manager.js';
-import { createAIDeps } from './aiDeps.js';
+import { AiHelper } from './aiHelper.js';
 import { spawnCellResources } from './resources.js';
 import { CONFIG } from './config.js';
 import Entity from './entity.js';
@@ -326,7 +326,7 @@ export class GameState {
    * 
    */
   async onRoundEnd() {
-    if (this.settings?.barbarians) await manageBarbarians(this, this.settings.barbarians, createAIDeps());
+    if (this.settings?.barbarians) await manageBarbarians(this.settings.barbarians, new AiHelper(this));
     this.currentRound++;
     if (this.replayRecorder?.isRecording()) {
       this.replayRecorder.recordSnapshot(this, `Round ${this.currentRound} began`);

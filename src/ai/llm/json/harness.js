@@ -5,13 +5,12 @@
  */
 import { LlmBaseManager } from '../llmBase.js';
 import responseSchema from './response.schema.json' with { type: 'json' };
-import { attack, support, build, explore, onActionDone } from '../../actions.js';
 import { manifestToMarkdown, serializeStateToMarkdown, summarizeTerrain } from '../markdown.js';
 import { DEFAULT_PROMPT_URLS } from '../promptUrls.js';
 
 export class JsonHarness extends LlmBaseManager {
-    constructor(player, gameState, controller, deps = {}) {
-        super(player, gameState, controller, deps);
+    constructor(player, helper) {
+        super(player, helper);
         this.cachedCommandSystemPrompt = null;
         this.cachedManifestKey = null;
     }
@@ -112,21 +111,21 @@ export class JsonHarness extends LlmBaseManager {
                         lastResponseError = `Attack requires targetId (a specific visible enemy). entityName is for Build only — attacking a type name like "village" is rejected.`;
                         continue;
                     }
-                    actionOutcome = attack(this.gameState, entity, target, this.player.orders);
+                    actionOutcome = this.helper.attack(this.gameState, entity, target, this.player.orders);
                 } else if (command === "REPAIR") {
                     if (!response.targetId) {
                         lastResponseError = `Repair requires targetId (a specific damaged entity). entityName is for Build only.`;
                         continue;
                     }
-                    actionOutcome = support(this.gameState, entity, target, "Repair", this.player.orders);
+                    actionOutcome = this.helper.support(this.gameState, entity, target, "Repair", this.player.orders);
                 } else if (command === "BUILD") {
                     if (!response.entityName) {
                         lastResponseError = `Build requires entityName (must be in the builder's Builds list)`;
                         continue;
                     }
-                    actionOutcome = build(this.gameState, entity, response.entityName);
+                    actionOutcome = this.helper.build(this.gameState, entity, response.entityName);
                 } else if (command === "EXPLORE") {
-                    actionOutcome = explore(this.gameState, entity, response.direction, true);
+                    actionOutcome = this.helper.explore(this.gameState, entity, response.direction, true);
                 }
 
                 ordersUsed = actionOutcome.ordersUsed;
@@ -150,7 +149,7 @@ export class JsonHarness extends LlmBaseManager {
                 lastResponseError = null;
 
                 // Action successfully executed: reconcile and render
-                await onActionDone(this.gameState, null, this.describeAction(response));
+                await this.helper.onActionDone(this.gameState, null, this.describeAction(response));
                 turnResponseLog.push(response);
             } else if (command === 'CHAT') {
                 if (this.player.orders <= 0) {
@@ -183,7 +182,7 @@ export class JsonHarness extends LlmBaseManager {
                 console.log(`[Harness] ${this.player.name} initiated diplomatic chat with ${targetPlayer.name}`);
                 await this.chat(this.player, targetPlayer, response.message || response.thoughtProcess);
 
-                await onActionDone(this.gameState, null, `Chat with ${targetPlayer.name}`);
+                await this.helper.onActionDone(this.gameState, null, `Chat with ${targetPlayer.name}`);
                 lastActionResult = `[completed] Concluded diplomatic session with ${targetPlayer.name}`;
                 lastResponseError = null;
                 turnResponseLog.push(response);
@@ -258,8 +257,7 @@ export class JsonHarness extends LlmBaseManager {
         const absScoreToWin = this.gameState.settings?.winCondition?.absoluteScore;
         const relScoreToWin = this.gameState.settings?.winCondition?.relativeScore;
 
-        const promptUrl = this.deps.config?.promptUrls?.command || DEFAULT_PROMPT_URLS.command;
-        const response = await fetch(promptUrl);
+        const response = await fetch(DEFAULT_PROMPT_URLS.command);
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }

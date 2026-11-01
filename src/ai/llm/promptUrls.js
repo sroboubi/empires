@@ -8,6 +8,6 @@
 export const DEFAULT_PROMPT_URLS = {
     command: './src/ai/llm/json/systemPrompt.command.md',
     menu: './src/ai/llm/menu/systemPrompt.menu.md',
-    chat: './src/ai/llm/json/systemPrompt.chat.md',
-    chatSummation: './src/ai/llm/json/systemPrompt.chatSummation.md',
+    chat: './src/ai/llm/systemPrompt.chat.md',
+    chatSummation: './src/ai/llm/systemPrompt.chatSummation.md',
 };

@@ -7,12 +7,11 @@ import { LlmBaseManager } from '../llmBase.js';
 import menuResponseSchema from './menu.response.schema.json' with { type: 'json' };
 import { buildMenu, executeMenuAction, renderMenuPrompt, parseMenuResponse } from './menu.js';
 import { serializeStateToMarkdown, summarizeTerrain } from '../markdown.js';
-import { onActionDone } from '../../actions.js';
 import { DEFAULT_PROMPT_URLS } from '../promptUrls.js';
 
 export class MenuHarness extends LlmBaseManager {
-    constructor(player, gameState, controller, deps = {}) {
-        super(player, gameState, controller, deps);
+    constructor(player, helper) {
+        super(player, helper);
         this.cachedMenuSystemPrompt = null;
     }
 
@@ -37,8 +36,7 @@ export class MenuHarness extends LlmBaseManager {
         if (this.cachedMenuSystemPrompt) return this.cachedMenuSystemPrompt;
         const absScoreToWin = this.gameState.settings?.winCondition?.absoluteScore;
         const relScoreToWin = this.gameState.settings?.winCondition?.relativeScore;
-        const promptUrl = this.deps.config?.promptUrls?.menu || DEFAULT_PROMPT_URLS.menu;
-        const response = await fetch(promptUrl);
+        const response = await fetch(DEFAULT_PROMPT_URLS.menu);
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -75,7 +73,7 @@ export class MenuHarness extends LlmBaseManager {
             const manifestList = Array.isArray(manifestEntities) ? manifestEntities : Object.values(manifestEntities);
             const stateMd = serializeStateToMarkdown(this.summarizeGameState(), manifestList);
             // Rebuild the menu every iteration: actions execute and the state changes.
-            let { options } = buildMenu(this.gameState, this.player, menuCfg);
+            let { options } = buildMenu(this.gameState, this.player, menuCfg, this.helper);
             // Harness-only chat cooldown (in orders): after chatting, the next N
             // orders must go to non-chat actions. Filter chat options while the
             // cooldown is active, then renumber so options stay dense.
@@ -147,7 +145,7 @@ export class MenuHarness extends LlmBaseManager {
                 console.log(`[Harness] ${this.player.name} initiated diplomatic chat with ${targetPlayer.name}`);
                 this.recordChat();
                 await this.chat(this.player, targetPlayer, thoughtProcess || null);
-                await onActionDone(this.gameState, null, `Chat with ${targetPlayer.name}`);
+                await this.helper.onActionDone(this.gameState, null, `Chat with ${targetPlayer.name}`);
                 lastActionResult = `[completed] Concluded diplomatic session with ${targetPlayer.name}`;
                 lastResponseError = null;
                 lastFailedLabel = null;
@@ -155,7 +153,7 @@ export class MenuHarness extends LlmBaseManager {
                 continue;
             }
 
-            const outcome = executeMenuAction(this.gameState, this.player, action);
+            const outcome = executeMenuAction(this.gameState, this.player, action, this.helper);
             if (outcome.ordersUsed === 0) {
                 lastResponseError = outcome.result.message;
                 lastFailedLabel = label;
@@ -166,7 +164,7 @@ export class MenuHarness extends LlmBaseManager {
             lastFailedLabel = null;
             lastActionResult = `[${outcome.result.status}] ${outcome.result.message}`;
             lastResponseError = null;
-            await onActionDone(this.gameState, null, label);
+            await this.helper.onActionDone(this.gameState, null, label);
             turnResponseLog.push(label);
         }
     }
