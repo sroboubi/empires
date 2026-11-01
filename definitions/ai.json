@@ -16,16 +16,16 @@
     "controllers": {
         "standard": {
             "url": "./ai/standard/smartManager.js",
-            "config": {}
+            "config": {}            
         },
-        "llm-json-gemma-4": {
+        "llm-json": {
             "url": "./ai/llm/json/harness.js",
             "config": {
                 "provider": "local",
-                "model": "google/gemma-4-e4b"
-            }
+                "model": "google/gemma-4-e4b"                
+            }            
         },
-        "llm-menu-deepseek-4.1": {
+        "llm-menu": {
             "url": "./ai/llm/menu/harness.js",
             "config": {
                 "provider": "open-router",
@@ -34,56 +34,12 @@
                 "attackOrders": 3,
                 "repairTargets": 5,
                 "repairOrders": 3,
-                "moveTargets": 3,
-                "maxChatExchanges": 6,
-                "chatCooldownOrders": 2
-            }
-        },
-        "llm-menu-gemma-4": {
-            "url": "./ai/llm/menu/harness.js",
-            "config": {
-                "provider": "local",
-                "model": "google/gemma-4-e4b",
-                "attackTargets": 5,
-                "attackOrders": 3,
-                "repairTargets": 5,
-                "repairOrders": 3,
-                "moveTargets": 3,
-                "maxChatExchanges": 6,
-                "chatCooldownOrders": 2
-            }
-        },
-        "llm-menu-qwen-3.5": {
-            "url": "./ai/llm/menu/harness.js",
-            "config": {
-                "provider": "local",
-                "model": "qwen3.5-4b",
-                "attackTargets": 5,
-                "attackOrders": 3,
-                "repairTargets": 5,
-                "repairOrders": 3,
-                "moveTargets": 3,
-                "maxChatExchanges": 6,
-                "chatCooldownOrders": 2
-            }
-        },
-        "llm-menu-phi-4": {
-            "url": "./ai/llm/menu/harness.js",
-            "config": {
-                "provider": "local",
-                "model": "phi-4-mini-instruct",
-                "attackTargets": 5,
-                "attackOrders": 3,
-                "repairTargets": 5,
-                "repairOrders": 3,
-                "moveTargets": 3,
-                "maxChatExchanges": 6,
-                "chatCooldownOrders": 2
-            }
+                "moveTargets": 3
+            }            
         }
     },
     "baseConfig": {
         "callDelayMs": 0,
         "timeoutMs": 30000
-    }
+    }    
 }
