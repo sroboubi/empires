@@ -10,6 +10,9 @@ export class LLMClient {
      * @param {string|string[]} options.orderedModels - Model ID(s).
      * @param {number} [options.maxRetries=2] - Schema error feedback retries.
      * @param {number} [options.timeoutMs=15000] - Hard timeout limit in ms.
+     * @param {number} [options.callDelayMs=0] - Minimum interval between
+     *   HTTP attempt starts (0 = no pacing). Providers count attempts,
+     *   so this must pace retries too, not just top-level calls.
      * @param {Object} [options.generationConfig] - Hyperparameters (temperature, maxOutputTokens, thinkingBudget).
      */
     constructor({
@@ -20,6 +23,7 @@ export class LLMClient {
         orderedModels,
         maxRetries = 2,
         timeoutMs = 15000,
+        callDelayMs = 0,
         generationConfig = {}
     } = {}) {
         this.systemPrompt = systemPrompt;
@@ -29,6 +33,8 @@ export class LLMClient {
         this.orderedModels = Array.isArray(orderedModels) ? orderedModels : [orderedModels];
         this.maxRetries = maxRetries;
         this.timeoutMs = timeoutMs;
+        this.callDelayMs = callDelayMs;
+        this.lastAttemptMs = 0;
         this.generationConfig = generationConfig;
         this.allowSchema = true;   // these are generally per provider (per base URL, not per model)
         this.allowReasoning = true;
@@ -118,6 +124,15 @@ export class LLMClient {
             while (attempts <= this.maxRetries) {
                 attempts++;
 
+                // Pace every HTTP attempt (including retries): pacing
+                // top-level calls is not enough, since one call can make
+                // up to maxRetries+1 attempts and providers count attempts.
+                if (this.callDelayMs) {
+                    const waitMs = this.callDelayMs - (Date.now() - this.lastAttemptMs);
+                    if (waitMs > 0) await new Promise(r => setTimeout(r, waitMs));
+                    this.lastAttemptMs = Date.now();
+                }
+
                 try {
                     const headers = { 'Content-Type': 'application/json' };
                     if (this.apiKey) headers['Authorization'] = `Bearer ${this.apiKey}`;
@@ -150,6 +165,11 @@ export class LLMClient {
                             continue;
                         }
 
+                        if (response.status === 429 || response.status >= 500) {
+                            const backoffMs = Math.min(1000 * 2 ** attempts, 8000);
+                            await new Promise(r => setTimeout(r, backoffMs));
+                        }
+
                         throw new Error(`HTTP ${response.status}: ${errMsg}`);
                     }
 
@@ -175,7 +195,7 @@ export class LLMClient {
                             // A verbatim retry often rambles again, so
                             // escalate with a brevity instruction (once
                             // per model — the guard stops duplicates).
-                            const brevityNote = 'Your previous response was cut off because it exceeded the maximum output length. Reply again with the full JSON, keeping thoughtProcess to at most 20 words.';
+                            const brevityNote = 'Your previous response was cut off because it exceeded the maximum output length. Reply again with the full JSON, keeping thoughtProcess to at most 50 words.';
                             if (!payload.messages.some(m => m.content === brevityNote)) {
                                 payload.messages.push({ role: 'user', content: brevityNote });
                             }

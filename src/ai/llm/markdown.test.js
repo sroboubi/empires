@@ -285,6 +285,40 @@ test('late game with opponents and barbarians', () => {
     assert(md.includes('Total: 850'), 'late game score missing');
 });
 
+test('opponents keyed by player id show the id attribute', () => {
+    const summary = {
+        turn: 12, orders: 5, maxOrders: 6,
+        resources: {
+            stock: { gold: 200, wood: 300, food: 300, iron: 300, gems: 5 },
+            netIncome: { gold: 0, wood: 0, food: 0, iron: 0, gems: 0 },
+            turnsRemaining: {},
+        },
+        score: { total: 50, military: 10, economic: 20, exploration: 20 },
+        entities: [],
+        opponents: {
+            '3': {
+                name: 'Green', score: 61,
+                entities: [
+                    { id: 'green_swordsman_1', name: 'swordsman', health: 100, maxHealth: 100,
+                      fromStart: { direction: 'NE', distance: 6 }, terrain: 'plains',
+                      damage: { value: 50, type: 'slashing' } },
+                ]
+            },
+            'null': {
+                name: 'None', score: 0,
+                entities: [
+                    { id: 'barb_1', name: 'barbarian', health: 250, maxHealth: 300,
+                      fromStart: { direction: 'E', distance: 12 }, terrain: 'desert' },
+                ]
+            }
+        }
+    };
+    const md = serializeStateToMarkdown(summary, entities);
+    assert(md.includes('**Green** (id 3,'), 'id-keyed opponent should show its id');
+    assert(md.includes('**Barbarians**'), 'Barbarians missing');
+    assert(!md.includes('id null'), 'Barbarians must not show an id');
+});
+
 // --- AP-gated buildables ---
 
 console.log('\n## AP gating');

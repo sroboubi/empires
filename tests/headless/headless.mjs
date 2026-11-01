@@ -9,6 +9,14 @@
  *   npm test -- --config mygame.json   # custom game setup
  *   npm test -- 20 --config mygame.json
  *
+ * Checkpoint / resume (long LLM games outlive single runtime sessions):
+ *   npm test -- --config mygame.json --checkpoint-dir /path/to/run-dir
+ *   npm test -- --config mygame.json --resume /path/to/run-dir
+ * A checkpoint is saved at every round end (plus one at setup). Resume
+ * loads the latest checkpoint and plays only the remaining rounds, with
+ * the same config file (players, controllers, LLM credentials). See
+ * tests/headless/README.md "Checkpoint / resume" and checkpoint.mjs.
+ *
  * Config file (JSON) supports everything in the game settings:
  *   turns            - number of turns to simulate
  *   mapSize          - hex map radius (default 12)
@@ -29,12 +37,16 @@
 import { GameState } from '../../src/gameState.js';
 import { loadGameManifest } from '../../src/manifestLoader.js';
 import { readFileSync, existsSync } from 'fs';
+import path from 'path';
+import { saveCheckpoint, loadCheckpoint, resolveCheckpointPath, CHECKPOINT_FILE } from './checkpoint.mjs';
 
 function parseArgs() {
   const args = process.argv.slice(2);
-  const opts = { turns: 5, config: null };
+  const opts = { turns: 5, config: null, checkpointDir: null, resume: null };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--config' && args[i + 1]) opts.config = args[++i];
+    else if (args[i] === '--checkpoint-dir' && args[i + 1]) opts.checkpointDir = args[++i];
+    else if (args[i] === '--resume' && args[i + 1]) opts.resume = args[++i];
     else if (!isNaN(parseInt(args[i]))) opts.turns = parseInt(args[i]);
   }
   return opts;
@@ -88,11 +100,9 @@ async function main() {
 
   const ds = manifest.defaultSettings || {};
 
-  // Build full game settings: config file overrides defaultSettings.json
-  const gameState = new GameState();
-  const mapSize = cfg.mapSize || ds.mapSize || 12;
-  gameState.generateMap(mapSize, manifest.terrains, manifest);
-
+  // Player definitions come from the config in both modes: fresh runs use
+  // them for setup, resume uses them to validate the checkpoint and to
+  // pick controllers/credentials (see checkpoint.mjs header).
   const players = cfg.players || ds.players || [
     { id: 1, name: 'Blue', color: '#0000ff', controller: 'ai', description: '' },
     { id: 2, name: 'Red', color: '#ff0000', controller: 'ai', description: '' },
@@ -101,16 +111,91 @@ async function main() {
   for (const p of players) {
     if (p.controller === undefined) p.controller = 'ai';
   }
-  const settings = {
-    players,
-    initialization: cfg.initialization || ds.initialization || {},
-    winCondition: cfg.winCondition || ds.winCondition || null,
-    barbarians: cfg.barbarians !== undefined ? cfg.barbarians : (ds.barbarians || null),
-    llm: cfg.llm || null,
-    autoSave: { enabled: false }, // no autosave in headless
-  };
-  gameState.initializeManifest(manifest, settings);
-  console.log(`[headless] Game initialized: ${gameState.players.length} players, ${gameState.entities.length} entities`);
+
+  // Checkpoint wiring: --resume <dir|file> loads the latest checkpoint;
+  // --checkpoint-dir <dir> enables round-end checkpointing. Resuming
+  // without an explicit dir keeps checkpointing into the resume dir, so
+  // a resumed run survives a second kill the same way the first did.
+  let checkpointDir = opts.checkpointDir || null;
+  let resumePath = null;
+  if (opts.resume) {
+    if (!opts.config) {
+      throw new Error('--resume requires --config (same config file as the original run: it supplies players, controllers, and LLM credentials)');
+    }
+    resumePath = resolveCheckpointPath(opts.resume);
+    if (!checkpointDir) checkpointDir = path.dirname(resumePath);
+    // Same precious-checkpoint rule as fresh runs: resuming into a
+    // DIFFERENT directory that already holds a checkpoint would destroy
+    // that run's resume point at the first round end. (Checkpointing
+    // back into the resume dir itself is the whole point, so it is
+    // exempt.)
+    if (opts.checkpointDir &&
+        path.resolve(checkpointDir) !== path.resolve(path.dirname(resumePath)) &&
+        existsSync(path.join(checkpointDir, CHECKPOINT_FILE))) {
+      throw new Error(`refusing resume: --checkpoint-dir ${checkpointDir} already holds a checkpoint from another run — resume without --checkpoint-dir to keep checkpointing into the resume dir`);
+    }
+  }
+
+  let gameState;
+  let roundsDone = 0; // fresh runs start at round 1; resume overwrites this
+  if (resumePath) {
+    const cp = loadCheckpoint(resumePath);
+    if (cp.data.gameOver) {
+      throw new Error(`refusing to resume a completed game (checkpoint gameOver=true): ${resumePath}`);
+    }
+    roundsDone = cp.data.currentRound - 1;
+    if (roundsDone >= TURNS) {
+      throw new Error(`refusing to resume: checkpoint already at round ${cp.data.currentRound} (${roundsDone} rounds done) >= requested ${TURNS} turns: ${resumePath}`);
+    }
+    const cpIds = cp.data.players.map(p => p.id);
+    const cfgIds = players.map(p => p.id);
+    if (JSON.stringify(cpIds) !== JSON.stringify(cfgIds)) {
+      throw new Error(`refusing to resume: checkpoint players [${cpIds}] do not match config players [${cfgIds}] — resume with the same config file`);
+    }
+    gameState = new GameState();
+    gameState.manifestData = manifest; // needed for spawnEntity during deserialize
+    gameState.deserialize(cp.raw);
+    // deserialize() logs failures instead of throwing, so a checkpoint
+    // referencing an unknown entity or a missing cell would silently
+    // drop entities. Refuse rather than continue a corrupted game.
+    if (gameState.entities.length !== cp.data.entities.length) {
+      throw new Error(`refusing to resume: checkpoint has ${cp.data.entities.length} entities but only ${gameState.entities.length} restored: ${resumePath}`);
+    }
+    // serialize() does not carry initializationSettings (used by
+    // SmartManager deficit reasoning); restore it from the checkpoint's
+    // own settings, exactly as initializeManifest computes it.
+    gameState.initializationSettings = gameState.settings?.initialization || manifest.initialization || {};
+    // Controllers and LLM credentials come from the resume-time config,
+    // never from the checkpoint (which is key-stripped on write).
+    if (!gameState.settings) gameState.settings = {};
+    gameState.settings.llm = cfg.llm || null;
+    console.log(`[headless] Resumed from ${resumePath}: round ${gameState.currentRound} (${roundsDone} rounds done), ${gameState.entities.length} entities`);
+  } else {
+    // Build full game settings: config file overrides defaultSettings.json
+    gameState = new GameState();
+    const mapSize = cfg.mapSize || ds.mapSize || 12;
+    gameState.generateMap(mapSize, manifest.terrains, manifest);
+    const settings = {
+      players,
+      initialization: cfg.initialization || ds.initialization || {},
+      winCondition: cfg.winCondition || ds.winCondition || null,
+      barbarians: cfg.barbarians !== undefined ? cfg.barbarians : (ds.barbarians || null),
+      llm: cfg.llm || null,
+      autoSave: { enabled: false }, // no autosave in headless
+    };
+    gameState.initializeManifest(manifest, settings);
+    console.log(`[headless] Game initialized: ${gameState.players.length} players, ${gameState.entities.length} entities`);
+    if (checkpointDir) {
+      // A checkpoint here means a previous run's resume point. Overwriting
+      // it with a fresh game would destroy that run's only way back, so
+      // refuse loudly instead of silently replacing it.
+      if (existsSync(path.join(checkpointDir, CHECKPOINT_FILE))) {
+        throw new Error(`refusing fresh run: checkpoint already exists in ${checkpointDir} — resume it with --resume, or use a new --checkpoint-dir`);
+      }
+      const s = saveCheckpoint(checkpointDir, gameState);
+      console.log(`[headless] Initial checkpoint: round 1 -> ${s.path} (${(s.bytes / 1024).toFixed(1)} KB)`);
+    }
+  }
   if (cfg.barbarians) console.log(`[headless] Barbarians enabled`);
   if (cfg.llm?.orderedModels?.length) console.log(`[headless] LLM enabled: ${cfg.llm.orderedModels.join(', ')}`);
 
@@ -137,7 +222,11 @@ async function main() {
   // not chain into the browser's nextTurn(). Passing a function (rather
   // than nothing) is what makes AI players act; setup intentionally
   // passed no continuation, so no background AI turn fires at setup.
-  for (let turn = 1; turn <= TURNS; turn++) {
+  // roundsDone rounds already happened (0 on fresh runs); the loop runs
+  // exactly the remaining rounds, so completed rounds are never replayed.
+  let roundsRun = 0;
+  for (let turn = roundsDone + 1; turn <= TURNS; turn++) {
+    roundsRun++;
     console.log(`[headless] --- Turn ${turn} (round ${gameState.currentRound}) ---`);
     for (let pi = 0; pi < gameState.players.length; pi++) {
       const player = gameState.players[pi];
@@ -174,6 +263,15 @@ async function main() {
         break;
       }
     }
+    // Round-end checkpoint: the pi loop either ran all players (so
+    // onRoundEnd() advanced the round) or broke on a win. Either way the
+    // saved state is one resume refuses to replay past (gameOver) or the
+    // clean start of the next round. The write is atomic: a kill
+    // mid-save leaves the previous round's checkpoint intact.
+    if (checkpointDir) {
+      const s = saveCheckpoint(checkpointDir, gameState);
+      console.log(`[headless] Checkpoint: round ${s.round} -> ${s.path} (${(s.bytes / 1024).toFixed(1)} KB)`);
+    }
     if (gameState.gameOver) {
       console.log(`[headless] Game over at turn ${turn}`);
       break;
@@ -197,7 +295,9 @@ async function main() {
   console.log(`[headless] Save/load round-trip OK (${(saved.length / 1024).toFixed(1)} KB)`);
 
   console.log(failures === 0
-    ? `\n[headless] ALL CHECKS PASSED (${TURNS} turns)`
+    ? (resumePath
+      ? `\n[headless] ALL CHECKS PASSED (resumed: ${roundsRun} rounds this run, ${TURNS} total)`
+      : `\n[headless] ALL CHECKS PASSED (${TURNS} turns)`)
     : `\n[headless] ${failures} FAILURES`);
   process.exit(failures === 0 ? 0 : 1);
 }
