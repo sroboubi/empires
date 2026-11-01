@@ -11,9 +11,7 @@
  */
 export class BaseManager {
     /**
-     * @param {Player} player
-     * @param {GameState} gameState
-     * @param {Object} [controller]
+     * @param {Player} player    
      * @param {import('../aiHelper.js').AiHelper} [helper]
      */
     constructor(player, helper) {
