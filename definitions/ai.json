@@ -16,14 +16,14 @@
     "controllers": {
         "standard": {
             "url": "./ai/standard/smartManager.js",
-            "config": {}            
+            "config": {}
         },
         "llm-json-gemma-4": {
             "url": "./ai/llm/json/harness.js",
             "config": {
                 "provider": "local",
-                "model": "google/gemma-4-e4b"                
-            }            
+                "model": "google/gemma-4-e4b"
+            }
         },
         "llm-menu-deepseek-4.1": {
             "url": "./ai/llm/menu/harness.js",
@@ -34,8 +34,10 @@
                 "attackOrders": 3,
                 "repairTargets": 5,
                 "repairOrders": 3,
-                "moveTargets": 3
-            }            
+                "moveTargets": 3,
+                "maxChatExchanges": 6,
+                "chatCooldownTurns": 2
+            }
         },
         "llm-menu-gemma-4": {
             "url": "./ai/llm/menu/harness.js",
@@ -46,8 +48,10 @@
                 "attackOrders": 3,
                 "repairTargets": 5,
                 "repairOrders": 3,
-                "moveTargets": 3
-            }            
+                "moveTargets": 3,
+                "maxChatExchanges": 6,
+                "chatCooldownTurns": 2
+            }
         },
         "llm-menu-qwen-3.5": {
             "url": "./ai/llm/menu/harness.js",
@@ -58,8 +62,10 @@
                 "attackOrders": 3,
                 "repairTargets": 5,
                 "repairOrders": 3,
-                "moveTargets": 3
-            }            
+                "moveTargets": 3,
+                "maxChatExchanges": 6,
+                "chatCooldownTurns": 2
+            }
         },
         "llm-menu-phi-4": {
             "url": "./ai/llm/menu/harness.js",
@@ -70,12 +76,14 @@
                 "attackOrders": 3,
                 "repairTargets": 5,
                 "repairOrders": 3,
-                "moveTargets": 3
-            }            
+                "moveTargets": 3,
+                "maxChatExchanges": 6,
+                "chatCooldownTurns": 2
+            }
         }
     },
     "baseConfig": {
         "callDelayMs": 0,
         "timeoutMs": 30000
-    }    
+    }
 }
