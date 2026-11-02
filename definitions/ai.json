@@ -18,6 +18,10 @@
             "url": "./ai/standard/smartManager.js",
             "config": {}
         },
+        "adaptive": {
+            "url": "./ai/tactical/adaptiveManager.js",
+            "config": {}
+        },
         "llm-json-gemma-4": {
             "url": "./ai/llm/json/harness.js",
             "config": {
