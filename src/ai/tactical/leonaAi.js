@@ -197,9 +197,54 @@ export class LeonaTacticalAI extends BaseManager {
     if (player.orders <= 0) return;
     await this.buildPhase(directive);
 
-    // 3. Explore opportunistically
+    // 3. Position units strategically (even without directives)
+    if (player.orders <= 0) return;
+    await this.positionUnits(directive);
+
+    // 4. Explore opportunistically
     if (player.orders <= 0) return;
     await this.explorePhase(directive);
+  }
+
+  /**
+   * Position units strategically: military toward center/borders, scouts outward.
+   * Units shouldn't just sit where they were built.
+   */
+  async positionUnits(directive) {
+    const helper = this.helper;
+    const player = this.player;
+    const gameState = this.gameState;
+
+    // Find military units not near enemies
+    const military = this.getMyUnits().filter(e =>
+      helper.isDedicatedMilitary(e, this.gameState.manifestData) &&
+      (e.actionPoints ?? 0) >= 1
+    );
+
+    for (const unit of military) {
+      if (player.orders <= 0) break;
+
+      // Check if there are nearby enemies (within 10)
+      const enemies = this.getVisibleEnemies();
+      const nearby = enemies.filter(e => {
+        const d = helper.distance(
+          { q: unit.q, r: unit.r },
+          { q: e.q, r: e.r }
+        );
+        return d <= 10;
+      });
+
+      // If no nearby enemies, move toward map center (strategic positioning)
+      // This puts units in position to respond to threats or attack
+      if (nearby.length === 0 && (unit.actionPoints ?? 0) >= 2) {
+        // Move toward center (0,0) — simple strategic positioning
+        const result = helper.explore(gameState, unit, null, false, [{ q: 0, r: 0 }]);
+        if (result.ordersUsed > 0) {
+          player.orders = Math.max(0, player.orders - result.ordersUsed);
+          helper.aiLog(player, 'position', `Moved ${unit.name} toward center for strategic positioning`);
+        }
+      }
+    }
   }
 
   /**
@@ -220,11 +265,6 @@ export class LeonaTacticalAI extends BaseManager {
 
       // Never attack friendly/ally
       if (stance === 'friendly' || stance === 'ally') continue;
-
-      // Offensive: actively engage
-      // Defensive: engage if close
-      // Caution: avoid (skip)
-      // Neutral: engage if very close (defensive)
       if (stance === 'caution') continue;
 
       const myCombat = this.getMyUnits().filter(e =>
@@ -234,6 +274,20 @@ export class LeonaTacticalAI extends BaseManager {
 
       // Attack with the closest capable unit
       const attacker = myCombat[0];
+
+      // In neutral stance, be opportunistic: only attack if odds are favorable
+      // or if enemy is very close (defensive)
+      if (stance === 'neutral') {
+        const myPower = helper.getCombatPower(attacker) || 1;
+        const enemyPower = helper.getCombatPower(enemy) || 1;
+        const dist = helper.distance(
+          { q: attacker.q, r: attacker.r },
+          { q: enemy.q, r: enemy.r }
+        );
+        // Attack if 2:1 power advantage OR enemy within 3 (defensive)
+        if (myPower < enemyPower * 2 && dist > 3) continue;
+      }
+
       const result = helper.attack(gameState, attacker, enemy, 2);
       if (result.ordersUsed > 0) {
         player.orders = Math.max(0, player.orders - result.ordersUsed);
@@ -261,26 +315,26 @@ export class LeonaTacticalAI extends BaseManager {
       helper.aiLog(player, 'econ', `Resource deficit: ${deficit}, prioritizing economy`);
     }
 
-    // Priority 0: If no village, settler must build one first
+    // Priority 0: Expand villages (aim for 2-3 for territorial control)
     const myUnits = this.getMyUnits();
-    const hasVillage = myUnits.some(e => {
+    const villageCount = myUnits.filter(e => {
       const n = (e.name ?? e.type ?? '').toLowerCase();
       return n.includes('village');
-    });
-    if (!hasVillage) {
+    }).length;
+    // Build villages until we have 2 (or 3 if economy focus)
+    const targetVillages = focus === 'economy' ? 3 : 2;
+    if (villageCount < targetVillages) {
       const settler = myUnits.find(e => {
         const buildables = this.getBuildables(e);
         const hasVillageBuildable = buildables.some(b => b.toLowerCase().includes('village'));
         const ap = e.actionPoints ?? 0;
-        if (e.name === 'settler') {
-        }
         return hasVillageBuildable && ap >= 1;
       });
       if (settler && player.orders >= 2) {
         const result = helper.build(this.gameState, settler, 'village');
         if (result.result.status === 'completed' && result.ordersUsed > 0) {
           player.orders = Math.max(0, player.orders - result.ordersUsed);
-          helper.aiLog(player, 'build', `Built village (first priority)`);
+          helper.aiLog(player, 'build', `Built village ${villageCount + 1}/${targetVillages} (expansion)`);
           return; // Don't do other builds this turn
         }
       }
