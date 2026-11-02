@@ -49,7 +49,10 @@ export class EntityCentricAI extends BaseManager {
       `=== EntityCentric Turn Start (Round ${gameState.currentRound}) | Focus: ${directive.focus} | Orders: ${player.orders}/${player.maxOrders} ===`
     );
 
-    // Main loop: generate candidates, execute best, repeat
+    // Main loop: generate candidates, execute best, repeat.
+    // A failed candidate is skipped, not fatal: the next-best candidate is
+    // tried in the same pass. Only when nothing in a full generation can
+    // execute does the turn end (remaining orders convert via overflow).
     let iterations = 0;
     const maxIterations = Math.max(player.orders * 4, 40);
 
@@ -60,10 +63,19 @@ export class EntityCentricAI extends BaseManager {
       // Sort by importance (descending)
       candidates.sort((a, b) => b.importance - a.importance);
 
-      // Execute the best one
-      const best = candidates[0];
-      const executed = await this.executeCandidate(best, directive);
-      if (!executed) break; // Couldn't execute, stop
+      // Try candidates in order; execute the first that works, then
+      // regenerate (state changed). A failed candidate is skipped —
+      // one unaffordable build must not end the whole turn.
+      let progressed = false;
+      for (const candidate of candidates) {
+        if (player.orders <= 0) break;
+        const executed = await this.executeCandidate(candidate, directive);
+        if (executed) {
+          progressed = true;
+          break;
+        }
+      }
+      if (!progressed) break;
     }
 
     helper.aiLog(player, 'turn', `=== EntityCentric Turn End | Remaining Orders: ${player.orders} ===`);
@@ -363,6 +375,16 @@ export class EntityCentricAI extends BaseManager {
       let importance = 5;
       if (isWorker) importance = 6; // Workers enable everything
       else if (isEcon) importance = 5;
+
+      // Scouts drive the exploration score component (geometric mean with
+      // military/economic). Value diminishes with each scout: the first two
+      // are high-value, a few more still help, beyond that they're idle.
+      if (targetName.toLowerCase().includes('scout')) {
+        const scoutCount = this.getMyUnits().filter((e) =>
+          (e.name || '').toLowerCase().includes('scout')
+        ).length;
+        importance = scoutCount < 2 ? 7 : scoutCount < 4 ? 5.5 : 4;
+      }
 
       // Boost for resource deficits
       const deficit = this.getCriticalResourceDeficit();
