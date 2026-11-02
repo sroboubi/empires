@@ -262,14 +262,19 @@ export class LeonaTacticalAI extends BaseManager {
     }
 
     // Priority 0: If no village, settler must build one first
-    const hasVillage = this.getMyUnits().some(e => {
+    const myUnits = this.getMyUnits();
+    const hasVillage = myUnits.some(e => {
       const n = (e.name ?? e.type ?? '').toLowerCase();
       return n.includes('village');
     });
     if (!hasVillage) {
-      const settler = this.getMyUnits().find(e => {
+      const settler = myUnits.find(e => {
         const buildables = this.getBuildables(e);
-        return buildables.some(b => b.toLowerCase().includes('village')) && (e.actionPoints ?? 0) >= 1;
+        const hasVillageBuildable = buildables.some(b => b.toLowerCase().includes('village'));
+        const ap = e.actionPoints ?? 0;
+        if (e.name === 'settler') {
+        }
+        return hasVillageBuildable && ap >= 1;
       });
       if (settler && player.orders >= 2) {
         const result = helper.build(this.gameState, settler, 'village');
@@ -362,11 +367,24 @@ export class LeonaTacticalAI extends BaseManager {
 
   /**
    * Get entity definition from manifest by name.
+   * Handles both array and {entities: [...]} formats.
    */
   getEntityDef(name) {
     const manifest = this.gameState.manifestData;
     if (!manifest) return null;
-    return manifest.entities?.find(d => d.name === name) || null;
+    let entities = manifest.entities;
+    if (!entities) return null;
+    // Format 1: keyed object {settler: {...}, ...} — direct lookup
+    if (!Array.isArray(entities) && entities[name]) {
+      return entities[name];
+    }
+    // Format 2: array [...]
+    if (Array.isArray(entities)) {
+      return entities.find(d => d.name === name) || null;
+    }
+    // Format 3: wrapped {entities: [...]}
+    const wrapped = entities.entities || [];
+    return wrapped.find(d => d.name === name) || null;
   }
 
   isEconomyBuilding(name) {
