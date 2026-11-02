@@ -276,7 +276,7 @@ export class LeonaTacticalAI extends BaseManager {
       const attacker = myCombat[0];
 
       // In neutral stance, be opportunistic: only attack if odds are favorable
-      // or if enemy is very close (defensive)
+      // AND enemy is within reasonable range (don't chase across the map)
       if (stance === 'neutral') {
         const myPower = helper.getCombatPower(attacker) || 1;
         const enemyPower = helper.getCombatPower(enemy) || 1;
@@ -284,7 +284,9 @@ export class LeonaTacticalAI extends BaseManager {
           { q: attacker.q, r: attacker.r },
           { q: enemy.q, r: enemy.r }
         );
-        // Attack if 2:1 power advantage OR enemy within 3 (defensive)
+        // Skip if: not 2:1 advantage AND (far away OR not very close)
+        // In neutral, we only attack nearby threats or overwhelming opportunities
+        if (dist > 8) continue; // Don't chase across the map in neutral stance
         if (myPower < enemyPower * 2 && dist > 3) continue;
       }
 
