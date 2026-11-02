@@ -105,7 +105,7 @@ export class LeonaTacticalAI extends BaseManager {
 
     // Find combat-capable units with AP
     const units = this.getMyUnits().filter(e =>
-      helper.isCombatCapable(e) && (e.actionPoints ?? 0) >= 1
+      helper.isDedicatedMilitary(e, this.gameState.manifestData) && (e.actionPoints ?? 0) >= 1
     );
 
     for (const unit of units) {
@@ -228,7 +228,7 @@ export class LeonaTacticalAI extends BaseManager {
       if (stance === 'caution') continue;
 
       const myCombat = this.getMyUnits().filter(e =>
-        helper.isCombatCapable(e) && (e.actionPoints ?? 0) >= 1
+        helper.isDedicatedMilitary(e, this.gameState.manifestData) && (e.actionPoints ?? 0) >= 1
       );
       if (myCombat.length === 0) break;
 
@@ -259,6 +259,26 @@ export class LeonaTacticalAI extends BaseManager {
     if (deficit) {
       preferEconomy = true;
       helper.aiLog(player, 'econ', `Resource deficit: ${deficit}, prioritizing economy`);
+    }
+
+    // Priority 0: If no village, settler must build one first
+    const hasVillage = this.getMyUnits().some(e => {
+      const n = (e.name ?? e.type ?? '').toLowerCase();
+      return n.includes('village');
+    });
+    if (!hasVillage) {
+      const settler = this.getMyUnits().find(e => {
+        const buildables = this.getBuildables(e);
+        return buildables.some(b => b.toLowerCase().includes('village')) && (e.actionPoints ?? 0) >= 1;
+      });
+      if (settler && player.orders >= 2) {
+        const result = helper.build(this.gameState, settler, 'village');
+        if (result.result.status === 'completed' && result.ordersUsed > 0) {
+          player.orders = Math.max(0, player.orders - result.ordersUsed);
+          helper.aiLog(player, 'build', `Built village (first priority)`);
+          return; // Don't do other builds this turn
+        }
+      }
     }
 
     // Build with villages/production centers
@@ -304,7 +324,7 @@ export class LeonaTacticalAI extends BaseManager {
 
     const explorers = this.getMyUnits().filter(e =>
       helper.isMobile(e) && (e.actionPoints ?? 0) >= 1 &&
-      !helper.isBuilder(e) && helper.isCombatCapable(e)
+      !helper.isBuilder(e) && helper.isDedicatedMilitary(e, this.gameState.manifestData)
     ).slice(0, 1);
 
     for (const unit of explorers) {
