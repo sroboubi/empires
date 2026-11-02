@@ -51,7 +51,7 @@ export class LeonaTacticalAI extends BaseManager {
     const player = this.player;
     const directive = this.getDirective();
 
-    helper.aiLog(player, 'turn', `=== Turn Start (Round ${gameState.currentRound}) | Focus: ${directive.focus} | Orders: ${player.orders}/${player.maxOrders} ===`);
+    helper.aiLog(player, 'turn', `=== Turn Start (Round ${gameState.currentRound}) | Focus: ${directive.focus} | Orders: ${player.orders}/${player.maxOrders} | Scores -> Military: ${player.score?.military || 0}, Economic: ${player.score?.economic || 0}, Exploration: ${player.score?.exploration || 0} ===`);
 
     // Process goals in priority order
     for (const goal of directive.goals) {
