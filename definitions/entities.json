@@ -3,7 +3,7 @@
     "name": "barbarian",
     "description": "Aggressive melee raider. Strong slashing damage; best used to harass enemies, not to hold ground.",
     "modelUrl": "./assets/units/barbarian.glb",
-    "size": 1.5,
+    "size": 1.3,
     "health": 300,
     "maxHealth": 300,
     "actionPoints": 4,
@@ -26,9 +26,9 @@
     },
     "range": null,
     "armor": {
-      "slashing": 1.5,
-      "piercing": 1.5,
-      "blunt": 1.5
+      "slashing": 1.2,
+      "piercing": 1.2,
+      "blunt": 1.2
     },
     "maintenance": {
       "food": 6,
@@ -60,7 +60,7 @@
     "name": "barbarianPrincess",
     "description": "Fast barbarian leader. High mobility with solid damage; use for flanking and chasing down weak units.",
     "modelUrl": "./assets/units/barbarianPrincess.glb",
-    "size": 1.4,
+    "size": 1.1,
     "health": 250,
     "maxHealth": 250,
     "actionPoints": 6,
@@ -83,9 +83,9 @@
     },
     "range": null,
     "armor": {
-      "slashing": 1.6,
-      "piercing": 1.8,
-      "blunt": 1.2
+      "slashing": 1.3,
+      "piercing": 1.4,
+      "blunt": 1
     },
     "maintenance": {
       "food": 8,
@@ -117,7 +117,7 @@
     "name": "barbarianChief",
     "description": "Heavy barbarian bruiser. Devastating slashing damage but slow; keep at the front of an assault.",
     "modelUrl": "./assets/units/barbarianChief.glb",
-    "size": 1.7,
+    "size": 1.5,
     "health": 400,
     "maxHealth": 400,
     "actionPoints": 4,
@@ -140,9 +140,9 @@
     },
     "range": null,
     "armor": {
-      "slashing": 1.8,
-      "piercing": 1.8,
-      "blunt": 1.6
+      "slashing": 1.3,
+      "piercing": 1.3,
+      "blunt": 1.1
     },
     "maintenance": {
       "food": 8,
@@ -208,7 +208,7 @@
       "military": 10
     },
     "sightRange": 4,
-    "size": 1.4,
+    "size": 1.1,
     "spawnCost": {
       "food": 50,
       "gold": 20,
@@ -252,7 +252,7 @@
       "military": 5
     },
     "sightRange": 7,
-    "size": 1.2,
+    "size": 1,
     "spawnCost": {
       "food": 30,
       "gold": 15,
@@ -311,7 +311,7 @@
       "military": 5
     },
     "sightRange": 3,
-    "size": 1.2,
+    "size": 1,
     "spawnCost": {
       "food": 50,
       "gold": 30,
@@ -322,7 +322,7 @@
     "name": "swordsman",
     "description": "Core melee infantry. Balanced slashing damage; the backbone of your army.",
     "modelUrl": "./assets/units/swordsman.glb",
-    "size": 1.2,
+    "size": 1,
     "health": 200,
     "maxHealth": 200,
     "actionPoints": 5,
@@ -377,7 +377,7 @@
     "name": "knight",
     "description": "Heavy shock cavalry. High blunt damage; best used for breaking enemy lines.",
     "modelUrl": "./assets/units/knight.glb",
-    "size": 1.3,
+    "size": 1.1,
     "health": 250,
     "maxHealth": 250,
     "actionPoints": 4,
@@ -432,10 +432,137 @@
     }
   },
   {
+    "name": "longbowman",
+    "description": "Versatile ranged unit. Good against light armor; effective at maintaining distance.",
+    "modelUrl": "./assets/units/longbowman.glb",
+    "size": 1,
+    "health": 150,
+    "maxHealth": 150,
+    "actionPoints": 4,
+    "maxActionPoints": 4,
+    "attackCostScale": 1,
+    "healthRegenScale": 5,
+    "movement": {
+      "terrainCostScale": {
+        "ShallowWater": 1e1000,
+        "DeepWater": 1e1000,
+        "Ocean": 1e1000
+      }
+    },
+    "damage": {
+      "value": 50,
+      "type": "piercing",
+      "elevationAdjustment": 1.5
+    },
+    "range": {
+      "minCells": 2,
+      "maxCells": 4,
+      "arcHeight": 0.4
+    },
+    "armor": {
+      "slashing": 1.5,
+      "piercing": 1.8,
+      "blunt": 1.4
+    },
+    "maintenance": {
+      "food": 4,
+      "gold": 4,
+      "wood": 2
+    },
+    "spawnCost": {
+      "food": 30,
+      "iron": 30,
+      "gold": 40,
+      "wood": 20
+    },
+    "rotationOffset": 0,
+    "sightRange": 5,
+    "score": {
+      "military": 15,
+      "economic": 0
+    },
+    "sfx": {
+      "select": "select_unit.mp3",
+      "action": {
+        "move": "move.mp3",
+        "attack": "bow_attack.mp3",
+        "default": "move.mp3"
+      },
+      "damage": "damage_unit.mp3",
+      "destroy": "unit_destroy.mp3"
+    }
+  },
+  {
+    "name": "catapult",
+    "description": "Heavy siege weapon. Limited mobility.",
+    "modelUrl": "./assets/units/catapult.glb",
+    "size": 1.2,
+    "health": 200,
+    "maxHealth": 200,
+    "actionPoints": 4,
+    "maxActionPoints": 4,
+    "attackCostScale": 1,
+    "healthRegenScale": 5,
+    "movement": {
+      "terrainCostScale": {
+        "ShallowWater": 1e1000,
+        "DeepWater": 1e1000,
+        "Ocean": 1e1000,
+        "Mountains": 2,
+        "SnowyMountains": 2,
+        "Swamp": 1.5,
+        "Desert": 1.5
+      }
+    },
+    "damage": {
+      "value": 100,
+      "type": "blunt",
+      "elevationAdjustment": 1.5
+    },
+    "range": {
+      "minCells": 3,
+      "maxCells": 4,
+      "arcHeight": 0.5
+    },
+    "armor": {
+      "slashing": 1,
+      "piercing": 1,
+      "blunt": 1.5
+    },
+    "maintenance": {
+      "food": 2,
+      "iron": 2,
+      "gold": 5,
+      "wood": 5
+    },
+    "spawnCost": {
+      "food": 20,
+      "iron": 50,
+      "gold": 20,
+      "wood": 40
+    },
+    "rotationOffset": 0,
+    "sightRange": 5,
+    "score": {
+      "military": 18,
+      "economic": 0
+    },
+    "sfx": {
+      "select": "select_unit.mp3",
+      "action": {
+        "move": "move.mp3",
+        "attack": "bow_attack.mp3",
+        "default": "move.mp3"
+      },
+      "damage": "damage_unit.mp3",
+      "destroy": "unit_destroy.mp3"
+    }
+  },
+  {
     "name": "worker",
     "description": "Primary economic builder. Builds and repairs economic structures; weak in combat - keep protected.",
     "modelUrl": "./assets/units/worker.glb",
-    "size": 1.2,
+    "size": 1,
     "health": 100,
     "maxHealth": 100,
     "actionPoints": 5,
@@ -475,18 +602,22 @@
       "mine",
       "lumberMill",
       "farm",
+      "camp",
       "forge",
       "temple",
-      "tower"
+      "tower",
+      "barracks"
     ],
     "buildCharges": 3,
     "repairables": [
       "mine",
       "lumberMill",
       "farm",
+      "camp",
       "forge",
       "temple",
       "tower",
+      "barracks",
       "village"
     ],
     "score": {
@@ -507,7 +638,7 @@
     "name": "settler",
     "description": "Empire expansion unit. Builds villages; weak in combat - escort to a good site and found a village.",
     "modelUrl": "./assets/units/settler.glb",
-    "size": 1.5,
+    "size": 1.1,
     "health": 150,
     "maxHealth": 150,
     "actionPoints": 5,
@@ -565,7 +696,7 @@
     "name": "bowman",
     "description": "Ranged attacker. Deals piercing damage from 1-3 cells away; keep at range, avoid melee.",
     "modelUrl": "./assets/units/bowman.glb",
-    "size": 1.3,
+    "size": 1,
     "health": 150,
     "maxHealth": 150,
     "actionPoints": 6,
@@ -625,7 +756,7 @@
     "name": "horseman",
     "description": "Fast cavalry raider. High mobility and piercing damage; ideal for flanking and hit-and-run attacks.",
     "modelUrl": "./assets/units/horseman.glb",
-    "size": 1.5,
+    "size": 1.3,
     "health": 200,
     "maxHealth": 200,
     "actionPoints": 8,
@@ -683,7 +814,7 @@
     "name": "assassin",
     "description": "Skirmisher. Poison damage weakens targets over time; best used to pick off high-value targets.",
     "modelUrl": "./assets/units/assassin.glb",
-    "size": 1.1,
+    "size": 1,
     "health": 100,
     "maxHealth": 100,
     "actionPoints": 7,
@@ -768,13 +899,9 @@
     "ordersPerTurn": 1,
     "rotationOffset": 0,
     "sightRange": 7,
-    "buildables": [
-      "swordsman",
-      "bowman",
+    "buildables": [      
       "worker",
-      "settler",
-      "horseman",
-      "pikeman",
+      "settler",      
       "scout"
     ],
     "score": {
@@ -801,7 +928,7 @@
       "gems": 1
     },
     "spawnCost": {
-      "gold": 100,
+      "gold": 150,
       "food": 50,
       "iron": 50
     },
@@ -821,7 +948,8 @@
     "buildables": [
       "knight",
       "medic",
-      "assassin"
+      "assassin",
+      "longbowman"
     ],
     "score": {
       "military": 10,
@@ -1005,7 +1133,7 @@
   },
   {
     "name": "farm",
-    "description": "Economic structure. Produces food each turn; essential for feeding your army.",
+    "description": "Economic structure. Produces food each turn from grown crops; essential for feeding your army.",
     "modelUrl": "./assets/constructs/farm.glb",
     "health": 200,
     "maxHealth": 200,
@@ -1027,8 +1155,92 @@
     "rotationOffset": 0,
     "sightRange": 3,
     "score": {
-      "military": 2,
+      "military": 1,
       "economic": 4
+    },
+    "sfx": {
+      "select": "select_unit.mp3",
+      "build": "build.mp3",
+      "damage": "damage_building.mp3",
+      "destroy": "building_destroy.mp3"
+    }
+  },
+  {
+    "name": "camp",
+    "description": "Economic structure. Produces food each turn from hunting; essential for feeding your army.",
+    "modelUrl": "./assets/constructs/camp.glb",
+    "health": 200,
+    "maxHealth": 200,
+    "maintenance": {},
+    "spawnCost": {
+      "wood": 50,
+      "iron": 20,
+      "gold": 20
+    },
+    "spawnConditions": {
+      "terrain": [
+        "Grasslands",        
+        "FootHills",
+        "Tundra",
+        "Hills"
+      ],
+      "minSeparation": 2
+    },
+    "yields": {
+      "food": 10
+    },
+    "rotationOffset": 0,
+    "sightRange": 3,
+    "score": {
+      "military": 1,
+      "economic": 3
+    },
+    "sfx": {
+      "select": "select_unit.mp3",
+      "build": "build.mp3",
+      "damage": "damage_building.mp3",
+      "destroy": "building_destroy.mp3"
+    }
+  },
+  {
+    "name": "barracks",
+    "description": "Military structure. Recruits and trains units; essential for building your army.",
+    "modelUrl": "./assets/constructs/barracks.glb",
+    "size": 1.6,
+    "health": 300,
+    "maxHealth": 300,
+    "actionPoints": 1,
+    "maxActionPoints": 1,
+    "maintenance": {
+      "iron": 5,
+      "gold": 5
+    },
+    "spawnCost": {
+      "wood": 50,
+      "iron": 60,
+      "gold": 30
+    },
+    "spawnConditions": {
+      "terrain": [
+        "Grasslands",
+        "Desert",
+        "FootHills",
+        "Tundra",
+        "Hills"
+      ],
+      "minSeparation": 2
+    },    
+    "rotationOffset": 0,
+    "sightRange": 3,
+    "buildables": [
+      "swordsman",
+      "bowman",      
+      "horseman",
+      "pikeman",
+      "catapult"      
+    ],
+    "score": {
+      "military": 6
     },
     "sfx": {
       "select": "select_unit.mp3",

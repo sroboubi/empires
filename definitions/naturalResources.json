@@ -124,6 +124,36 @@
     }
   },
   {
+    "name": "pearls",
+    "iconUrl": "./assets/resources/pearls.png",
+    "terrains": [
+      {
+        "types": [
+          "ShallowWater"
+        ],
+        "modelUrls": [
+          "./assets/resources/pearls.glb"
+        ],
+        "quantity": {
+          "min": 1,
+          "max": 1
+        },
+        "probability": {
+          "base": 0.02,
+          "adjacent": 0
+        },
+        "size": 0.6,
+        "sizeVariance": 0.2
+      }
+    ],
+    "improvement": {
+      "village": {
+        "type": "gold",
+        "yieldMultiplier": 1.5
+      }
+    }
+  },
+  {
     "name": "deer",
     "iconUrl": "./assets/resources/deer.png",
     "terrains": [
@@ -150,7 +180,11 @@
     "improvement": {
       "village": {
         "type": "food",
-        "yieldMultiplier": 1.3
+        "yieldMultiplier": 1.2
+      },
+      "camp": {
+        "type": "food",
+        "yieldMultiplier": 1.5
       }
     }
   },
@@ -182,6 +216,10 @@
       "village": {
         "type": "food",
         "yieldMultiplier": 1.4
+      },
+      "camp": {
+        "type": "food",
+        "yieldMultiplier": 1.5
       }
     }
   },
@@ -212,6 +250,10 @@
       "village": {
         "type": "food",
         "yieldMultiplier": 1.2
+      },
+      "camp": {
+        "type": "food",
+        "yieldMultiplier": 1.5
       }
     }
   },
