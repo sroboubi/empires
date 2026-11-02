@@ -117,7 +117,7 @@ export class LeonaTacticalAI extends BaseManager {
       // Use explore with targeted cells to move toward the target
       const result = helper.explore(gameState, unit, null, false, [{ q: targetQ, r: targetR }]);
       if (result.ordersUsed > 0) {
-        player.orders -= result.ordersUsed;
+        player.orders = Math.max(0, player.orders - result.ordersUsed);
         helper.aiLog(player, 'combat', `Reinforce: moved ${unit.name} toward (${targetQ},${targetR})`);
       }
     }
@@ -142,7 +142,7 @@ export class LeonaTacticalAI extends BaseManager {
       const targetedCells = goal.target ? [{ q: goal.target.q, r: goal.target.r }] : null;
       const result = helper.explore(gameState, unit, direction, false, targetedCells);
       if (result.ordersUsed > 0) {
-        player.orders -= result.ordersUsed;
+        player.orders = Math.max(0, player.orders - result.ordersUsed);
         helper.aiLog(player, 'explore', `Explore: ${unit.name} → ${direction || 'target'}`);
       }
     }
@@ -174,7 +174,7 @@ export class LeonaTacticalAI extends BaseManager {
       for (const targetName of filtered) {
         const result = helper.build(this.gameState, builder, targetName);
         if (result.result.status === 'completed' && result.ordersUsed > 0) {
-          player.orders -= result.ordersUsed;
+          player.orders = Math.max(0, player.orders - result.ordersUsed);
           helper.aiLog(player, 'build', `Goal build (${kind}): ${targetName} by ${builder.name}`);
           break;
         }
@@ -236,7 +236,7 @@ export class LeonaTacticalAI extends BaseManager {
       const attacker = myCombat[0];
       const result = helper.attack(gameState, attacker, enemy, 2);
       if (result.ordersUsed > 0) {
-        player.orders -= result.ordersUsed;
+        player.orders = Math.max(0, player.orders - result.ordersUsed);
         helper.aiLog(player, 'combat', `Attacked ${enemy.name} (${stance} stance)`);
       }
     }
@@ -285,7 +285,7 @@ export class LeonaTacticalAI extends BaseManager {
         // Check if we can afford it (basic check)
         const result = helper.build(this.gameState, producer, targetName);
         if (result.result.status === 'completed' && result.ordersUsed > 0) {
-          player.orders -= result.ordersUsed;
+          player.orders = Math.max(0, player.orders - result.ordersUsed);
           helper.aiLog(player, 'build', `Built ${targetName} (focus: ${focus})`);
           break; // One build per producer per turn
         }
@@ -311,7 +311,7 @@ export class LeonaTacticalAI extends BaseManager {
       if (player.orders <= 0) break;
       const result = helper.explore(this.gameState, unit, null, false, null);
       if (result.ordersUsed > 0) {
-        player.orders -= result.ordersUsed;
+        player.orders = Math.max(0, player.orders - result.ordersUsed);
         helper.aiLog(player, 'explore', `Explored with ${unit.name}`);
       }
     }
@@ -334,25 +334,38 @@ export class LeonaTacticalAI extends BaseManager {
   }
 
   getBuildables(entity) {
-    // Get buildable names from entity definition
-    // Entity may have buildables array, or we check via helper
+    // Get buildable names from entity definition via manifest.
     if (entity.buildables) return entity.buildables;
-    // Fallback: try common buildables via manifest
-    const manifest = this.gameState.manifestData;
-    if (!manifest) return [];
-    const def = manifest.entities?.find(d => d.name === (entity.name ?? entity.type));
+    const def = this.getEntityDef(entity.name ?? entity.type);
     return def?.buildables || [];
   }
 
+  /**
+   * Get entity definition from manifest by name.
+   */
+  getEntityDef(name) {
+    const manifest = this.gameState.manifestData;
+    if (!manifest) return null;
+    return manifest.entities?.find(d => d.name === name) || null;
+  }
+
   isEconomyBuilding(name) {
-    // Economy buildings produce resources (not military)
-    const econKeywords = ['mine', 'lumber', 'farm', 'mill', 'forge', 'market'];
-    return econKeywords.some(k => name.toLowerCase().includes(k));
+    // Economy buildings produce resources (have yields) or have high economic score.
+    // Uses manifest data, never hardcoded names.
+    const def = this.getEntityDef(name);
+    if (!def) return false;
+    const yields = def.yields || {};
+    const hasYields = Object.keys(yields).length > 0;
+    const econScore = def.score?.economic || 0;
+    const milScore = def.score?.military || 0;
+    return hasYields || econScore > milScore;
   }
 
   isWorkerUnit(name) {
-    const workerKeywords = ['worker', 'settler'];
-    return workerKeywords.some(k => name.toLowerCase().includes(k));
+    // Worker units can build things (have buildables). Uses manifest data.
+    const def = this.getEntityDef(name);
+    if (!def) return false;
+    return (def.buildables || []).length > 0;
   }
 
   getCriticalResourceDeficit() {
