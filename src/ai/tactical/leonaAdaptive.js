@@ -1029,9 +1029,16 @@ export class LeonaAdaptiveManager extends BaseManager {
         const targetPower = this.helper.getCombatPower(target, this.getEntityMeta(target));
 
         // Unowned barbarians/neutrals only become targets when near our territory.
+        // FIX (Leona): Use nearest *combat-capable* unit, not nearest *any* unit.
+        // A worker 5 hexes away shouldn't make a barbarian "engageable" when
+        // our nearest fighter is 22 hexes away.
         if (target.owner === null || target.owner === undefined) {
-            const nearestOwn = Math.min(...this.getActiveEntities().map(unit => this.helper.distance(unit, target)));
-            if (nearestOwn > this.config.threatRadius * 2) return false;
+            const combatUnits = this.getActiveEntities().filter(e =>
+                this.helper.isCombatCapable(e) && asNumber(e.actionPoints, 0) > 0
+            );
+            if (combatUnits.length === 0) return false;
+            const nearestCombat = Math.min(...combatUnits.map(unit => this.helper.distance(unit, target)));
+            if (nearestCombat > this.config.threatRadius * 2) return false;
         }
 
         if (target.isConstruct) {
