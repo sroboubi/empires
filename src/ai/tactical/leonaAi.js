@@ -348,6 +348,10 @@ export class LeonaTacticalAI extends BaseManager {
       return buildables.length > 0 && (e.actionPoints ?? 0) >= 1;
     });
 
+    // Track military vs economy builds for balanced focus
+    let militaryBuilds = 0;
+    let totalBuilds = 0;
+
     for (const producer of producers) {
       if (player.orders < 2) break;
       const buildables = this.getBuildables(producer);
@@ -358,6 +362,16 @@ export class LeonaTacticalAI extends BaseManager {
         candidates = buildables.filter(n => this.isEconomyBuilding(n) || this.isWorkerUnit(n));
       } else if (focus === 'military') {
         candidates = buildables.filter(n => !this.isEconomyBuilding(n) && !this.isWorkerUnit(n));
+      } else if (focus === 'balanced') {
+        // In balanced mode, ensure at least 30% military
+        // If we've done mostly economy, prioritize military
+        const militaryRatio = totalBuilds > 0 ? militaryBuilds / totalBuilds : 0;
+        if (militaryRatio < 0.3 && totalBuilds >= 2) {
+          const militaryCandidates = buildables.filter(n => !this.isEconomyBuilding(n) && !this.isWorkerUnit(n));
+          if (militaryCandidates.length > 0) {
+            candidates = militaryCandidates;
+          }
+        }
       }
 
       // Try each candidate
@@ -367,6 +381,10 @@ export class LeonaTacticalAI extends BaseManager {
         const result = helper.build(this.gameState, producer, targetName);
         if (result.result.status === 'completed' && result.ordersUsed > 0) {
           player.orders = Math.max(0, player.orders - result.ordersUsed);
+          totalBuilds++;
+          if (!this.isEconomyBuilding(targetName) && !this.isWorkerUnit(targetName)) {
+            militaryBuilds++;
+          }
           helper.aiLog(player, 'build', `Built ${targetName} (focus: ${focus})`);
           break; // One build per producer per turn
         }
