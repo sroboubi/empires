@@ -172,15 +172,14 @@ export class JsonHarness extends LlmBaseManager {
                     continue;
                 }
 
-                // Initiating chat costs 1 order
-                this.player.orders -= 1;
+                // Initiating chat costs 1 order (handled inside helper.chat via consumeOrders).
                 this.player.addHistoryEntry(this.gameState.currentRound, {
                     category: 'action',
                     details: `Initiated diplomatic chat with ${targetPlayer.name} (costs 1 order)`
                 });
 
                 console.log(`[Harness] ${this.player.name} initiated diplomatic chat with ${targetPlayer.name}`);
-                await this.chat(this.player, targetPlayer, response.message || response.thoughtProcess);
+                await this.helper.chat(this.player, targetPlayer, response.message || response.thoughtProcess);
 
                 await this.helper.onActionDone(this.gameState, null, `Chat with ${targetPlayer.name}`);
                 lastActionResult = `[completed] Concluded diplomatic session with ${targetPlayer.name}`;

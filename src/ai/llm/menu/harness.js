@@ -17,18 +17,18 @@ export class MenuHarness extends LlmBaseManager {
 
     /** Orders that must be spent on non-chat actions before chat is allowed again. */
     chatCooldownRemaining() {
-        return this.player._chatCooldownOrders ?? 0;
+        return this._chatCooldownOrders ?? 0;
     }
 
     recordChat() {
         const cooldown = this.player.controller?.config?.chatCooldownOrders ?? 2;
-        this.player._chatCooldownOrders = cooldown;
+        this._chatCooldownOrders = cooldown;
     }
 
     /** Call after any non-chat action that spent orders. */
     tickChatCooldown(ordersUsed) {
-        if ((this.player._chatCooldownOrders ?? 0) > 0 && ordersUsed > 0) {
-            this.player._chatCooldownOrders = Math.max(0, this.player._chatCooldownOrders - ordersUsed);
+        if ((this._chatCooldownOrders ?? 0) > 0 && ordersUsed > 0) {
+            this._chatCooldownOrders = Math.max(0, this._chatCooldownOrders - ordersUsed);
         }
     }
 
@@ -136,15 +136,14 @@ export class MenuHarness extends LlmBaseManager {
                     lastFailedLabel = label;
                     continue;
                 }
-                // Initiating chat costs 1 order (parity with the JSON path).
-                this.player.orders -= 1;
+                // Initiating chat costs 1 order (handled inside helper.chat via consumeOrders).
                 this.player.addHistoryEntry(this.gameState.currentRound, {
                     category: 'action',
                     details: `Initiated diplomatic chat with ${targetPlayer.name} (costs 1 order)`
                 });
                 console.log(`[Harness] ${this.player.name} initiated diplomatic chat with ${targetPlayer.name}`);
                 this.recordChat();
-                await this.chat(this.player, targetPlayer, thoughtProcess || null);
+                await this.helper.chat(this.player, targetPlayer, thoughtProcess || null);
                 await this.helper.onActionDone(this.gameState, null, `Chat with ${targetPlayer.name}`);
                 lastActionResult = `[completed] Concluded diplomatic session with ${targetPlayer.name}`;
                 lastResponseError = null;
