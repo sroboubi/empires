@@ -79,3 +79,17 @@ This file documents mistakes made during development, reasons why they occurred,
 - **Why it was made**: Assumed the recorder had to be active before `initializeManifest()` to capture the initial AI turn, without accounting for the fact that `initializeManifest()` is what creates players and starting units. The AI turn is asynchronous, so starting the recorder immediately after `initializeManifest()` returns still captures the initial state before the first AI action.
 - **What to avoid in the future**: Never start a state-capturing recorder before the state it captures has been constructed. If an async process (AI turn) must be captured, start the recorder synchronously after the state is built but before the async work resumes; do not move the recorder earlier than the state construction.
 
+---
+
+### Mistake 12: Reading an entity's source coordinates after executing its move
+- **Description**: In the new `src/ai/tactical/adaptiveManager.js`, several action handlers pushed `{ q: entity.q, r: entity.r }` into `involvedCells` and logged "from (q,r)" *after* `helper.attack`, `helper.explore`, `helper.moveAlongPath`, or `moveAction.do` had already mutated the entity's `q`/`r`. This recorded the destination as the source, so visibility checks and diagnostic logs pointed at the wrong cell.
+- **Why it was made**: Captured coordinates inline at the point of use instead of snapshotting them before the mutating call.
+- **What to avoid in the future**: Whenever an action mutates an entity's position, capture `const from = { q, r }` before calling the action and use that snapshot for logs and `involvedCells`.
+
+---
+
+### Mistake 13: Conflating proximity with hostility, and making a stance branch unreachable
+- **Description**: In the adaptive AI's first draft, any visible neutral unit within the threat radius was treated as a hostile threat, which violates the hybrid directive's `neutral` stance ("move freely around their units, no special targeting"). Separately, `isThreat` included `stance === 'offensive'` before the `else if (stance === 'offensive')` favorability check, making that check unreachable and allowing suicidal attacks.
+- **Why it was made**: Focused on preventing surprise attacks and did not re-read the stance semantics after adding the offensive/neutral branches.
+- **What to avoid in the future**: Model stance explicitly: proximity is a threat for barbarians and `defensive` opponents; `neutral` is engaged via attacker history or a safe/opportunistic check; `caution` only when attacked; `offensive` is a hostile stance but still subject to a local force-balance check. Ensure mutually exclusive branches do not overlap in earlier conditions.
+
