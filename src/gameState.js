@@ -24,9 +24,12 @@ export class GameState {
     this.replayRecorder = null;
     this.fogPovPlayer = null; // Replay only: fog POV override (snapshot's active player); null = human-player union
     // Single shared AiHelper instance (used by barbarians, players, harnesses).
-    // main.js sets onActionDone callback after construction.
+    // main.js sets callbacks after construction: onActionDone,
+    // onOpenChatModal, onCloseChatModal.
     this.aiHelper = new AiHelper(this);
-    this.onActionDone = null; // Set by main.js: (involvedCells, actionDesc) => {...}
+    this.onActionDone = null;
+    this.onOpenChatModal = null;
+    this.onCloseChatModal = null;
   }
 
   /**
