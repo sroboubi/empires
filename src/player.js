@@ -1,5 +1,6 @@
 import { animateToTimeOfDay } from "./renderer.js";
 import { AiHelper } from './aiHelper.js';
+import { createAiManager } from './aiInterfaceProxy.js';
 
 const turnHours = { start: 7, end: 17 }
 const orderToResourceConversionRate = 3;
@@ -61,12 +62,12 @@ export class Player {
   async getAiManager() {
     if (this.aiManager) return this.aiManager;
     if (!this.controller?.url || this.isReplayAI) return null;
-    const module = await import(this.controller.url);    
+    const module = await import(this.controller.url);
     const ManagerClass = module.default;
     if (!ManagerClass) {
       throw new Error(`Default Class not found in module ${this.controller.url}`);
     }
-    this.aiManager = new ManagerClass(this, new AiHelper(this.gameState));
+    this.aiManager = createAiManager(ManagerClass, this, new AiHelper(this.gameState));
     return this.aiManager;
   }
 
@@ -184,7 +185,7 @@ export class Player {
 
     this.updateVisibility();
     this.recalculateScore();
-    
+
     try {
       const aiManager = await this.getAiManager();
       if (aiManager) await aiManager.processTurn();
@@ -195,7 +196,7 @@ export class Player {
       if (typeof onTurnEnd === 'function' && this.isAI) {
         onTurnEnd();
       }
-    }  
+    }
   }
 
   /**
@@ -276,6 +277,7 @@ export class Player {
       const ownerId = entity.owner ? entity.owner.id : null;
       if (!opponent[ownerId]) {
         opponent[ownerId] = {
+          id: ownerId,
           name: entity.owner ? entity.owner.name : 'None',
           score: entity.owner ? entity.owner.score : 0,
           description: entity.owner ? entity.owner.description : '',

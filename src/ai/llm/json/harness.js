@@ -172,15 +172,12 @@ export class JsonHarness extends LlmBaseManager {
                     continue;
                 }
 
-                // Initiating chat costs 1 order
-                this.player.orders -= 1;
-                this.player.addHistoryEntry(this.gameState.currentRound, {
-                    category: 'action',
-                    details: `Initiated diplomatic chat with ${targetPlayer.name} (costs 1 order)`
-                });
-
-                console.log(`[Harness] ${this.player.name} initiated diplomatic chat with ${targetPlayer.name}`);
-                await this.chat(this.player, targetPlayer, response.message || response.thoughtProcess);
+                console.log(`[Harness] ${this.player.name} initiating diplomatic chat with ${targetPlayer.name}`);
+                const chatRes = await this.chat(this.player, targetPlayer, response.message || response.thoughtProcess);
+                if (chatRes && chatRes.success === false) {
+                    lastResponseError = chatRes.message || 'Failed to initiate chat.';
+                    continue;
+                }
 
                 await this.helper.onActionDone(this.gameState, null, `Chat with ${targetPlayer.name}`);
                 lastActionResult = `[completed] Concluded diplomatic session with ${targetPlayer.name}`;
