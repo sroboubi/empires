@@ -67,7 +67,7 @@ export class Player {
     if (!ManagerClass) {
       throw new Error(`Default Class not found in module ${this.controller.url}`);
     }
-    this.aiManager = createAiManager(ManagerClass, this, new AiHelper(this.gameState));
+    this.aiManager = createAiManager(ManagerClass, this, this.gameState.aiHelper);
     return this.aiManager;
   }
 

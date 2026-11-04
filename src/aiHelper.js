@@ -13,7 +13,6 @@ import { HexGrid, DIRECTIONS_8 } from './hexGrid.js';
 import { camelToTitle, sleep, calculateAttackMultiplier } from './utils.js';
 import { applyResourceYieldBonus } from './resources.js';
 import { reconcileEntities } from './renderer.js';
-import { updatePlayersUI } from './ui.js';
 import Entity from './entity.js';
 import { CONFIG } from './config.js';
 
@@ -1039,29 +1038,23 @@ export class AiHelper {
         // Bring up chat window and await until closed/ended.
         // The summary note is added by closeChatModal() in main.js when the
         // modal closes — do not summarize here as well (would double the note
-        // and the LLM call).
-        if (typeof window !== 'undefined' && typeof window.openChatModal === 'function') {
-            await window.openChatModal(humanPlayer, aiPlayer);
-        }
+        // Open the chat modal via gameState callback (registered by main.js).
+        // No-op in headless mode where no callback is registered.
+        await this.gameState?.onOpenChatModal?.(humanPlayer, aiPlayer);
         return true;
     }
 
+    /**
+     * Called after an AI action completes. Delegates to the onActionDone
+     * callback registered by main.js on gameState (which handles UI refresh).
+     * No-op if no callback is registered (e.g. headless mode).
+     */
     async onActionDone(gameState, involvedCells = null, actionDesc = '') {
-        const config = this.getConfig();
-        if (gameState?.replayRecorder?.isRecording()) {
-            gameState.replayRecorder.recordSnapshot(gameState, actionDesc || 'AI action');
+        if (typeof this.gameState?.onActionDone === 'function') {
+            return this.gameState.onActionDone(involvedCells, actionDesc);
         }
-        if (!config.showAll && Array.isArray(involvedCells) && involvedCells.length > 0) {
-            if (!involvedCells.some(cell => gameState.isVisibleToHuman(cell))) {
-                console.debug("AI action done (no visible cells)");
-                return;
-            }
-        }
-        console.debug("AI action done (visible)");
-        this.reconcileEntities(gameState);
-        updatePlayersUI(this.gameState);
-        await this.sleep(config.actionSleepMs ?? 0);
     }
+
 }
 
 export default AiHelper;
