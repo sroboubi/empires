@@ -58,7 +58,7 @@ async function onActionDone(involvedCells = null, actionDesc = '') {
   if (gameState?.replayRecorder?.isRecording()) {
     gameState.replayRecorder.recordSnapshot(gameState, actionDesc || 'AI action');
   }
-  if (!CONFIG.showAll && Array.isArray(involvedCells) && involvedCells.length > 0) {
+  if (!CONFIG.SHOW_ALL && Array.isArray(involvedCells) && involvedCells.length > 0) {
     if (!involvedCells.some(cell => gameState.isVisibleToHuman(cell))) {
       console.debug("AI action done (no visible cells)");
       return;
@@ -67,7 +67,7 @@ async function onActionDone(involvedCells = null, actionDesc = '') {
   console.debug("AI action done (visible)");
   reconcileEntities(gameState);
   updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
-  await new Promise(r => setTimeout(r, CONFIG.actionSleepMs ?? 0));
+  await new Promise(r => setTimeout(r, CONFIG.AI_ACTION_SLEEP ?? 0));
 }
 
 /**
