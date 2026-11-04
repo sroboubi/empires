@@ -5,7 +5,6 @@
  * handleStartGameClicked) stays in main.js and calls collectSetupSettings()
  * + buildController() from this module.
  */
-import { CONFIG } from '../config.js';
 import { showToast } from '../utils.js';
 
 export function openSetupModal(canClose = true) {

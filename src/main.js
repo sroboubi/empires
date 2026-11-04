@@ -1,16 +1,13 @@
 import { GameState } from './gameState.js';
 import { CONFIG } from './config.js';
-import { showToast, displayNum } from './utils.js';
+import { showToast } from './utils.js';
 import {
   initRenderer,
   drawGrid,
   updateHexFog,
   setMapCameraLimits,
-  highlightCell,
   highlightPathCells,
   clearPathHighlight,
-  showExclusionZone,
-  clearExclusionZone,
   pickHexCell,
   setEntitySelectionHighlight,
   clearEntitySelectionHighlight,
@@ -26,16 +23,15 @@ import { loadGameManifest } from './manifestLoader.js';
 import { HexGrid } from './hexGrid.js';
 import { collectResourceModelEntries } from './resources.js';
 import { audio } from './audio.js';
-import { saveGame, loadGame, listSaves, deleteSave, pruneAutoSaves } from './saveManager.js';
+import { saveGame, loadGame, pruneAutoSaves } from './saveManager.js';
 import { Player } from './player.js';
 import { setUiCallbacks } from './ui/callbacks.js';
 import { updatePlayersUI } from './ui/playersList.js';
-import { renderResourceProfileHTML } from './ui/profileVisualizer.js';
 import { showContextMenu, hideContextMenu, showPlayerContextMenu, hidePlayerContextMenu } from './ui/contextMenu.js';
-import { renderChatMessages, openChatModal, closeChatModal, sendChatMessage } from './ui/chat.js';
-import { onMouseMove as handleCellHover, prettifyName } from './ui/cellInspector.js';
+import { openChatModal, closeChatModal, sendChatMessage } from './ui/chat.js';
+import { onMouseMove as handleCellHover } from './ui/cellInspector.js';
 import { showVictoryModal, closeVictoryModal } from './ui/victoryModal.js';
-import { openSetupModal, closeSetupModal, buildController, loadAiDefinitions, collectSetupSettings } from './ui/setup.js';
+import { openSetupModal, closeSetupModal, loadAiDefinitions, collectSetupSettings } from './ui/setup.js';
 import { openSaveLoadModal, closeSaveLoadModal, renderSavesList } from './ui/saveLoad.js';
 import { ReplayRecorder, ReplayPlayer, exportReplayToJSON, readReplayFile } from './replayManager.js';
 
@@ -329,43 +325,6 @@ async function init() {
    SETUP MODAL & GAME INITIALIZATION LOGIC
    ========================================================================== */
 
-
-
-
-
-
-
-
-
-/* --------------------------------------------------------------------------
-   BARBARIAN SETUP UI: enable toggle, dynamic horde sliders, collapsible section
-   --------------------------------------------------------------------------
-   All horde unit sliders are generated dynamically from whatever keys exist
-   in defaultSettings.barbarians.horde — no unit names are hardcoded here.
-   -------------------------------------------------------------------------- */
-
-
-
-
-
-
-
-/* --------------------------------------------------------------------------
-   AI SETUP UI (Phase 23): provider keys, controller + leader selection.
-   Definitions: definitions/ai.json (providers, controllers),
-   definitions/leaders.json (leader personas).
-   -------------------------------------------------------------------------- */
-
-
-
-/** Controller key for a setup player's controller object (matched by URL). */
-/** Hover/selected-leader tooltip text (Phase 23.4). */
-
-/** Phase 23.1: one key input per provider from ai.json. */
-
-
-
-
 function handleStartGameClicked() {
   const settings = collectSetupSettings(defaultSettings);
   if (!settings) return;
@@ -421,9 +380,6 @@ function startNewGame(settings) {
 /* ==========================================================================
    SAVE / LOAD MODAL LOGIC
    ========================================================================== */
-
-
-
 
 async function handleManualSaveClicked() {
   const input = document.getElementById('manual-save-name');
@@ -697,9 +653,6 @@ async function checkAutoSave() {
   }
 }
 
-
-
-
 /* ==========================================================================
    INTERACTION & SELECTION HANDLERS
    ========================================================================== */
@@ -824,26 +777,9 @@ function doContextMenuAction(action, targetCell, targetEntity, gameState, checkR
   }
 }
 
-
-
-
-
-
-/* ==========================================================================
-   DIPLOMATIC CHAT SYSTEM (MODAL & MESSAGING)
-   ========================================================================== */
-
-
-
-
-
-
-
 function closeProfileModal() {
   const overlay = document.getElementById('profile-modal-overlay');
   if (overlay) overlay.classList.remove('active');
 }
-
-
 
 window.addEventListener('DOMContentLoaded', init);
