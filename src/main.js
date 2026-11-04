@@ -50,7 +50,8 @@ let setupStartingUnits = {};
 /**
  * Called after an AI action completes. Handles replay recording, visibility
  * filtering, entity reconciliation, and UI refresh. Registered on gameState
- * by wireGameState(); aiHelper delegates to it via gameState.onActionDone().
+ * Registered on gameState via the constructor; aiHelper delegates to it
+ * via gameState.onActionDone().
  */
 async function onActionDone(involvedCells = null, actionDesc = '') {
   if (!gameState) return;
@@ -67,17 +68,6 @@ async function onActionDone(involvedCells = null, actionDesc = '') {
   reconcileEntities(gameState);
   updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
   await new Promise(r => setTimeout(r, CONFIG.actionSleepMs ?? 0));
-}
-
-/**
- * Wire gameState callbacks after creation. Must be called every time a new
- * GameState is constructed (new game, load game, replay).
- * main.js implements these; aiHelper delegates via gameState.
- */
-function wireGameState() {
-  gameState.onActionDone = onActionDone;
-  gameState.onOpenChatModal = (humanPlayer, aiPlayer) => openChatModal(humanPlayer, aiPlayer);
-  gameState.onCloseChatModal = () => closeChatModal();
 }
 
 /**
@@ -980,8 +970,11 @@ function startNewGame(settings) {
   button.disabled = false;
   button.textContent = 'Next Turn';
 
-  gameState = new GameState();
-  wireGameState();
+  gameState = new GameState({
+    onActionDone,
+    onOpenChatModal: (humanPlayer, aiPlayer) => openChatModal(humanPlayer, aiPlayer),
+    onCloseChatModal: () => closeChatModal(),
+  });
   gameState.generateMap(settings.mapSize, manifestData.terrains, manifestData);
 
   // The browser drives turns: pass nextTurn as the continuation so the
@@ -1145,8 +1138,11 @@ async function doLoadGame(saveName) {
     hideContextMenu();
     clearEntityMeshes();
 
-    gameState = new GameState();
-    wireGameState();
+    gameState = new GameState({
+    onActionDone,
+    onOpenChatModal: (humanPlayer, aiPlayer) => openChatModal(humanPlayer, aiPlayer),
+    onCloseChatModal: () => closeChatModal(),
+  });
     gameState.manifestData = manifestData;
     gameState.deserialize(record.data);
 
@@ -1212,8 +1208,11 @@ async function startReplayMode(replayData) {
   if (fogToggle) fogToggle.checked = false;
 
   // Instantiate GameState for replay from initial state
-  gameState = new GameState();
-  wireGameState();
+  gameState = new GameState({
+    onActionDone,
+    onOpenChatModal: (humanPlayer, aiPlayer) => openChatModal(humanPlayer, aiPlayer),
+    onCloseChatModal: () => closeChatModal(),
+  });
   gameState.settings = replayData.settings || {};
   gameState.manifestData = manifestData;
 

@@ -11,7 +11,13 @@ import Entity from './entity.js';
  * It is fully serializable to and from JSON.
  */
 export class GameState {
-  constructor() {
+  /**
+   * @param {Object} [callbacks={}] - UI callbacks registered by main.js:
+   *   onActionDone(involvedCells, actionDesc),
+   *   onOpenChatModal(humanPlayer, aiPlayer),
+   *   onCloseChatModal()
+   */
+  constructor(callbacks = {}) {
     this.players = [];
     this.activePlayerIndex = 0;
     this.currentRound = 1;
@@ -24,12 +30,11 @@ export class GameState {
     this.replayRecorder = null;
     this.fogPovPlayer = null; // Replay only: fog POV override (snapshot's active player); null = human-player union
     // Single shared AiHelper instance (used by barbarians, players, harnesses).
-    // main.js sets callbacks after construction: onActionDone,
-    // onOpenChatModal, onCloseChatModal.
     this.aiHelper = new AiHelper(this);
-    this.onActionDone = null;
-    this.onOpenChatModal = null;
-    this.onCloseChatModal = null;
+    // UI callbacks (main.js implements these; aiHelper delegates via gameState).
+    this.onActionDone = callbacks.onActionDone || null;
+    this.onOpenChatModal = callbacks.onOpenChatModal || null;
+    this.onCloseChatModal = callbacks.onCloseChatModal || null;
   }
 
   /**
