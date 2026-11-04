@@ -93,3 +93,11 @@ This file documents mistakes made during development, reasons why they occurred,
 - **Why it was made**: Focused on preventing surprise attacks and did not re-read the stance semantics after adding the offensive/neutral branches.
 - **What to avoid in the future**: Model stance explicitly: proximity is a threat for barbarians and `defensive` opponents; `neutral` is engaged via attacker history or a safe/opportunistic check; `caution` only when attacked; `offensive` is a hostile stance but still subject to a local force-balance check. Ensure mutually exclusive branches do not overlap in earlier conditions.
 
+
+
+---
+
+### Mistake 14: Coupling AI base classes to engine isolation proxy wrappers
+- **Description**: Placed the AI interface proxy inside `src/ai/interfaceProxy.js` and had `BaseManager` import and construct the proxy wrappers directly.
+- **Why it was made**: Assumed `BaseManager` was the intended injection point based on initial spec notes without considering architectural boundaries and anti-cheat separation.
+- **What to avoid in the future**: AI controllers and base classes in `src/ai/` must remain completely decoupled from and unaware of the engine's isolation/proxy infrastructure. Keep security and proxy harnesses outside the `ai/` directory (e.g. `src/aiInterfaceProxy.js`) and inject the proxied objects via the engine constructor factory (`createAiManager` in `src/player.js`).

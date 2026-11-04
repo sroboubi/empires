@@ -64,69 +64,7 @@ export class LlmBaseManager extends BaseManager {
      */
 
     async chat(initiator, receiver, initialMessage = null, maxExchanges = null) {
-        console.log(`[Harness] chat() started between ${initiator.name} and ${receiver.name}`);
-
-        // Max back-and-forth exchanges per chat, from controller config (default 6).
-        const maxEx = maxExchanges ?? initiator.controller?.config?.maxChatExchanges ?? 6;
-
-        const initiatorHarness = await initiator.getAiManager();
-        const receiverHarness = await receiver.getAiManager();
-        // Case 1: Both players are AI -> background chat loop (invisible to human)
-        if (initiatorHarness && receiverHarness) {
-            let firstMsg = initialMessage;
-            if (!firstMsg) {
-                const opening = await initiatorHarness.generateChatReply(receiver, "Open diplomatic dialogue with an initial statement or proposal.");
-                firstMsg = opening.content;
-            }
-            this.gameState.addChatMessage(initiator, receiver, firstMsg);
-
-            let currentSpeaker = receiver;
-            let currentHarness = receiverHarness;
-            let otherPlayer = initiator;
-            const maxExchanges = maxEx;
-
-            for (let i = 0; i < maxExchanges; i++) {
-                const reply = await currentHarness.generateChatReply(otherPlayer);
-                this.gameState.addChatMessage(currentSpeaker, otherPlayer, reply.content);
-
-                if (reply.ended) {
-                    console.log(`[Harness] AI-to-AI chat terminated by ${currentSpeaker.name} at exchange ${i + 1}`);
-                    break;
-                }
-
-                // Alternate speakers
-                const tempP = currentSpeaker;
-                currentSpeaker = otherPlayer;
-                otherPlayer = tempP;
-                currentHarness = (currentSpeaker === initiator) ? initiatorHarness : receiverHarness;
-            }
-
-            // Both AI players add summary note to their history
-            await initiatorHarness.summarizeChatAndAddNote(receiver);
-            if (receiverHarness && receiverHarness !== initiatorHarness) {
-                await receiverHarness.summarizeChatAndAddNote(initiator);
-            }
-            return;
-        }
-
-        // Case 2: One player is human -> open chat window
-        const aiPlayer = initiatorHarness ? initiator : receiver;
-        const humanPlayer = initiatorHarness ? receiver : initiator;
-        const aiHarness = initiatorHarness || receiverHarness;
-
-        if (initiator.isAI) {
-            // AI opening statement
-            const opening = initialMessage || (await aiHarness.generateChatReply(humanPlayer, "Open diplomatic dialogue with an initial statement or proposition to the human leader.")).content;
-            this.gameState.addChatMessage(aiPlayer, humanPlayer, opening);
-        }
-
-        // Bring up chat window and await until closed/ended.
-        // The summary note is added by closeChatModal() in main.js when the
-        // modal closes — do not summarize here as well (would double the note
-        // and the LLM call).
-        if (typeof window !== 'undefined' && typeof window.openChatModal === 'function') {
-            await window.openChatModal(humanPlayer, aiPlayer);
-        }
+        return await this.helper.chat(initiator, receiver, initialMessage, maxExchanges);
     }
 
     /**
@@ -165,7 +103,7 @@ export class LlmBaseManager extends BaseManager {
             .replace('{OTHER_TOTAL}', otherScore.total)
             .replace('{MY_RESOURCES}', Object.entries(this.player.resources || {}).map(([k, v]) => `${k} ${Math.round(v)}`).join(', ') || 'none')
             .replace('{MY_UNITS}', summarizeUnitCounts(this.player.getEntities(this.gameState)))
-            .replace('{OTHER_UNITS}', summarizeUnitCounts((this.gameState.entities || []).filter(e => e.owner === otherPlayer && this.player.isVisible?.(e.q, e.r))));
+            .replace('{OTHER_UNITS}', summarizeUnitCounts((this.gameState.entities || []).filter(e => e.owner?.id === otherPlayer?.id && this.player.isVisible?.(e.q, e.r))));
     }
 
     /**
@@ -313,7 +251,7 @@ export class LlmBaseManager extends BaseManager {
             history: history,
             entities: ownSummaries,
             opponents: opponents,
-            knownPlayers: (this.gameState.players || []).filter(p => p !== this.player).map(p => ({ name: p.name, score: p.score })),
+            knownPlayers: (this.gameState.players || []).filter(p => p?.id !== this.player?.id).map(p => ({ name: p.name, score: p.score })),
             mapSize: this.gameState.settings?.mapSize,
             exploredPercent: helper.getCellCount() ? Math.round((this.player.exploredCells?.size || 0) / helper.getCellCount() * 100) : null,
             threats: threats,
