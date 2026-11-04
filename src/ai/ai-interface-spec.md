@@ -41,8 +41,14 @@ AIs MAY use `aiHelper` for convenience (filtered info, multi-step actions), but 
 
 ## Implementation details
 
-- JS Proxy wraps underlying objects dynamically (`src/ai/interfaceProxy.js`).
+- JS Proxy wraps underlying objects dynamically (`src/aiInterfaceProxy.js`, outside `src/ai/` so AI code has zero dependency on it).
 - Wrapping is lazy on property access.
-- `Symbol.for('aiInterfaceUnwrap')` allows engine code and `AiHelper` to unwrap proxy arguments cleanly without changing `Entity` action code.
-- `BaseManager` wraps `gameState`, `player`, and `helper` in its constructor before handing them to AI subclasses (`SmartManager`, `AdaptiveManager`, `JsonHarness`, `MenuHarness`).
+- Module-local `Symbol('aiInterfaceUnwrap')` (never exported) allows the proxy to unwrap arguments before calling real engine methods. AI code cannot reference or forge it.
+- The game constructs AI managers via `createAiManager(ManagerClass, player, helper)` (called from `player.js`), which wraps player/gameState before handing them to the manager. `BaseManager` itself never imports the proxy.
 - `AiHelper.chat()` manages diplomatic conversations, order deduction, and player history logging. AI private cooldown tracking (e.g. `_chatCooldownOrders`) is maintained on the harness instance rather than mutating `player`.
+
+## Proxy identity semantics (for AI implementors)
+
+- The proxy uses a shared identity cache: the **same underlying object always maps to the same proxy instance** within an AI's turn. This means `===` / `!==` work as expected — e.g. `unit.owner === this.player` is true when they wrap the same player.
+- However, **prefer comparing IDs** (`unit.owner?.id === player.id`) over object identity. It's more robust and clearer about intent. ID comparison always works regardless of proxy internals.
+- Never store a proxy reference and expect it to `===` a proxy obtained from a different AI's turn — each `createAiManager` call gets a fresh cache.

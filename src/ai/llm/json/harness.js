@@ -90,7 +90,7 @@ export class JsonHarness extends LlmBaseManager {
                 if (!entity) {
                     lastResponseError = `Actor entity not found: ${actorId}`;
                     continue;
-                } else if (entity.owner !== this.player) {
+                } else if (entity.owner?.id !== this.player.id) {
                     lastResponseError = `Entity ${actorId} does not belong to you`;
                     continue;
                 }

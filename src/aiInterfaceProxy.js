@@ -64,6 +64,10 @@ function wrapFunction(fn, target, aiName, seen, ownPlayer = null) {
       const result = Reflect.apply(fnTarget, thisArg, realArgs);
       return deepWrap(result, aiName, seen, ownPlayer);
     },
+    has(target, prop) {
+      if (prop === UNWRAP) return true;
+      return Reflect.has(target, prop);
+    },
   });
 }
 
@@ -119,7 +123,15 @@ function deepWrap(obj, aiName, seen = new WeakMap(), ownPlayer = null) {
         };
       }
 
-      const value = Reflect.get(target, prop, receiver);
+      // Reflect.get with receiver can throw for built-in accessors (e.g. Set.prototype.size
+      // when target is a Set): the getter runs with `this` = proxy, which lacks the internal slots.
+      // Fall back to target-bound lookup in that case.
+      let value;
+      try {
+        value = Reflect.get(target, prop, receiver);
+      } catch (e) {
+        value = Reflect.get(target, prop);
+      }
       if (typeof value === 'function') {
         return wrapFunction(value, target, aiName, seen, ownPlayer);
       }
@@ -140,6 +152,10 @@ function deepWrap(obj, aiName, seen = new WeakMap(), ownPlayer = null) {
     },
     ownKeys(target) {
       return Reflect.ownKeys(target).filter(k => k !== UNWRAP);
+    },
+    has(target, prop) {
+      if (prop === UNWRAP) return true;
+      return Reflect.has(target, prop);
     },
   });
 
@@ -162,7 +178,15 @@ function createOtherPlayerProxy(player, aiName) {
       if (HIDDEN_PLAYER_PROPS.has(prop)) {
         return undefined;
       }
-      const value = Reflect.get(target, prop, receiver);
+      // Reflect.get with receiver can throw for built-in accessors (e.g. Set.prototype.size
+      // when target is a Set): the getter runs with `this` = proxy, which lacks the internal slots.
+      // Fall back to target-bound lookup in that case.
+      let value;
+      try {
+        value = Reflect.get(target, prop, receiver);
+      } catch (e) {
+        value = Reflect.get(target, prop);
+      }
       if (typeof value === 'function') {
         return () => undefined;
       }
@@ -180,6 +204,10 @@ function createOtherPlayerProxy(player, aiName) {
     },
     ownKeys(target) {
       return Reflect.ownKeys(target).filter(k => k !== UNWRAP);
+    },
+    has(target, prop) {
+      if (prop === UNWRAP) return true;
+      return Reflect.has(target, prop);
     },
   });
 }
@@ -216,7 +244,15 @@ function createHexGridProxy(hexGrid, ownPlayer, aiName, seen) {
         };
       }
 
-      const value = Reflect.get(target, prop, receiver);
+      // Reflect.get with receiver can throw for built-in accessors (e.g. Set.prototype.size
+      // when target is a Set): the getter runs with `this` = proxy, which lacks the internal slots.
+      // Fall back to target-bound lookup in that case.
+      let value;
+      try {
+        value = Reflect.get(target, prop, receiver);
+      } catch (e) {
+        value = Reflect.get(target, prop);
+      }
       if (typeof value === 'function') {
         return wrapFunction(value, target, aiName, seen, ownPlayer);
       }
@@ -238,6 +274,10 @@ function createHexGridProxy(hexGrid, ownPlayer, aiName, seen) {
     ownKeys(target) {
       return Reflect.ownKeys(target).filter(k => k !== UNWRAP);
     },
+    has(target, prop) {
+      if (prop === UNWRAP) return true;
+      return Reflect.has(target, prop);
+    },
   });
 }
 
@@ -245,10 +285,9 @@ function createHexGridProxy(hexGrid, ownPlayer, aiName, seen) {
  * Create the gameState proxy for an AI.
  * Enforces entity visibility, getEntityAt/getEntityById masking, and chat privacy.
  */
-export function createGameStateProxy(gameState, ownPlayer, aiName) {
+export function createGameStateProxy(gameState, ownPlayer, aiName, seen = new WeakMap()) {
   const ownPlayerId = ownPlayer.id;
   const playerCache = new Map();
-  const seen = new WeakMap();
 
   function wrapPlayer(p) {
     if (!p) return p;
@@ -324,14 +363,27 @@ export function createGameStateProxy(gameState, ownPlayer, aiName) {
       }
 
       if (prop === 'chatHistory') {
-        const hist = (target.chatHistory || []).filter(msg =>
-          msg.sender === ownPlayer.name || msg.receiver === ownPlayer.name ||
-          msg.senderId === ownPlayerId || msg.receiverId === ownPlayerId
-        );
-        return deepWrap(hist, aiName, seen, ownPlayer);
+        // chatHistory is an object keyed by "id1:id2" (sorted), not an array.
+        // Keep only chats involving the AI's player.
+        const hist = target.chatHistory || {};
+        const filtered = {};
+        for (const [key, msgs] of Object.entries(hist)) {
+          if (key.split(':').includes(String(ownPlayerId))) {
+            filtered[key] = msgs;
+          }
+        }
+        return deepWrap(filtered, aiName, seen, ownPlayer);
       }
 
-      const value = Reflect.get(target, prop, receiver);
+      // Reflect.get with receiver can throw for built-in accessors (e.g. Set.prototype.size
+      // when target is a Set): the getter runs with `this` = proxy, which lacks the internal slots.
+      // Fall back to target-bound lookup in that case.
+      let value;
+      try {
+        value = Reflect.get(target, prop, receiver);
+      } catch (e) {
+        value = Reflect.get(target, prop);
+      }
       if (typeof value === 'function') {
         return wrapFunction(value, target, aiName, seen, ownPlayer);
       }
@@ -353,6 +405,10 @@ export function createGameStateProxy(gameState, ownPlayer, aiName) {
     ownKeys(target) {
       return Reflect.ownKeys(target).filter(k => k !== UNWRAP);
     },
+    has(target, prop) {
+      if (prop === UNWRAP) return true;
+      return Reflect.has(target, prop);
+    },
   });
 }
 
@@ -360,8 +416,8 @@ export function createGameStateProxy(gameState, ownPlayer, aiName) {
  * Create the player proxy for the AI's own player.
  * Full read access, blocks direct writes.
  */
-export function createPlayerProxy(player, aiName) {
-  return deepWrap(player, aiName, new WeakMap(), player);
+export function createPlayerProxy(player, aiName, seen = new WeakMap()) {
+  return deepWrap(player, aiName, seen, player);
 }
 
 /**
@@ -411,6 +467,10 @@ function createHelperProxy(helper, ownPlayer, aiName) {
     ownKeys(target) {
       return Reflect.ownKeys(target).filter(k => k !== UNWRAP);
     },
+    has(target, prop) {
+      if (prop === UNWRAP) return true;
+      return Reflect.has(target, prop);
+    },
   });
 }
 
@@ -428,12 +488,16 @@ function createHelperProxy(helper, ownPlayer, aiName) {
  */
 export function createAiManager(ManagerClass, player, helper) {
   const aiName = player.name || `player-${player.id}`;
-  const proxiedPlayer = createPlayerProxy(player, aiName);
-  const proxiedGameState = createGameStateProxy(helper.getGameState(), player, aiName);
+  // Shared seen-cache across the whole proxy tree: the same real object always
+  // maps to the same proxy. This makes identity comparison (===) work
+  // transparently — e.g. unit.owner === this.player is true when they wrap
+  // the same underlying player.
+  const seen = new WeakMap();
+  const proxiedPlayer = createPlayerProxy(player, aiName, seen);
+  const proxiedGameState = createGameStateProxy(helper.getGameState(), player, aiName, seen);
   const proxiedHelper = createHelperProxy(helper, player, aiName);
 
   const manager = new ManagerClass(proxiedPlayer, proxiedHelper);
   manager.gameState = proxiedGameState;
   return manager;
 }
-

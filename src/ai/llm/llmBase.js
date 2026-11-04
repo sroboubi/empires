@@ -103,7 +103,7 @@ export class LlmBaseManager extends BaseManager {
             .replace('{OTHER_TOTAL}', otherScore.total)
             .replace('{MY_RESOURCES}', Object.entries(this.player.resources || {}).map(([k, v]) => `${k} ${Math.round(v)}`).join(', ') || 'none')
             .replace('{MY_UNITS}', summarizeUnitCounts(this.player.getEntities(this.gameState)))
-            .replace('{OTHER_UNITS}', summarizeUnitCounts((this.gameState.entities || []).filter(e => e.owner === otherPlayer && this.player.isVisible?.(e.q, e.r))));
+            .replace('{OTHER_UNITS}', summarizeUnitCounts((this.gameState.entities || []).filter(e => e.owner?.id === otherPlayer?.id && this.player.isVisible?.(e.q, e.r))));
     }
 
     /**
@@ -251,7 +251,7 @@ export class LlmBaseManager extends BaseManager {
             history: history,
             entities: ownSummaries,
             opponents: opponents,
-            knownPlayers: (this.gameState.players || []).filter(p => p !== this.player).map(p => ({ name: p.name, score: p.score })),
+            knownPlayers: (this.gameState.players || []).filter(p => p?.id !== this.player?.id).map(p => ({ name: p.name, score: p.score })),
             mapSize: this.gameState.settings?.mapSize,
             exploredPercent: helper.getCellCount() ? Math.round((this.player.exploredCells?.size || 0) / helper.getCellCount() * 100) : null,
             threats: threats,
