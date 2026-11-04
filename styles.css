@@ -1046,3 +1046,28 @@
 
 .stacked-bar-spaced { margin-top: 2px; }
 .btn-auto { width: auto; }
+/* --- victory modal --- */
+.victory-title { font-size: 24px; font-weight: 700; margin-bottom: 12px; }
+.victory-round { font-size: 14px; color: var(--text-muted); margin-bottom: 16px; }
+.victory-reasons { text-align: left; font-size: 13px; color: var(--text-main); }
+.victory-reason { margin: 8px 0; padding: 8px; background: rgba(52, 152, 219, 0.1); border-radius: 4px; }
+
+/* --- context menu --- */
+.context-build-stats { font-size: 10px; color: #38bdf8; margin-top: 3px; display: flex; gap: 8px; flex-wrap: wrap; }
+.context-action-disabled { opacity: 0.5; cursor: not-allowed; }
+.context-action-inner { display: flex; flex-direction: column; width: 100%; }
+.context-action-row { display: flex; justify-content: space-between; align-items: center; }
+.context-action-name { font-size: 12px; color: #ffffff; }
+.context-action-name-disabled { color: #999999; }
+.context-action-arrow { font-size: 10px; color: var(--accent-color); }
+.context-action-arrow-disabled { color: #666666; }
+.context-action-preview { font-size: 10px; margin-top: 1px; }
+.context-action-preview-ok { color: #a78bfa; }
+.context-action-preview-bad { color: #ff6b6b; }
+.context-no-actions { font-size: 11px; color: var(--text-muted); padding: 4px; }
+
+/* --- chat modal --- */
+.chat-empty { color: var(--text-muted); font-size: 13px; text-align: center; margin: auto; padding: 20px; }
+.chat-thinking { display: inline-block; animation: pulse 1.5s infinite; }
+.chat-concluded { color: #f1c40f; }
+.chat-error { color: #e74c3c; }

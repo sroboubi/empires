@@ -13,7 +13,7 @@ import { HexGrid, DIRECTIONS_8 } from './hexGrid.js';
 import { camelToTitle, sleep, calculateAttackMultiplier } from './utils.js';
 import { applyResourceYieldBonus } from './resources.js';
 import { reconcileEntities } from './renderer.js';
-import { updatePlayersUI } from './ui.js';
+import { updatePlayersUI } from './ui/playersList.js';
 import Entity from './entity.js';
 import { CONFIG } from './config.js';
 
