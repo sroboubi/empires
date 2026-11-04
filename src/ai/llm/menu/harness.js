@@ -138,13 +138,13 @@ export class MenuHarness extends LlmBaseManager {
                     continue;
                 }
                 console.log(`[Harness] ${this.player.name} initiating diplomatic chat with ${targetPlayer.name}`);
-                this.recordChat();
                 const chatRes = await this.chat(this.player, targetPlayer, thoughtProcess || null);
-                if (chatRes && chatRes.success === false) {
-                    lastResponseError = chatRes.message || 'Failed to initiate chat.';
+                if (chatRes === false) {
+                    lastResponseError = 'Failed to initiate chat.';
                     lastFailedLabel = label;
                     continue;
                 }
+                this.recordChat();
                 await this.helper.onActionDone(this.gameState, null, `Chat with ${targetPlayer.name}`);
                 lastActionResult = `[completed] Concluded diplomatic session with ${targetPlayer.name}`;
                 lastResponseError = null;

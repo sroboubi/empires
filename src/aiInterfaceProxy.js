@@ -52,6 +52,46 @@ function isExploredByPlayer(player, q, r) {
 }
 
 /**
+ * Duck-type check for Player objects. We can't import Player here
+ * (player.js imports this module — would be a cycle), so we check for
+ * the distinctive combination of player-only properties.
+ */
+function isPlayerObject(obj) {
+  return obj !== null && typeof obj === 'object' &&
+    typeof obj.id === 'number' &&
+    obj.resources !== undefined && typeof obj.resources === 'object' &&
+    obj.orders !== undefined &&
+    typeof obj.getEntities === 'function';
+}
+
+/**
+ * Wrap an entity's actions with the ownership guard: calling .do() on an
+ * action of a foreign-owned entity throws. Shared by the getActions() and
+ * .actions property interceptions.
+ */
+function wrapActionsWithOwnership(actions, entityTarget, entityName, aiName, seen, ownPlayer) {
+  const isOwned = !ownPlayer || (entityTarget.ownerId ?? entityTarget.owner?.id) === ownPlayer.id;
+  return actions.map(action => {
+    const wrappedAction = deepWrap(action, aiName, seen, ownPlayer);
+    if (!isOwned) {
+      return new Proxy(wrappedAction, {
+        get(actTarget, actProp) {
+          if (actProp === 'do') {
+            return () => {
+              throw new Error(
+                `[AI Interface] Illegal action: AI '${aiName}' attempted to execute action '${action.name}' on entity '${entityName}' owned by another player.`
+              );
+            };
+          }
+          return Reflect.get(actTarget, actProp);
+        }
+      });
+    }
+    return wrappedAction;
+  });
+}
+
+/**
  * Wrap a function so that:
  * - Arguments from the AI are unwrapped to real objects before the call.
  * - Return values are wrapped before going back to the AI.
@@ -99,28 +139,16 @@ function deepWrap(obj, aiName, seen = new WeakMap(), ownPlayer = null) {
 
       // Gap 4: Enforce action ownership when getActions() is called
       if (prop === 'getActions' && typeof target.getActions === 'function') {
-        const isOwned = !ownPlayer || (target.ownerId ?? target.owner?.id) === ownPlayer.id;
         return () => {
           const actions = target.getActions();
-          return actions.map(action => {
-            const wrappedAction = deepWrap(action, aiName, seen, ownPlayer);
-            if (!isOwned) {
-              return new Proxy(wrappedAction, {
-                get(actTarget, actProp) {
-                  if (actProp === 'do') {
-                    return () => {
-                      throw new Error(
-                        `[AI Interface] Illegal action: AI '${aiName}' attempted to execute action '${action.name}' on entity '${target.name}' owned by another player.`
-                      );
-                    };
-                  }
-                  return Reflect.get(actTarget, actProp);
-                }
-              });
-            }
-            return wrappedAction;
-          });
+          return wrapActionsWithOwnership(actions, target, target.name, aiName, seen, ownPlayer);
         };
+      }
+
+      // Gap 4 (continued): entity.actions is the same array getActions() returns,
+      // so intercept the property too — otherwise enemyUnit.actions[0].do() bypasses the guard.
+      if (prop === 'actions' && Array.isArray(target.actions)) {
+        return wrapActionsWithOwnership(target.actions, target, target.name, aiName, seen, ownPlayer);
       }
 
       // Reflect.get with receiver can throw for built-in accessors (e.g. Set.prototype.size
@@ -136,6 +164,11 @@ function deepWrap(obj, aiName, seen = new WeakMap(), ownPlayer = null) {
         return wrapFunction(value, target, aiName, seen, ownPlayer);
       }
       if (value !== null && typeof value === 'object') {
+        // Opponent players reached via any path (e.g. entity.owner) get the
+        // restricted proxy, not full read access.
+        if (ownPlayer && isPlayerObject(value) && value.id !== ownPlayer.id) {
+          return createOtherPlayerProxy(value, aiName, seen);
+        }
         return deepWrap(value, aiName, seen, ownPlayer);
       }
       return value;
@@ -167,8 +200,9 @@ function deepWrap(obj, aiName, seen = new WeakMap(), ownPlayer = null) {
  * Create a read-only proxy for an opponent player.
  * Gap 5: Returns undefined on hidden properties instead of throwing error.
  */
-function createOtherPlayerProxy(player, aiName) {
-  return new Proxy(player, {
+function createOtherPlayerProxy(player, aiName, seen = new WeakMap()) {
+  if (seen.has(player)) return seen.get(player);
+  const proxy = new Proxy(player, {
     get(target, prop, receiver) {
       if (prop === UNWRAP) return target;
       if (prop === 'name' || prop === 'score' || prop === 'description' ||
@@ -210,6 +244,8 @@ function createOtherPlayerProxy(player, aiName) {
       return Reflect.has(target, prop);
     },
   });
+  seen.set(player, proxy);
+  return proxy;
 }
 
 /**
@@ -422,11 +458,20 @@ export function createPlayerProxy(player, aiName, seen = new WeakMap()) {
 
 /**
  * Creates helper proxy to prevent commanding entities of other players (Gap 4).
+ * helper.gameState / helper.getGameState() return the filtered gameState proxy
+ * (not the raw game state, not a plain deepWrap which would skip visibility filtering).
+ * All other return values are deep-wrapped.
  */
-function createHelperProxy(helper, ownPlayer, aiName) {
+function createHelperProxy(helper, ownPlayer, aiName, seen = new WeakMap(), proxiedGameState = null) {
   return new Proxy(helper, {
     get(target, prop, receiver) {
       if (prop === UNWRAP) return target;
+
+      // Never leak the raw gameState — hand back the filtered proxy instead.
+      if ((prop === 'gameState' || prop === 'getGameState') && proxiedGameState) {
+        if (prop === 'gameState') return proxiedGameState;
+        return () => proxiedGameState;
+      }
 
       const val = Reflect.get(target, prop, receiver);
       if (typeof val === 'function') {
@@ -449,8 +494,11 @@ function createHelperProxy(helper, ownPlayer, aiName) {
             }
           }
           const realArgs = args.map(unwrap);
-          return val.apply(target, realArgs);
+          return deepWrap(val.apply(target, realArgs), aiName, seen, ownPlayer);
         };
+      }
+      if (val !== null && typeof val === 'object') {
+        return deepWrap(val, aiName, seen, ownPlayer);
       }
       return val;
     },
@@ -495,7 +543,7 @@ export function createAiManager(ManagerClass, player, helper) {
   const seen = new WeakMap();
   const proxiedPlayer = createPlayerProxy(player, aiName, seen);
   const proxiedGameState = createGameStateProxy(helper.getGameState(), player, aiName, seen);
-  const proxiedHelper = createHelperProxy(helper, player, aiName);
+  const proxiedHelper = createHelperProxy(helper, player, aiName, seen, proxiedGameState);
 
   const manager = new ManagerClass(proxiedPlayer, proxiedHelper);
   manager.gameState = proxiedGameState;

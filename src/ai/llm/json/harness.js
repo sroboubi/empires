@@ -174,8 +174,8 @@ export class JsonHarness extends LlmBaseManager {
 
                 console.log(`[Harness] ${this.player.name} initiating diplomatic chat with ${targetPlayer.name}`);
                 const chatRes = await this.chat(this.player, targetPlayer, response.message || response.thoughtProcess);
-                if (chatRes && chatRes.success === false) {
-                    lastResponseError = chatRes.message || 'Failed to initiate chat.';
+                if (chatRes === false) {
+                    lastResponseError = 'Failed to initiate chat.';
                     continue;
                 }
 
