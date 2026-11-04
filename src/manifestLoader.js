@@ -21,6 +21,7 @@ export async function loadGameManifest(overrides = {}) {
   const treasuresUrl = urls.treasuresUrl || urls.TREASURES_URL || CONFIG.TREASURES_URL || './definitions/treasures.json';
   const terrainsUrl = urls.terrainsUrl || urls.TERRAINS_URL || CONFIG.TERRAINS_URL || './definitions/terrains.json';
   const audioUrl = urls.audioUrl || urls.AUDIO_URL || CONFIG.AUDIO_URL || './definitions/audio.json';
+  const resourcesUrl = urls.resourcesUrl || urls.RESOURCES_URL || CONFIG.RESOURCES_URL || './definitions/resources.json';
   const defaultSettingsUrl = urls.defaultSettingsUrl || urls.DEFAULT_SETTINGS_URL || CONFIG.DEFAULT_SETTINGS_URL || './definitions/defaultSettings.json';
 
   console.log(`Loading game definitions from:
@@ -29,9 +30,10 @@ export async function loadGameManifest(overrides = {}) {
   - Treasures: ${treasuresUrl}
   - Terrains: ${terrainsUrl}
   - Audio: ${audioUrl}
+  - Resources: ${resourcesUrl}
   - Default Settings: ${defaultSettingsUrl}`);
 
-  const [entitiesRes, naturalResourcesRes, treasuresRes, terrainsRes, audioRes, defaultSettingsRes] = await Promise.all([
+  const [entitiesRes, naturalResourcesRes, treasuresRes, terrainsRes, audioRes, resourcesRes, defaultSettingsRes] = await Promise.all([
     fetch(entitiesUrl).then(r => {
       if (!r.ok) throw new Error(`Failed to load entities from ${entitiesUrl}: ${r.statusText}`);
       return r.json();
@@ -52,6 +54,10 @@ export async function loadGameManifest(overrides = {}) {
       if (!r.ok) throw new Error(`Failed to load audio from ${audioUrl}: ${r.statusText}`);
       return r.json();
     }),
+    fetch(resourcesUrl).then(r => {
+      if (!r.ok) throw new Error(`Failed to load resources from ${resourcesUrl}: ${r.statusText}`);
+      return r.json();
+    }),
     fetch(defaultSettingsUrl).then(r => {
       if (!r.ok) throw new Error(`Failed to load default settings from ${defaultSettingsUrl}: ${r.statusText}`);
       return r.json();
@@ -64,6 +70,7 @@ export async function loadGameManifest(overrides = {}) {
     treasures: treasuresRes,
     terrains: terrainsRes,
     audio: audioRes,
+    resources: resourcesRes,
     defaultSettings: defaultSettingsRes
   });
 }
@@ -79,6 +86,7 @@ function processManifestPayload(rawData) {
   const rawTreasures = Array.isArray(rawData.treasures) ? rawData.treasures : (rawData.treasures?.treasures || []);
   const rawTerrains = Array.isArray(rawData.terrains) ? rawData.terrains : (rawData.terrains?.terrains || []);
   const rawAudio = rawData.audio?.audio || rawData.audio || {};
+  const rawResources = Array.isArray(rawData.resources) ? rawData.resources : (rawData.resources?.resources || []);
   const defaultSettings = rawData.defaultSettings || {};
 
   const entityMetadata = {};
@@ -97,6 +105,7 @@ function processManifestPayload(rawData) {
     treasures: rawTreasures,
     terrains: rawTerrains,
     audio: rawAudio,
+    resources: rawResources,
     defaultSettings: defaultSettings
   };
 }
