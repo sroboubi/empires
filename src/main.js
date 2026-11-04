@@ -1,13 +1,16 @@
 import { GameState } from './gameState.js';
 import { CONFIG } from './config.js';
-import { showToast } from './utils.js';
+import { showToast, displayNum } from './utils.js';
 import {
   initRenderer,
   drawGrid,
   updateHexFog,
   setMapCameraLimits,
+  highlightCell,
   highlightPathCells,
   clearPathHighlight,
+  showExclusionZone,
+  clearExclusionZone,
   pickHexCell,
   setEntitySelectionHighlight,
   clearEntitySelectionHighlight,
@@ -23,16 +26,9 @@ import { loadGameManifest } from './manifestLoader.js';
 import { HexGrid } from './hexGrid.js';
 import { collectResourceModelEntries } from './resources.js';
 import { audio } from './audio.js';
-import { saveGame, loadGame, pruneAutoSaves } from './saveManager.js';
+import { saveGame, loadGame, listSaves, deleteSave, pruneAutoSaves } from './saveManager.js';
 import { Player } from './player.js';
-import { setUiCallbacks } from './ui/callbacks.js';
-import { updatePlayersUI } from './ui/playersList.js';
-import { showContextMenu, hideContextMenu, showPlayerContextMenu, hidePlayerContextMenu } from './ui/contextMenu.js';
-import { openChatModal, closeChatModal, sendChatMessage } from './ui/chat.js';
-import { onMouseMove as handleCellHover } from './ui/cellInspector.js';
-import { showVictoryModal, closeVictoryModal } from './ui/victoryModal.js';
-import { openSetupModal, closeSetupModal, loadAiDefinitions, collectSetupSettings } from './ui/setup.js';
-import { openSaveLoadModal, closeSaveLoadModal, renderSavesList } from './ui/saveLoad.js';
+import { updatePlayersUI, renderResourceProfileHTML } from './ui.js';
 import { ReplayRecorder, ReplayPlayer, exportReplayToJSON, readReplayFile } from './replayManager.js';
 
 let gameState;
@@ -49,6 +45,38 @@ let pointerDownPos = { x: 0, y: 0 };
 let pointerDownTime = 0;
 
 // Local setup state before starting game
+let setupPlayers = [];
+let setupStartingUnits = {};
+
+/**
+ * Called after an AI action completes. Handles replay recording, visibility
+ * filtering, entity reconciliation, and UI refresh. Registered on gameState
+ * by wireGameState(); aiHelper delegates to it via gameState.onActionDone().
+ */
+async function onActionDone(involvedCells = null, actionDesc = '') {
+  if (!gameState) return;
+  if (gameState?.replayRecorder?.isRecording()) {
+    gameState.replayRecorder.recordSnapshot(gameState, actionDesc || 'AI action');
+  }
+  if (!CONFIG.showAll && Array.isArray(involvedCells) && involvedCells.length > 0) {
+    if (!involvedCells.some(cell => gameState.isVisibleToHuman(cell))) {
+      console.debug("AI action done (no visible cells)");
+      return;
+    }
+  }
+  console.debug("AI action done (visible)");
+  reconcileEntities(gameState);
+  updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
+  await new Promise(r => setTimeout(r, CONFIG.actionSleepMs ?? 0));
+}
+
+/**
+ * Wire gameState callbacks after creation. Must be called every time a new
+ * GameState is constructed (new game, load game, replay).
+ */
+function wireGameState() {
+  gameState.onActionDone = onActionDone;
+}
 
 /**
  * Initializes the application.
@@ -70,18 +98,7 @@ async function init() {
     await preloadModels({ ...manifestData.entities, ...collectResourceModelEntries(manifestData) });
 
     // 3. Setup Event Listeners
-
-    // Register UI callbacks: ui/ modules call these for game actions.
-    // This keeps the dependency direction one-way (ui imports game, never reverse).
-    setUiCallbacks({
-      onPlayerContextMenu: (x, y, player) => showPlayerContextMenu(x, y, player),
-      doContextAction: (action, targetCell, targetEntity, gs) => doContextMenuAction(action, targetCell, targetEntity, gs),
-      clearPathHighlight: () => clearPathHighlight(),
-      highlightPathCells: (cells) => highlightPathCells(cells),
-      onLoadGame: (name) => doLoadGame(name),
-      onSaveGame: (name, isAuto) => doSaveGame(name, isAuto),
-    });
-    window.addEventListener('mousemove', (e) => handleCellHover(e, gameState, mouse, selectedEntity));
+    window.addEventListener('mousemove', onMouseMove);
 
     window.addEventListener('pointerdown', (e) => {
       pointerDownPos = { x: e.clientX, y: e.clientY };
@@ -152,7 +169,7 @@ async function init() {
         closeSaveLoadModal();
         closeProfileModal();
         closeVictoryModal();
-        closeChatModal();
+        gameState?.aiHelper.closeChatModal();
         if (gameState) {
           closeSetupModal();
         }
@@ -271,19 +288,19 @@ async function init() {
           details: `Initiated diplomatic chat with ${targetAi.name} (costs 1 order)`
         });
 
-        updatePlayersUI(gameState);
-        openChatModal(activeP, targetAi);
+        updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
+        gameState.aiHelper.openChatModal(activeP, targetAi);
       });
     }
 
     const btnCloseChat = document.getElementById('btn-close-chat');
     if (btnCloseChat) {
-      btnCloseChat.addEventListener('click', () => closeChatModal());
+      btnCloseChat.addEventListener('click', () => gameState?.aiHelper.closeChatModal());
     }
 
     const btnSendChat = document.getElementById('btn-send-chat');
     if (btnSendChat) {
-      btnSendChat.addEventListener('click', () => sendChatMessage());
+      btnSendChat.addEventListener('click', () => gameState?.aiHelper.sendChatMessage());
     }
 
     const chatInput = document.getElementById('chat-message-input');
@@ -291,7 +308,7 @@ async function init() {
       chatInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
-          sendChatMessage();
+          gameState?.aiHelper.sendChatMessage();
         }
       });
     }
@@ -325,10 +342,630 @@ async function init() {
    SETUP MODAL & GAME INITIALIZATION LOGIC
    ========================================================================== */
 
+function openSetupModal(canClose = true) {
+  const overlay = document.getElementById('setup-modal-overlay');
+  const closeBtn = document.getElementById('btn-close-setup');
+  closeBtn.style.display = canClose ? 'block' : 'none';
+
+  // Map size
+  document.getElementById('setup-map-size').value = defaultSettings.mapSize || 64;
+
+  // Orders
+  const orders = defaultSettings.initialization?.orders || { max: 8, perTurn: 6 };
+  document.getElementById('setup-orders-max').value = orders.max;
+  document.getElementById('setup-orders-perturn').value = orders.perTurn;
+
+  // Players
+  setupPlayers = JSON.parse(JSON.stringify(defaultSettings.players || [
+    { id: 1, name: 'Red Empire', color: '#ff4d4d', controller: null },
+    { id: 2, name: 'Blue Alliance', color: '#3399ff', controller: null }
+  ]));
+  renderSetupPlayers();
+
+  // Resources
+  renderSetupResources();
+
+  // Units
+  setupStartingUnits = { ...(defaultSettings.initialization?.startingUnits || {}) };
+  populateUnitSelectOptions();
+  renderSetupUnits();
+
+  // Auto-Save
+  const autoSave = defaultSettings.autoSave || { enabled: true, intervalTurns: 5, maxAutoSaves: 10 };
+  document.getElementById('setup-autosave-enabled').checked = autoSave.enabled;
+  document.getElementById('setup-autosave-interval').value = autoSave.intervalTurns;
+  document.getElementById('setup-autosave-max').value = autoSave.maxAutoSaves;
+
+  // Barbarian Settings — dynamically render horde sliders from defaultSettings.barbarians.horde
+  const barbarians = defaultSettings.barbarians || null;
+  const enabledCheckbox = document.getElementById('setup-barbarians-enabled');
+  const collapsible = document.getElementById('setup-barbarian-collapsible');
+  enabledCheckbox.checked = barbarians !== null && barbarians !== undefined;
+  collapsible.classList.toggle('expanded', enabledCheckbox.checked);
+
+  // Render one range-slider widget per horde unit key found in settings
+  renderBarbarianHordeSliders(barbarians?.horde || {});
+  updateAllRangeFills();
+  document.getElementById('setup-barbarian-spawn-frequency').value = barbarians?.spawnFrequencyTurns || 5;
+  document.getElementById('setup-barbarian-max-number').value = barbarians?.maxNumber || 20;
+  document.getElementById('setup-barbarian-max-age').value = barbarians?.maxAge || 30;
+
+  // Win Conditions
+  const winCondition = defaultSettings.winCondition || { absoluteScore: 1000, relativeScore: 2 };
+  const absoluteEnabled = winCondition.absoluteScore !== undefined && winCondition.absoluteScore !== null;
+  const relativeEnabled = winCondition.relativeScore !== undefined && winCondition.relativeScore !== null;
+  document.getElementById('setup-win-absolute-enabled').checked = absoluteEnabled;
+  document.getElementById('setup-win-absolute-value').value = winCondition.absoluteScore || 1000;
+  document.getElementById('setup-win-absolute-value').disabled = !absoluteEnabled;
+  document.getElementById('setup-win-relative-enabled').checked = relativeEnabled;
+  document.getElementById('setup-win-relative-value').value = winCondition.relativeScore || 2;
+  document.getElementById('setup-win-relative-value').disabled = !relativeEnabled;
+
+  // Add event listeners for win condition checkboxes
+  document.getElementById('setup-win-absolute-enabled').addEventListener('change', (e) => {
+    document.getElementById('setup-win-absolute-value').disabled = !e.target.checked;
+  });
+  document.getElementById('setup-win-relative-enabled').addEventListener('change', (e) => {
+    document.getElementById('setup-win-relative-value').disabled = !e.target.checked;
+  });
+
+  // Initialize custom spinner buttons
+  initNumberInputSpinners();
+
+  overlay.classList.add('active');
+}
+
+function closeSetupModal() {
+  document.getElementById('setup-modal-overlay').classList.remove('active');
+}
+
+function renderSetupPlayers() {
+  const container = document.getElementById('setup-players-container');
+  container.innerHTML = '';
+
+  setupPlayers.forEach((p, idx) => {
+    const row = document.createElement('div');
+    row.className = 'dynamic-row';
+
+    // Phase 23.2: controller dropdown (human or a controller from ai.json).
+    // The picked key is stored explicitly on the player.
+    const ctrlKey = p.controllerKey || 'human';
+    const isAI = ctrlKey !== 'human';
+    const ctrlOpts = `<option value="human"${!isAI ? ' selected' : ''}>Human</option>` +
+      Object.keys(aiJson?.controllers || {}).map(k =>
+        `<option value="${k}"${ctrlKey === k ? ' selected' : ''}>${k}</option>`).join('');
+
+    // Phase 23.3: name is a text input for humans, a leader picker for AI.
+    let nameField;
+    if (isAI) {
+      const leaderOpts = `<option value="" disabled${!leadersJson.some(l => l.name === p.name) ? ' selected' : ''}>Select leader…</option>` +
+        leadersJson.map(l =>
+          `<option value="${l.name}"${p.name === l.name ? ' selected' : ''}>${l.name}</option>`).join('');
+      nameField = `<select name="leader" class="form-input leader-select" style="flex: 1;" title="${leaderTitle(p.name)}">${leaderOpts}</select>`;
+    } else {
+      nameField = `<input name="player-name" type="text" class="form-input" value="${p.name}" placeholder="Player Name" style="flex: 1;">`;
+    }
+
+    row.innerHTML = `
+      <input name="player-color" type="color" value="${p.color}" title="Choose color">
+      ${nameField}
+      <select name="controller" class="form-input controller-select" style="max-width: 320px;" title="Controller">${ctrlOpts}</select>
+      <button type="button" class="btn btn-danger btn-small" ${setupPlayers.length <= 1 ? 'disabled style="opacity:0.3;cursor:not-allowed;"' : ''}>✕</button>
+    `;
+
+    // Event listeners for fields
+    const colorInput = row.querySelector('input[type="color"]');
+    const nameInput = row.querySelector('input[type="text"]');
+    const leaderSelect = row.querySelector('.leader-select');
+    const ctrlSelect = row.querySelector('.controller-select');
+    const removeBtn = row.querySelector('.btn-danger');
+
+    colorInput.addEventListener('change', (e) => { p.color = e.target.value; });
+    if (nameInput) {
+      nameInput.addEventListener('input', (e) => { p.name = e.target.value; });
+    }
+    if (leaderSelect) {
+      leaderSelect.addEventListener('change', (e) => {
+        const leader = leadersJson.find(l => l.name === e.target.value);
+        if (leader) {
+          p.name = leader.name;
+          leaderSelect.title = leaderTitle(leader.name);
+        }
+      });
+    }
+    ctrlSelect.addEventListener('change', (e) => {
+      const key = e.target.value;
+      p.controllerKey = key;
+      if (key !== 'human') {
+        // Default to first leader if current name isn't a leader
+        const leader = leadersJson.find(l => l.name === p.name) || leadersJson[0];
+        if (leader) p.name = leader.name;
+      }
+      renderSetupPlayers();
+    });
+
+    removeBtn.addEventListener('click', () => {
+      if (setupPlayers.length > 1) {
+        setupPlayers.splice(idx, 1);
+        renderSetupPlayers();
+      }
+    });
+
+    container.appendChild(row);
+  });
+}
+
+function addSetupPlayerRow() {
+  const palette = ['#ff4d4d', '#3399ff', '#2ecc71', '#f1c40f', '#9b59b6', '#e67e22', '#1abc9c', '#e84393'];
+  const newId = setupPlayers.length > 0 ? Math.max(...setupPlayers.map(p => p.id)) + 1 : 1;
+  const color = palette[(newId - 1) % palette.length];
+  setupPlayers.push({
+    id: newId,
+    name: `Player ${newId}`,
+    color: color,
+    controllerKey: 'human'
+  });
+  renderSetupPlayers();
+}
+
+function renderSetupResources() {
+  const container = document.getElementById('setup-resources-container');
+  container.innerHTML = '';
+  for (const [res, val] of Object.entries(defaultSettings?.initialization?.startingResources || {})) {
+    const box = document.createElement('div');
+    box.style.display = 'flex';
+    box.style.flexDirection = 'column';
+    box.style.gap = '2px';
+
+    box.innerHTML = `
+      <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">${res}</span>
+      <div class="number-input-wrapper" style="width: 100%;">
+        <input type="number" id="res-val-${res}" class="form-input" value="${val}" min="0" style="padding: 4px 8px;">
+        <div class="spinner-buttons">
+          <button type="button" class="spinner-btn up" data-target="res-val-${res}">▲</button>
+          <button type="button" class="spinner-btn down" data-target="res-val-${res}">▼</button>
+        </div>
+      </div>
+    `;
+    container.appendChild(box);
+  };
+  // Re-initialize spinners for dynamically added inputs
+  initNumberInputSpinners();
+}
+
+function populateUnitSelectOptions() {
+  const select = document.getElementById('setup-add-unit-select');
+  select.innerHTML = '';
+  if (!manifestData || !manifestData.entities) return;
+
+  Object.keys(manifestData.entities).forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name.toUpperCase();
+    select.appendChild(opt);
+  });
+}
+
+function renderSetupUnits() {
+  const container = document.getElementById('setup-units-container');
+  container.innerHTML = '';
+
+  Object.entries(setupStartingUnits).forEach(([unitName, qty]) => {
+    const row = document.createElement('div');
+    row.className = 'dynamic-row';
+
+    const inputId = `setup-unit-count-${unitName}`;
+    row.innerHTML = `
+      <strong style="font-size: 13px; text-transform: uppercase; flex: 1;">${unitName}</strong>
+      <span style="font-size: 11px; color: var(--text-muted);">Count:</span>
+      <div class="number-input-wrapper" style="width: 80px;">
+        <input type="number" id="${inputId}" class="form-input" value="${qty}" min="1" style="padding: 4px 8px;">
+        <div class="spinner-buttons">
+          <button type="button" class="spinner-btn up" data-target="${inputId}">▲</button>
+          <button type="button" class="spinner-btn down" data-target="${inputId}">▼</button>
+        </div>
+      </div>
+      <button type="button" class="btn btn-danger btn-small">✕</button>
+    `;
+
+    const countInput = row.querySelector('input[type="number"]');
+    const removeBtn = row.querySelector('.btn-danger');
+
+    countInput.addEventListener('change', (e) => {
+      const val = parseInt(e.target.value, 10);
+      if (val > 0) {
+        setupStartingUnits[unitName] = val;
+      }
+    });
+
+    removeBtn.addEventListener('click', () => {
+      delete setupStartingUnits[unitName];
+      renderSetupUnits();
+    });
+
+    container.appendChild(row);
+  });
+  // Re-initialize spinners for dynamically added inputs
+  initNumberInputSpinners();
+}
+
+function addSetupUnitRow() {
+  const select = document.getElementById('setup-add-unit-select');
+  const unitName = select.value;
+  if (unitName && setupStartingUnits[unitName] === undefined) {
+    setupStartingUnits[unitName] = 1;
+    renderSetupUnits();
+  }
+}
+
+/* --------------------------------------------------------------------------
+   BARBARIAN SETUP UI: enable toggle, dynamic horde sliders, collapsible section
+   --------------------------------------------------------------------------
+   All horde unit sliders are generated dynamically from whatever keys exist
+   in defaultSettings.barbarians.horde — no unit names are hardcoded here.
+   -------------------------------------------------------------------------- */
+
+/**
+ * Derive a human-readable label from a camelCase unit name.
+ * e.g. "barbarianChief" -> "Barbarian Chief", "barbarianPrincess" -> "Barbarian Princess"
+ */
+function hordeUnitLabel(unitName) {
+  return unitName
+    .replace(/([A-Z])/g, ' $1')
+    .replace(/^./, s => s.toUpperCase())
+    .trim();
+}
+
+/**
+ * Returns the DOM id prefix used for a given horde unit key.
+ * e.g. "barbarianChief" -> "setup-barbarian-barbarianChief"
+ */
+function hordeUnitIdPrefix(unitName) {
+  return `setup-barbarian-${unitName}`;
+}
+
+/**
+ * Renders one range-slider widget per horde unit in the horde container.
+ * Called each time the setup modal is opened so sliders always reflect the
+ * current defaultSettings. Event listeners are attached inline.
+ * @param {Object} horde - e.g. { barbarian: {min,max}, barbarianChief: {min,max}, ... }
+ */
+function renderBarbarianHordeSliders(horde) {
+  const container = document.getElementById('setup-barbarian-horde-container');
+  if (!container) return;
+  container.innerHTML = '';
+
+  Object.entries(horde).forEach(([unitName, { min: defaultMin, max: defaultMax }]) => {
+    const prefix = hordeUnitIdPrefix(unitName);
+    const minId = `${prefix}-min`;
+    const maxId = `${prefix}-max`;
+    const fillId = `${prefix}-range-fill`;
+    const minValId = `${minId}-val`;
+    const maxValId = `${maxId}-val`;
+
+    // Infer a sensible slider upper bound from the default max (at least 10)
+    const sliderMax = Math.max(defaultMax * 3, 10);
+
+    const group = document.createElement('div');
+    group.className = 'form-group';
+    group.innerHTML = `
+      <label class="form-label">${hordeUnitLabel(unitName)} Horde (Min — Max)</label>
+      <div class="range-slider" data-range-id="${unitName}">
+        <div class="rs-track"></div>
+        <div class="rs-range" id="${fillId}"></div>
+        <input type="range" id="${minId}" min="0" max="${sliderMax}" value="${defaultMin}" step="1">
+        <input type="range" id="${maxId}" min="0" max="${sliderMax}" value="${defaultMax}" step="1">
+        <div class="rs-labels">
+          <span>Min: <strong id="${minValId}">${defaultMin}</strong></span>
+          <span>Max: <strong id="${maxValId}">${defaultMax}</strong></span>
+        </div>
+      </div>
+    `;
+    container.appendChild(group);
+
+    // Attach live update handlers
+    const minEl = document.getElementById(minId);
+    const maxEl = document.getElementById(maxId);
+    const cfg = { minId, maxId, fillId };
+    const handler = (e) => {
+      let lo = parseInt(minEl.value, 10);
+      let hi = parseInt(maxEl.value, 10);
+      if (lo > hi) {
+        if (e.target === minEl) { minEl.value = hi; lo = hi; }
+        else { maxEl.value = lo; hi = lo; }
+      }
+      document.getElementById(minValId).textContent = lo;
+      document.getElementById(maxValId).textContent = hi;
+      updateRangeFill(cfg);
+    };
+    minEl.addEventListener('input', handler);
+    maxEl.addEventListener('input', handler);
+  });
+}
+
+function setupBarbarianUI() {
+  const enabledCheckbox = document.getElementById('setup-barbarians-enabled');
+  const collapsible = document.getElementById('setup-barbarian-collapsible');
+  if (!enabledCheckbox || !collapsible) return;
+
+  enabledCheckbox.addEventListener('change', () => {
+    collapsible.classList.toggle('expanded', enabledCheckbox.checked);
+  });
+  // Individual slider listeners are attached in renderBarbarianHordeSliders()
+}
+
+function updateRangeFill(cfg) {
+  const minEl = document.getElementById(cfg.minId);
+  const maxEl = document.getElementById(cfg.maxId);
+  const fill = document.getElementById(cfg.fillId);
+  if (!minEl || !maxEl || !fill) return;
+  const min = parseInt(minEl.min, 10);
+  const max = parseInt(minEl.max, 10);
+  const range = max - min;
+  const lo = parseInt(minEl.value, 10);
+  const hi = parseInt(maxEl.value, 10);
+  fill.style.left = `${((lo - min) / range) * 100}%`;
+  fill.style.width = `${((hi - lo) / range) * 100}%`;
+}
+
+function updateAllRangeFills() {
+  // Enumerate all range-slider widgets currently in the DOM
+  document.querySelectorAll('.range-slider[data-range-id]').forEach(slider => {
+    const unitName = slider.dataset.rangeId;
+    const prefix = hordeUnitIdPrefix(unitName);
+    updateRangeFill({
+      minId: `${prefix}-min`,
+      maxId: `${prefix}-max`,
+      fillId: `${prefix}-range-fill`
+    });
+  });
+}
+
+/* --------------------------------------------------------------------------
+   AI SETUP UI (Phase 23): provider keys, controller + leader selection.
+   Definitions: definitions/ai.json (providers, controllers),
+   definitions/leaders.json (leader personas).
+   -------------------------------------------------------------------------- */
+
+let aiJson = null;          // { providers, controllers, baseConfig }
+let leadersJson = [];       // [{ name, description, focus[] }]
+let setupProviderKeys = {}; // { providerName: apiKey }
+
+async function loadAiDefinitions() {
+  if (!aiJson) {
+    const [aiRes, leadersRes] = await Promise.all([
+      fetch('./definitions/ai.json'),
+      fetch('./definitions/leaders.json')
+    ]);
+    if (!aiRes.ok) throw new Error(`ai.json: HTTP ${aiRes.status}`);
+    if (!leadersRes.ok) throw new Error(`leaders.json: HTTP ${leadersRes.status}`);
+    aiJson = await aiRes.json();
+    leadersJson = await leadersRes.json();
+  }
+  return { aiJson, leadersJson };
+}
+
+/** Controller key for a setup player's controller object (matched by URL). */
+/** Hover/selected-leader tooltip text (Phase 23.4). */
+function leaderTitle(name) {
+  const l = leadersJson.find(x => x.name === name);
+  return l ? `${l.description} Focus: ${l.focus.join(', ')}.` : '';
+}
+
+/** Phase 23.1: one key input per provider from ai.json. */
+function setupAiConfigUI() {
+  const container = document.getElementById('setup-provider-keys');
+  if (!container || !aiJson) return;
+  container.innerHTML = '';
+  try {
+    const saved = sessionStorage.getItem('empires_provider_keys');
+    if (saved) setupProviderKeys = JSON.parse(saved) || {};
+  } catch (e) { /* ignore */ }
+  for (const [name, prov] of Object.entries(aiJson.providers || {})) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;';
+    const label = document.createElement('label');
+    label.style.cssText = 'font-size:12px;min-width:90px;text-transform:capitalize;color:var(--text-muted);font-weight:600;';
+    label.textContent = name;
+    const input = document.createElement('input');
+    input.type = 'password';
+    input.name = `provider-key-${name}`;
+    input.className = 'form-input';
+    input.placeholder = `API key for ${name} (optional)`;
+    input.value = setupProviderKeys[name] || '';
+    input.style.flex = '1';
+    input.addEventListener('input', (e) => {
+      setupProviderKeys[name] = e.target.value.trim();
+      try { sessionStorage.setItem('empires_provider_keys', JSON.stringify(setupProviderKeys)); }
+      catch (err) { /* ignore */ }
+    });
+    row.appendChild(label);
+    row.appendChild(input);
+    container.appendChild(row);
+  }
+}
+
+/**
+ * Build a runtime controller from a controller key and player name.
+ * Looks up the controller definition in ai.json, resolves the provider
+ * URL, adds the API key from session storage if present, and overlays
+ * the leader's description/focus based on the player name.
+ * Returns null for 'human'.
+ */
+function buildController(key, playerName) {
+  if (!key || key === 'human' || !aiJson) return null;
+  const def = aiJson.controllers?.[key];
+  if (!def) return null;
+  const controller = {
+    url: def.url,
+    config: JSON.parse(JSON.stringify(def.config || {})),
+  };
+  // Overlay leader description/focus if player name matches a leader
+  const leader = leadersJson.find(l => l.name === playerName);
+  if (leader) {
+    controller.description = leader.description;
+    controller.focus = [...leader.focus];
+  } else if (def.description) {
+    controller.description = def.description;
+    controller.focus = def.focus ? [...def.focus] : undefined;
+  }
+  // Resolve provider: config.provider is a provider name in ai.json
+  const cfg = controller.config;
+  const provDef = aiJson.providers?.[cfg.provider];
+  if (provDef) {
+    cfg.baseUrl = provDef.url;
+    if (setupProviderKeys[cfg.provider]) cfg.apiKey = setupProviderKeys[cfg.provider];
+  }
+  return controller;
+}
+
+
+/**
+ * Initialize custom spinner buttons for number inputs in the setup modal
+ */
+function initNumberInputSpinners() {
+  const modal = document.getElementById('setup-modal-overlay');
+  if (!modal) return;
+
+  const spinners = modal.querySelectorAll('.number-input-wrapper');
+  spinners.forEach(wrapper => {
+    const input = wrapper.querySelector('input[type="number"]');
+    const upBtn = wrapper.querySelector('.spinner-btn.up');
+    const downBtn = wrapper.querySelector('.spinner-btn.down');
+
+    if (!input || !upBtn || !downBtn) return;
+
+    const min = parseFloat(input.min) || 0;
+    const max = parseFloat(input.max) || Infinity;
+    const step = parseFloat(input.step) || 1;
+
+    const updateValue = (delta) => {
+      let value = parseFloat(input.value) || 0;
+      value = Math.max(min, Math.min(max, value + delta * step));
+      // Handle step precision for decimals
+      if (step < 1) {
+        value = Math.round(value / step) * step;
+      }
+      input.value = value;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+
+    upBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      updateValue(1);
+    });
+
+    downBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      updateValue(-1);
+    });
+
+    // Also support long-press for rapid increment/decrement
+    let pressTimer = null;
+    const startPress = (delta) => {
+      updateValue(delta);
+      pressTimer = setTimeout(() => {
+        pressTimer = setInterval(() => updateValue(delta), 100);
+      }, 400);
+    };
+    const stopPress = () => {
+      if (pressTimer) {
+        clearTimeout(pressTimer);
+        clearInterval(pressTimer);
+        pressTimer = null;
+      }
+    };
+
+    upBtn.addEventListener('mousedown', (e) => { e.preventDefault(); startPress(1); });
+    upBtn.addEventListener('mouseup', stopPress);
+    upBtn.addEventListener('mouseleave', stopPress);
+    downBtn.addEventListener('mousedown', (e) => { e.preventDefault(); startPress(-1); });
+    downBtn.addEventListener('mouseup', stopPress);
+    downBtn.addEventListener('mouseleave', stopPress);
+
+    // Touch support
+    upBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startPress(1); });
+    upBtn.addEventListener('touchend', stopPress);
+    downBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startPress(-1); });
+    downBtn.addEventListener('touchend', stopPress);
+  });
+}
+
 function handleStartGameClicked() {
-  const settings = collectSetupSettings(defaultSettings);
-  if (!settings) return;
+  if (setupPlayers.length < 1) {
+    showToast('Add at least 1 player!', true);
+    return;
+  }
+
+  const startingResources = {};
+  for (const [res, val] of Object.entries(defaultSettings?.initialization?.startingResources || {})) {
+    const el = document.getElementById(`res-val-${res}`);
+    startingResources[res] = el ? parseInt(el.value, 10) || 0 : val;
+  };
+
+  // Win conditions
+  const winCondition = {};
+  if (document.getElementById('setup-win-absolute-enabled').checked) {
+    winCondition.absoluteScore = parseInt(document.getElementById('setup-win-absolute-value').value, 10) || 1000;
+  }
+  if (document.getElementById('setup-win-relative-enabled').checked) {
+    winCondition.relativeScore = parseFloat(document.getElementById('setup-win-relative-value').value) || 2;
+  }
+
+  // Phase 23.5: provider keys were captured live into setupProviderKeys.
+
+  const settings = {
+    mapSize: parseInt(document.getElementById('setup-map-size').value, 10),
+    players: setupPlayers.map((p, i) => {
+      return {
+        id: i + 1,
+        name: p.name.trim() || `Player ${i + 1}`,
+        color: p.color,
+        controller: buildController(p.controllerKey, p.name)
+      };
+    }),
+    initialization: {
+      orders: {
+        max: parseInt(document.getElementById('setup-orders-max').value, 10) || 8,
+        initial: parseInt(document.getElementById('setup-orders-max').value, 10) || 8,
+        perTurn: parseInt(document.getElementById('setup-orders-perturn').value, 10) || 6
+      },
+      startingResources: startingResources,
+      startingUnits: { ...setupStartingUnits }
+    },
+    autoSave: {
+      enabled: document.getElementById('setup-autosave-enabled').checked,
+      intervalTurns: parseInt(document.getElementById('setup-autosave-interval').value, 10) || 5,
+      maxAutoSaves: parseInt(document.getElementById('setup-autosave-max').value, 10) || 10
+    },
+    barbarians: document.getElementById('setup-barbarians-enabled').checked
+      ? (() => {
+        // Collect horde values dynamically — one entry per slider widget rendered
+        const horde = {};
+        document.querySelectorAll('#setup-barbarian-horde-container .range-slider[data-range-id]').forEach(slider => {
+          const unitName = slider.dataset.rangeId;
+          const prefix = hordeUnitIdPrefix(unitName);
+          horde[unitName] = {
+            min: parseInt(document.getElementById(`${prefix}-min`).value, 10) || 0,
+            max: parseInt(document.getElementById(`${prefix}-max`).value, 10) || 0
+          };
+        });
+        return {
+          horde,
+          spawnFrequencyTurns: parseInt(document.getElementById('setup-barbarian-spawn-frequency').value, 10) || 5,
+          maxNumber: parseInt(document.getElementById('setup-barbarian-max-number').value, 10) || 20,
+          maxAge: parseInt(document.getElementById('setup-barbarian-max-age').value, 10) || 30
+        };
+      })()
+      : null,
+    winCondition: Object.keys(winCondition).length > 0 ? winCondition : null
+  };
+
+
   startNewGame({ ...defaultSettings, ...settings });
+  closeSetupModal();
 }
 
 function startNewGame(settings) {
@@ -342,6 +979,7 @@ function startNewGame(settings) {
   button.textContent = 'Next Turn';
 
   gameState = new GameState();
+  wireGameState();
   gameState.generateMap(settings.mapSize, manifestData.terrains, manifestData);
 
   // The browser drives turns: pass nextTurn as the continuation so the
@@ -363,7 +1001,7 @@ function startNewGame(settings) {
   drawGrid(gameState);
   reconcileEntities(gameState);
   buildCellResources(gameState);
-  updatePlayersUI(gameState);
+  updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
 
   // Focus camera on center of mass of active player's entities
   if (gameState.activePlayer && gameState.entities.length > 0) {
@@ -380,6 +1018,82 @@ function startNewGame(settings) {
 /* ==========================================================================
    SAVE / LOAD MODAL LOGIC
    ========================================================================== */
+
+async function openSaveLoadModal(mode = 'save') {
+  if (!gameState && mode === 'save') {
+    showToast('Start a game first before saving!', true);
+    return;
+  }
+
+  const overlay = document.getElementById('saveload-modal-overlay');
+  const manualInput = document.getElementById('manual-save-name');
+
+  if (gameState) {
+    const activeP = gameState.activePlayer ? gameState.activePlayer.name : 'Game';
+    manualInput.value = `${activeP} - Turn ${gameState.currentRound}`;
+  } else {
+    manualInput.value = '';
+  }
+
+  overlay.classList.add('active');
+  await renderSavesList();
+}
+
+function closeSaveLoadModal() {
+  document.getElementById('saveload-modal-overlay').classList.remove('active');
+}
+
+async function renderSavesList() {
+  const container = document.getElementById('saves-list-container');
+  container.innerHTML = '<div style="font-size:12px; color:var(--text-muted);">Loading saves...</div>';
+
+  try {
+    const saves = await listSaves();
+    container.innerHTML = '';
+
+    if (saves.length === 0) {
+      container.innerHTML = '<div style="font-size:12px; color:var(--text-muted); padding:12px; text-align:center;">No saved games found.</div>';
+      return;
+    }
+
+    saves.forEach(save => {
+      const item = document.createElement('div');
+      item.className = 'save-item';
+
+      const dateStr = new Date(save.timestamp).toLocaleString();
+      const badgeClass = save.auto ? 'auto' : 'manual';
+      const badgeText = save.auto ? 'Auto-Save' : 'Manual';
+
+      item.innerHTML = `
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <strong style="font-size: 14px;">${save.name}</strong>
+            <span class="save-badge ${badgeClass}">${badgeText}</span>
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted);">
+            Round ${save.turnNumber || 1} • Saved on ${dateStr}
+          </div>
+        </div>
+        <div style="display: flex; gap: 6px;">
+          <button type="button" class="btn btn-small btn-load-entry" style="width: 70px;">Load</button>
+          <button type="button" class="btn btn-danger btn-small btn-del-entry">✕</button>
+        </div>
+      `;
+
+      item.querySelector('.btn-load-entry').addEventListener('click', () => doLoadGame(save.name));
+      item.querySelector('.btn-del-entry').addEventListener('click', async () => {
+        await deleteSave(save.name);
+        renderSavesList();
+        showToast(`Deleted save "${save.name}"`);
+      });
+
+      container.appendChild(item);
+    });
+  } catch (err) {
+    console.error('Failed to list saves:', err);
+    container.innerHTML = '<div style="font-size:12px; color:#e74c3c;">Failed to load saved games.</div>';
+  }
+}
 
 async function handleManualSaveClicked() {
   const input = document.getElementById('manual-save-name');
@@ -430,6 +1144,7 @@ async function doLoadGame(saveName) {
     clearEntityMeshes();
 
     gameState = new GameState();
+    wireGameState();
     gameState.manifestData = manifestData;
     gameState.deserialize(record.data);
 
@@ -445,7 +1160,7 @@ async function doLoadGame(saveName) {
     drawGrid(gameState);
     reconcileEntities(gameState);
     buildCellResources(gameState);
-    updatePlayersUI(gameState);
+    updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
 
     // Focus camera on center of mass of active player's entities
     if (gameState.activePlayer && gameState.entities.length > 0) {
@@ -496,6 +1211,7 @@ async function startReplayMode(replayData) {
 
   // Instantiate GameState for replay from initial state
   gameState = new GameState();
+  wireGameState();
   gameState.settings = replayData.settings || {};
   gameState.manifestData = manifestData;
 
@@ -573,7 +1289,7 @@ function updateReplayUI(state) {
     playBtn.textContent = state.isPlaying ? '⏸ Pause' : '▶ Play';
   }
 
-  updatePlayersUI(gameState);
+  updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
 }
 
 // exitReplayMode removed - users refresh the page to exit replay mode
@@ -613,7 +1329,7 @@ export async function nextTurn() {
   updateHexFog(gameState);
   reconcileEntities(gameState);
   reconcileCellResources(gameState);
-  updatePlayersUI(gameState);
+  updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
 
   // Focus camera on center of mass of active player's entities
   if (gameState.activePlayer && gameState.entities.length > 0 &&
@@ -637,7 +1353,7 @@ export async function nextTurn() {
 
   // Check win conditions (pure check on GameState; render the modal here)
   const win = gameState.checkWinConditions();
-  if (win) showVictoryModal(gameState, win.winner, win.reasons);
+  if (win) showVictoryModal(win.winner, win.reasons);
 }
 
 async function checkAutoSave() {
@@ -651,6 +1367,38 @@ async function checkAutoSave() {
     await doSaveGame(autoSaveName, true);
     showToast(`Auto-saved (${autoSaveName})`);
   }
+}
+
+
+/**
+ * Shows the victory modal with the winning player and reasons.
+ */
+function showVictoryModal(player, reasons) {
+  const overlay = document.getElementById('victory-modal-overlay');
+  const messageDiv = document.getElementById('victory-message');
+
+  messageDiv.innerHTML = `
+    <div style="font-size: 24px; font-weight: 700; color: ${player.color}; margin-bottom: 12px;">${player.name.toUpperCase()} WINS!</div>
+    <div style="font-size: 14px; color: var(--text-muted); margin-bottom: 16px;">Round ${gameState.currentRound}</div>
+    <div style="text-align: left; font-size: 13px; color: var(--text-main);">
+      ${reasons.map(r => `<div style="margin: 8px 0; padding: 8px; background: rgba(52, 152, 219, 0.1); border-radius: 4px;">${r}</div>`).join('')}
+    </div>
+  `;
+
+  overlay.classList.add('active');
+  gameState.gameOver = true;
+
+  if (gameState?.replayRecorder?.isRecording()) {
+    gameState.replayRecorder.recordSnapshot(gameState, `Game Over: ${player.name} won!`);
+  }
+}
+
+/**
+ * Closes the victory modal.
+ */
+function closeVictoryModal() {
+  const overlay = document.getElementById('victory-modal-overlay');
+  overlay.classList.remove('active');
 }
 
 /* ==========================================================================
@@ -746,40 +1494,337 @@ function deselectEntity() {
   }
 }
 
+function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
+  const menu = document.getElementById('entity-context-menu');
+  const title = document.getElementById('context-menu-title');
+  const actionsDiv = document.getElementById('context-menu-actions');
 
-/**
- * Execute a context menu action (game logic).
- * Called via the UI callback registry from ui/contextMenu.js.
- */
-function doContextMenuAction(action, targetCell, targetEntity, gameState, checkReason) {
-  const success = action.do ? action.do(targetCell, targetEntity) : false;
+  title.textContent = `${entity.name.toUpperCase()} ACTIONS`;
+  actionsDiv.innerHTML = '';
+  clearPathHighlight();
 
-  if (success) {
-    audio.playEntitySfx(selectedEntity, 'action', action.name);
-    showToast(checkReason || `Executed ${action.name}`);
-    if (gameState?.replayRecorder?.isRecording()) {
-      const loc = targetCell ? ` at (${targetCell.q}, ${targetCell.r})` : '';
-      gameState.replayRecorder.recordSnapshot(gameState, `${selectedEntity.name} ${action.name}${loc}`);
+  const pathCellKeys = new Set();
+  const pathCellsToHighlight = [];
+
+  if (actions && actions.length > 0) {
+    actions.forEach(action => {
+      const check = action.canDo ? action.canDo(targetCell, targetEntity) : { possible: true, reason: action.description || '' };
+      const isPossible = check.possible !== false;
+      const previewText = check.reason || action.description || '';
+
+      if (check.path && check.path.length > 0) {
+        for (const cell of check.path) {
+          const key = `${cell.q},${cell.r}`;
+          if (!pathCellKeys.has(key)) {
+            pathCellKeys.add(key);
+            pathCellsToHighlight.push(cell);
+          }
+        }
+      }
+
+      // Extract build stats if this is a build action
+      let buildStatsHTML = '';
+      if (action.name && action.name.toLowerCase().startsWith('build ')) {
+        const buildTarget = action.name.substring(6).trim();
+        const manifestEntities = gameState?.manifestData?.entities || {};
+        let meta = manifestEntities[buildTarget];
+        if (!meta) {
+          const entry = Object.entries(manifestEntities).find(([k]) => k.toLowerCase() === buildTarget.toLowerCase());
+          if (entry) meta = entry[1];
+        }
+        if (meta) {
+          const upkeepParts = Object.entries(meta.maintenance || {}).map(([r, a]) => `${a} ${r}`);
+          const upkeepStr = upkeepParts.length > 0 ? upkeepParts.join(', ') : 'None';
+          const yieldParts = Object.entries(meta.yields || {}).map(([r, a]) => `+${a} ${r}`);
+          const yieldStr = yieldParts.length > 0 ? yieldParts.join(', ') : 'None';
+          buildStatsHTML = `
+            <div style="font-size: 10px; color: #38bdf8; margin-top: 3px; display: flex; gap: 8px; flex-wrap: wrap;">
+              <span><strong>Upkeep:</strong> ${upkeepStr}</span>
+              <span><strong>Yield:</strong> ${yieldStr}</span>
+            </div>
+          `;
+        }
+      }
+
+      const btn = document.createElement('button');
+      btn.className = 'context-action-btn';
+      if (!isPossible) {
+        btn.style.opacity = '0.5';
+        btn.style.cursor = 'not-allowed';
+      }
+
+      btn.innerHTML = `
+        <div style="display: flex; flex-direction: column; width: 100%;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <strong style="font-size: 12px; color: ${isPossible ? '#ffffff' : '#999999'};">${action.name}</strong>
+            <span style="font-size: 10px; color: ${isPossible ? 'var(--accent-color)' : '#666666'};">►</span>
+          </div>
+          <span style="font-size: 10px; color: ${isPossible ? '#a78bfa' : '#ff6b6b'}; margin-top: 1px;">${previewText}</span>
+          ${buildStatsHTML}
+        </div>
+      `;
+
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        hideContextMenu();
+
+        if (!isPossible) {
+          showToast(check.reason || 'Action cannot be performed.', true);
+          return;
+        }
+
+        const success = action.do ? action.do(targetCell, targetEntity) : false;
+
+        if (success) {
+          audio.playEntitySfx(selectedEntity, 'action', action.name);
+          showToast(check.reason || `Executed ${action.name}`);
+          if (gameState?.replayRecorder?.isRecording()) {
+            const loc = targetCell ? ` at (${targetCell.q}, ${targetCell.r})` : '';
+            gameState.replayRecorder.recordSnapshot(gameState, `${selectedEntity.name} ${action.name}${loc}`);
+          }
+        } else {
+          showToast(`Failed to execute ${action.name}`, true);
+        }
+
+        updateHexFog(gameState);
+        reconcileEntities(gameState);
+        reconcileCellResources(gameState);
+        updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
+
+        if (selectedEntity && !gameState.entities.includes(selectedEntity)) {
+          deselectEntity();
+        } else if (selectedEntity) {
+          selectEntity(selectedEntity);
+        }
+      });
+      actionsDiv.appendChild(btn);
+    });
+
+    if (pathCellsToHighlight.length > 0) {
+      highlightPathCells(pathCellsToHighlight);
     }
   } else {
-    showToast(`Failed to execute ${action.name}`, true);
+    actionsDiv.innerHTML = '<div style="font-size: 11px; color: var(--text-muted); padding: 4px;">No actions available for target cell</div>';
   }
 
-  updateHexFog(gameState);
-  reconcileEntities(gameState);
-  reconcileCellResources(gameState);
-  updatePlayersUI(gameState);
+  // Position and display menu directly without frame-delay to prevent top-left fly-in
+  menu.style.display = 'flex';
+  menu.style.visibility = 'hidden';
+  const menuWidth = menu.offsetWidth || 280;
+  const menuHeight = menu.offsetHeight || 220;
 
-  if (selectedEntity && !gameState.entities.includes(selectedEntity)) {
-    deselectEntity();
-  } else if (selectedEntity) {
-    selectEntity(selectedEntity);
-  }
+  const posX = Math.max(10, Math.min(x, window.innerWidth - menuWidth - 10));
+  const posY = Math.max(10, Math.min(y, window.innerHeight - menuHeight - 10));
+
+  menu.style.left = `${posX}px`;
+  menu.style.top = `${posY}px`;
+  menu.style.visibility = 'visible';
 }
+
+function hideContextMenu() {
+  const menu = document.getElementById('entity-context-menu');
+  if (menu) menu.style.display = 'none';
+  clearPathHighlight();
+}
+
+let playerContextMenuTarget = null;
+
+export function showPlayerContextMenu(x, y, targetPlayer) {
+  hideContextMenu();
+  const menu = document.getElementById('player-context-menu');
+  if (!menu) return;
+
+  playerContextMenuTarget = targetPlayer;
+
+  menu.style.display = 'flex';
+  menu.style.visibility = 'hidden';
+  const menuWidth = menu.offsetWidth || 170;
+  const menuHeight = menu.offsetHeight || 50;
+
+  const posX = Math.max(10, Math.min(x, window.innerWidth - menuWidth - 10));
+  const posY = Math.max(10, Math.min(y, window.innerHeight - menuHeight - 10));
+
+  menu.style.left = `${posX}px`;
+  menu.style.top = `${posY}px`;
+  menu.style.visibility = 'visible';
+}
+
+export function hidePlayerContextMenu() {
+  const menu = document.getElementById('player-context-menu');
+  if (menu) menu.style.display = 'none';
+  playerContextMenuTarget = null;
+}
+
+
+/* ==========================================================================
+   DIPLOMATIC CHAT SYSTEM (MODAL & MESSAGING)
+   ========================================================================== */
+
 
 function closeProfileModal() {
   const overlay = document.getElementById('profile-modal-overlay');
   if (overlay) overlay.classList.remove('active');
+}
+
+function onMouseMove(event) {
+  if (!gameState) return;  // no game started yet
+
+  // Do not update hover inspection or path preview when context menu is open
+  const contextMenu = document.getElementById('entity-context-menu');
+  if (contextMenu && contextMenu.style.display !== 'none') {
+    return;
+  }
+
+  mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+  const hovered = pickHexCell(mouse, gameState);
+  const infoPanel = document.getElementById('inspect-panel');
+  const activePlayer = gameState.activePlayer;
+
+  if (hovered) {
+    const isExplored = CONFIG.SHOW_ALL || (activePlayer ? !activePlayer.isAI && activePlayer.isExplored(hovered.q, hovered.r) : true);
+    const isVisible = CONFIG.SHOW_ALL || (activePlayer ? !activePlayer.isAI && activePlayer.isVisible(hovered.q, hovered.r) : true);
+
+    highlightCell(hovered.q, hovered.r, isExplored ? hovered.terrain.height : 3.0);
+
+    document.getElementById('inspect-coords').textContent = `(${hovered.q}, ${hovered.r})`;
+
+    if (!isExplored) {
+      document.getElementById('inspect-terrain').textContent = 'Unexplored (Fog of War)';
+      document.getElementById('inspect-height').textContent = '?';
+      document.getElementById('inspect-elevation').textContent = '?';
+      document.getElementById('inspect-temperature').textContent = '?';
+      document.getElementById('inspect-humidity').textContent = '?';
+    } else {
+      document.getElementById('inspect-terrain').textContent = `${hovered.terrain.name}${!isVisible ? ' (Fog of War)' : ''}`;
+      document.getElementById('inspect-height').textContent = hovered.terrain.height.toFixed(2);
+      document.getElementById('inspect-elevation').textContent = hovered.terrain.elevation.toFixed(2);
+      document.getElementById('inspect-temperature').textContent = hovered.terrain.temperature.toFixed(2);
+      document.getElementById('inspect-humidity').textContent = hovered.terrain.humidity.toFixed(2);
+    }
+
+    // Natural resource / treasure on the hovered cell (hidden under fog of war)
+    const resourceRow = document.getElementById('inspect-resource-row');
+    const resourceValue = document.getElementById('inspect-resource');
+    const hoveredCell = gameState.hexGrid.cells.get(`${hovered.q},${hovered.r}`);
+    if (isExplored && hoveredCell && hoveredCell.resource) {
+      const res = hoveredCell.resource;
+      const kindLabel = res.kind === 'treasure' ? 'Treasure' : 'Resource';
+      resourceValue.textContent = `${kindLabel}: ${prettifyName(res.name)} ×${res.quantity}`;
+      resourceRow.style.display = 'flex';
+    } else if (resourceRow) {
+      resourceRow.style.display = 'none';
+    }
+
+    const entity = gameState.getEntityAt(hovered.q, hovered.r);
+    const entitiesDiv = document.getElementById('inspect-entities');
+    entitiesDiv.innerHTML = '';
+
+    const showEntityInInspect = entity && (
+      (entity.owner && activePlayer && entity.owner.id === activePlayer.id && isExplored) ||
+      isVisible
+    );
+
+    // 1. Exclusion Zone Preview on Unit/Construct Hover
+    if (entity && showEntityInInspect) {
+      const manifestEntities = gameState?.manifestData?.entities || {};
+      const meta = manifestEntities[entity.name] || manifestEntities[entity.name.toLowerCase()];
+      if (meta && meta.spawnConditions && typeof meta.spawnConditions.minSeparation === 'number' && meta.spawnConditions.minSeparation > 1) {
+        showExclusionZone(entity.q, entity.r, meta.spawnConditions.minSeparation, entity.owner ? entity.owner.color : '#3498db', gameState);
+      } else {
+        clearExclusionZone();
+      }
+    } else {
+      clearExclusionZone();
+    }
+
+    // 2. Movement Path and Cost Preview when a unit with "Move" is selected (only when movement is possible)
+    const moveRow = document.getElementById('inspect-movement-row');
+    const moveValue = document.getElementById('inspect-movement');
+    const moveAction = selectedEntity && selectedEntity.owner && activePlayer && selectedEntity.owner.id === activePlayer.id && !activePlayer.isAI
+      ? selectedEntity.getActions().find(a => a.name === "Move")
+      : null;
+
+    if (moveAction && isExplored) {
+      if (hovered.q === selectedEntity.q && hovered.r === selectedEntity.r) {
+        clearPathHighlight();
+        if (moveRow) moveRow.style.display = 'none';
+      } else {
+        const targetOccupant = gameState.getEntityAt(hovered.q, hovered.r);
+        const check = moveAction.canDo(hovered, targetOccupant);
+        if (check && check.possible && check.path && check.path.length > 1) {
+          highlightPathCells(check.path);
+          const ap = selectedEntity.actionPoints !== undefined ? selectedEntity.actionPoints : 0;
+          const cost = check.cost;
+          if (moveRow && moveValue) {
+            moveRow.style.display = 'flex';
+            moveValue.innerHTML = `<span style="color: #2ecc71; font-weight: 600;">${displayNum(cost)} AP</span> (${check.path.length - 1} steps, ${displayNum(ap)} AP avail)`;
+          }
+        } else {
+          clearPathHighlight();
+          if (moveRow && moveValue) {
+            moveRow.style.display = 'flex';
+            moveValue.innerHTML = `<span style="color: #e74c3c; font-weight: 600;">${check ? check.reason : 'Cannot move'}</span>`;
+          }
+        }
+      }
+    } else {
+      if (moveRow) moveRow.style.display = 'none';
+      clearPathHighlight();
+    }
+
+    if (showEntityInInspect) {
+      const isSelected = selectedEntity && selectedEntity.id === entity.id;
+
+      const entityRow = document.createElement('div');
+      entityRow.style.marginBottom = '6px';
+      if (isSelected) {
+        entityRow.style.background = 'rgba(0, 255, 255, 0.1)';
+        entityRow.style.border = '1px solid rgba(0, 255, 255, 0.4)';
+        entityRow.style.borderRadius = '4px';
+        entityRow.style.padding = '4px';
+      }
+
+      const playerColor = entity.owner ? entity.owner.color : '#cccccc';
+      entityRow.innerHTML = `
+        <div style="font-weight: 600; color: ${isSelected ? '#00ffff' : 'var(--text-main)'}; display: flex; align-items: center;">
+          <span class="player-color-dot" style="background-color: ${playerColor}; margin-right: 6px;"></span>
+          ${entity.name.toUpperCase()} ${isSelected ? ' ★ SELECTED' : ''}
+        </div>
+        <div style="font-size: 11px; color: var(--text-muted); margin-left: 16px; margin-top: 2px;">
+          ${entity.info()}
+        </div>
+      `;
+      entitiesDiv.appendChild(entityRow);
+    } else {
+      entitiesDiv.textContent = isExplored ? 'None' : 'Unknown';
+    }
+
+    infoPanel.classList.add('active');
+  } else {
+    highlightCell(null, null);
+    clearExclusionZone();
+    const moveRow = document.getElementById('inspect-movement-row');
+    if (moveRow) moveRow.style.display = 'none';
+    const resourceRow = document.getElementById('inspect-resource-row');
+    if (resourceRow) resourceRow.style.display = 'none';
+    const contextMenu = document.getElementById('entity-context-menu');
+    if (!contextMenu || contextMenu.style.display === 'none') {
+      clearPathHighlight();
+    }
+    if (!selectedEntity) {
+      infoPanel.classList.remove('active');
+    }
+  }
+}
+
+/**
+ * "smallRuins" -> "Small Ruins", "tree" -> "Tree".
+ */
+function prettifyName(name) {
+  if (!name) return '';
+  return name.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, c => c.toUpperCase());
 }
 
 window.addEventListener('DOMContentLoaded', init);

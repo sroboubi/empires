@@ -13,7 +13,6 @@ import { HexGrid, DIRECTIONS_8 } from './hexGrid.js';
 import { camelToTitle, sleep, calculateAttackMultiplier } from './utils.js';
 import { applyResourceYieldBonus } from './resources.js';
 import { reconcileEntities } from './renderer.js';
-import { updatePlayersUI } from './ui/playersList.js';
 import Entity from './entity.js';
 import { CONFIG } from './config.js';
 
@@ -33,6 +32,7 @@ export class AiHelper {
      */
     constructor(gameState) {
         this.gameState = gameState;
+        this.initChatSession();
     }
 
     // ==================== Engine bridge: hex grid ====================
@@ -1039,28 +1039,197 @@ export class AiHelper {
         // Bring up chat window and await until closed/ended.
         // The summary note is added by closeChatModal() in main.js when the
         // modal closes — do not summarize here as well (would double the note
-        // and the LLM call).
-        if (typeof window !== 'undefined' && typeof window.openChatModal === 'function') {
-            await window.openChatModal(humanPlayer, aiPlayer);
-        }
+        // Open the chat modal via this helper (no window attachment needed).
+        await this.openChatModal(humanPlayer, aiPlayer);
         return true;
     }
 
+    /**
+     * Called after an AI action completes. Delegates to the onActionDone
+     * callback registered by main.js on gameState (which handles UI refresh).
+     * No-op if no callback is registered (e.g. headless mode).
+     */
     async onActionDone(gameState, involvedCells = null, actionDesc = '') {
-        const config = this.getConfig();
-        if (gameState?.replayRecorder?.isRecording()) {
-            gameState.replayRecorder.recordSnapshot(gameState, actionDesc || 'AI action');
+        if (typeof this.gameState?.onActionDone === 'function') {
+            return this.gameState.onActionDone(involvedCells, actionDesc);
         }
-        if (!config.showAll && Array.isArray(involvedCells) && involvedCells.length > 0) {
-            if (!involvedCells.some(cell => gameState.isVisibleToHuman(cell))) {
-                console.debug("AI action done (no visible cells)");
-                return;
-            }
+    }
+
+    // ==================== Diplomatic chat modal ====================
+    // Human-AI chat UI. State lives on the instance; gameState is the
+    // single shared instance. UI refresh goes through gameState.onActionDone().
+
+    initChatSession() {
+        this.currentChatSession = {
+            humanPlayer: null,
+            aiPlayer: null,
+            resolvePromise: null,
+            isWaitingForAi: false
+        };
+    }
+
+
+
+    escapeHTML(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    renderChatMessages() {
+      const container = document.getElementById('chat-messages-container');
+      if (!container || !this.currentChatSession.humanPlayer || !this.currentChatSession.aiPlayer) return;
+
+      const history = this.gameState.getChatHistory(this.currentChatSession.humanPlayer, this.currentChatSession.aiPlayer);
+      if (!history || history.length === 0) {
+        container.innerHTML = `
+          <div style="color: var(--text-muted); font-size: 13px; text-align: center; margin: auto; padding: 20px;">
+            No diplomatic correspondence on record. Send a message to open negotiations with ${this.currentChatSession.aiPlayer.name}.
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = history.map(msg => {
+        const isHuman = msg.sender === this.currentChatSession.humanPlayer.name;
+        const authorColor = isHuman ? 'var(--accent-color)' : this.currentChatSession.aiPlayer.color;
+        const timeStr = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : '';
+        const bubbleClass = isHuman ? 'chat-msg chat-msg-sent' : 'chat-msg chat-msg-received';
+        const borderStyle = isHuman ? '' : `border-left: 3px solid ${this.currentChatSession.aiPlayer.color};`;
+
+        return `
+          <div class="${bubbleClass}" style="${borderStyle}">
+            <div class="chat-msg-header">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span class="player-color-dot" style="background-color: ${authorColor}; width: 8px; height: 8px;"></span>
+                <span class="chat-msg-author" style="color: ${authorColor};">${escapeHTML(msg.sender)}</span>
+              </div>
+              <span class="chat-msg-time">${timeStr}</span>
+            </div>
+            <div class="chat-msg-body">${escapeHTML(msg.content)}</div>
+          </div>
+        `;
+      }).join('');
+
+      container.scrollTop = container.scrollHeight;
+    }
+
+    openChatModal(humanPlayer, aiPlayer, options = {}) {
+      if (!this.gameState || !humanPlayer || !aiPlayer) return Promise.resolve();
+
+      const overlay = document.getElementById('chat-modal-overlay');
+      const colorDot = document.getElementById('chat-modal-color');
+      const title = document.getElementById('chat-modal-title');
+      const input = document.getElementById('chat-message-input');
+      const sendBtn = document.getElementById('btn-send-chat');
+      const statusIndicator = document.getElementById('chat-status-indicator');
+
+      colorDot.style.backgroundColor = aiPlayer.color;
+      title.textContent = `DIPLOMACY: ${aiPlayer.name.toUpperCase()}`;
+      statusIndicator.innerHTML = '';
+      input.value = '';
+      input.disabled = false;
+      sendBtn.disabled = false;
+
+      return new Promise((resolve) => {
+        this.currentChatSession = {
+          humanPlayer,
+          aiPlayer,
+          resolvePromise: resolve,
+          isWaitingForAi: false
+        };
+
+        renderChatMessages();
+        overlay.classList.add('active');
+        setTimeout(() => input.focus(), 100);
+      });
+    }
+
+    async closeChatModal() {
+      const overlay = document.getElementById('chat-modal-overlay');
+      if (!overlay || !overlay.classList.contains('active')) return;
+
+      overlay.classList.remove('active');
+
+      const { humanPlayer, aiPlayer, resolvePromise } = this.currentChatSession;
+      if (aiPlayer && humanPlayer) {
+        // Requirement 7: When human exits chat, allow the AI player to add a note to summarize the chat
+        const mgr = await aiPlayer.getAiManager();
+        if (mgr) await mgr.summarizeChatAndAddNote(humanPlayer);
+      }
+
+      if (typeof this.gameState?.onActionDone === 'function') await this.gameState.onActionDone();
+
+      if (resolvePromise) {
+        resolvePromise();
+      }
+      this.currentChatSession = {
+        humanPlayer: null,
+        aiPlayer: null,
+        resolvePromise: null,
+        isWaitingForAi: false
+      };
+    }
+
+    async sendChatMessage() {
+      if (this.currentChatSession.isWaitingForAi) return;
+
+      const input = document.getElementById('chat-message-input');
+      const sendBtn = document.getElementById('btn-send-chat');
+      const statusIndicator = document.getElementById('chat-status-indicator');
+      const text = input.value.trim();
+      if (!text) return;
+
+      const { humanPlayer, aiPlayer } = this.currentChatSession;
+      if (!humanPlayer || !aiPlayer) return;
+
+      // Add human message to this.gameState
+      this.gameState.addChatMessage(humanPlayer, aiPlayer, text);
+      input.value = '';
+      renderChatMessages();
+
+      // Show thinking indicator & disable input
+      this.currentChatSession.isWaitingForAi = true;
+      input.disabled = true;
+      sendBtn.disabled = true;
+      statusIndicator.innerHTML = `
+        <span style="display: inline-block; animation: pulse 1.5s infinite;">⏳</span>
+        <span>${aiPlayer.name} is formulating a response...</span>
+      `;
+
+      try {
+        const mgr = await aiPlayer.getAiManager();
+        if (mgr) {
+          const reply = await mgr.generateChatReply(humanPlayer);
+
+          // Add AI message to this.gameState
+          this.gameState.addChatMessage(aiPlayer, humanPlayer, reply.content);
+          renderChatMessages();
+
+          if (reply.ended) {
+            // Summary note is added by closeChatModal() when the human closes the
+            // modal — summarizing here too would double the note and the LLM call.
+            statusIndicator.innerHTML = `<span style="color: #f1c40f;">[ ${aiPlayer.name} has concluded the negotiations. ]</span>`;
+            if (typeof this.gameState?.onActionDone === 'function') await this.gameState.onActionDone();
+          } else {
+            statusIndicator.innerHTML = '';
+            input.disabled = false;
+            sendBtn.disabled = false;
+            input.focus();
+          }
         }
-        console.debug("AI action done (visible)");
-        this.reconcileEntities(gameState);
-        updatePlayersUI(this.gameState);
-        await this.sleep(config.actionSleepMs ?? 0);
+      } catch (err) {
+        console.error('Error generating AI chat reply:', err);
+        statusIndicator.innerHTML = `<span style="color: #e74c3c;">Failed to get response from ${aiPlayer.name}.</span>`;
+        input.disabled = false;
+        sendBtn.disabled = false;
+      } finally {
+        this.currentChatSession.isWaitingForAi = false;
+      }
     }
 }
 

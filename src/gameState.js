@@ -23,6 +23,10 @@ export class GameState {
     this.chatHistory = {};
     this.replayRecorder = null;
     this.fogPovPlayer = null; // Replay only: fog POV override (snapshot's active player); null = human-player union
+    // Single shared AiHelper instance (used by barbarians, players, harnesses).
+    // main.js sets onActionDone callback after construction.
+    this.aiHelper = new AiHelper(this);
+    this.onActionDone = null; // Set by main.js: (involvedCells, actionDesc) => {...}
   }
 
   /**
@@ -321,7 +325,7 @@ export class GameState {
    * 
    */
   async onRoundEnd() {
-    if (this.settings?.barbarians) await manageBarbarians(this.settings.barbarians, new AiHelper(this));
+    if (this.settings?.barbarians) await manageBarbarians(this.settings.barbarians, this.aiHelper);
     this.currentRound++;
     if (this.replayRecorder?.isRecording()) {
       this.replayRecorder.recordSnapshot(this, `Round ${this.currentRound} began`);
