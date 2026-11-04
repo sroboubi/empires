@@ -946,11 +946,13 @@ export class AdaptiveManager extends BaseManager {
 
             // Friendly/ally units are only defended against if they actually
             // attacked us. Caution-stance units are avoided and only engaged
-            // in self-defence. Neutral units that are adjacent/striking are
-            // treated as immediate threats. A strike on an ally is defended.
+            // in self-defence. Neutral units are treated the same as caution:
+            // proximity alone is not hostility — engage only after they
+            // actually attack. A strike on an ally is defended.
             const passiveCaution = stance === 'caution' && attackerDamage === 0;
+            const passiveNeutral = stance === 'neutral' && attackerDamage === 0;
             const isImmediate = attackerDamage > 0
-                || (!friendly && ((!passiveCaution && (nearestOwn <= 1 || canStrike)) || alliedThreat));
+                || (!friendly && ((!passiveCaution && !passiveNeutral && (nearestOwn <= 1 || canStrike)) || alliedThreat));
             if (!isImmediate) continue;
 
             immediate.push({ ...item, stance, nearestOwn, nearestAlly, attackerDamage, alliedThreat });
