@@ -73,15 +73,15 @@ export function updatePlayersUI(gameState, callbacks = {}) {
     const scoreToWinText = minRoundsReached ? scoreToWinStr : `score to win: available after round ${CONFIG.MIN_GAME_ROUNDS}`;
 
     li.innerHTML = `
-      <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
-        <div style="display: flex; align-items: center; gap: 8px;">
+      <div class="flex-row-between">
+        <div class="flex-row">
           <span class="player-color-dot" style="background-color: ${player.color};"></span>
           <strong style="font-size: 14px; color: ${isActive ? '#ffffff' : 'var(--text-muted)'};">${player.name} ${isActive ? '◀ ACTIVE' : ''}</strong>
         </div>
-        <span style="font-size: 10px; color: var(--accent-color); opacity: 0.8;">📊 Profile</span>
+        <span class="profile-link">📊 Profile</span>
       </div>
-      ${ordersStr ? `<div style="font-size: 11px; color: var(--accent-color); margin-left: 18px;">${ordersStr}</div>` : ''}
-      ${scoreStr ? `<div style="font-size: 11px; color: var(--accent-color); margin-left: 18px;">${scoreStr}</div>` : ''}
+      ${ordersStr ? `<div class="player-sub-line">${ordersStr}</div>` : ''}
+      ${scoreStr ? `<div class="player-sub-line">${scoreStr}</div>` : ''}
       ${scoreToWinText ? `<div style="font-size: 11px; color: ${scoreToWinColor}; margin-left: 18px;">${scoreToWinText}</div>` : ''}
     `;
 
@@ -179,30 +179,29 @@ export function renderResourceProfileHTML(player, gameState, isCompact = false) 
     <div class="profile-summary-grid">
       <div class="profile-stat-box">
         <span class="profile-stat-label">Military Score</span>
-        <span class="profile-stat-val" style="color: #e74c3c;">${player.score.military}</span>
+        <span class="profile-stat-val stat-military">${player.score.military}</span>
       </div>
       <div class="profile-stat-box">
         <span class="profile-stat-label">Economic Score</span>
-        <span class="profile-stat-val" style="color: #f1c40f;">${player.score.economic}</span>
+        <span class="profile-stat-val stat-economic">${player.score.economic}</span>
       </div>
       <div class="profile-stat-box">
         <span class="profile-stat-label">Exploration Score</span>
-        <span class="profile-stat-val" style="color: #0f44f1ff;">${player.score.exploration}</span>
+        <span class="profile-stat-val stat-exploration">${player.score.exploration}</span>
       </div>
       <div class="profile-stat-box">
         <span class="profile-stat-label">Orders</span>
-        <span class="profile-stat-val" style="color: var(--accent-color);">${player.orders}/${player.maxOrders}</span>
+        <span class="profile-stat-val stat-orders">${player.orders}/${player.maxOrders}</span>
       </div>
     </div>
   `;
 
-  // TODO define this, and resource icons, in manifestData for better flexibility
-  const resourceIconColors = {
-    food: '#2ecc71',
-    gold: '#f1c40f',
-    iron: '#95a5a6',
-    wood: '#e67e22',
-    gems: '#9b59b6'
+  // Resource display colors come from definitions/resources.json (via manifestData),
+  // with a hardcoded fallback so the profile still renders if the manifest is absent.
+  const manifestResources = gameState.manifestData?.resources || [];
+  const resourceColor = (name) => {
+    const entry = manifestResources.find(r => r.name?.toLowerCase() === name.toLowerCase());
+    return entry?.color || 'var(--accent-color)';
   };
 
   let chartsHTML = '';
@@ -247,8 +246,8 @@ export function renderResourceProfileHTML(player, gameState, isCompact = false) 
     const yieldPct = Math.min(100, Math.round((yields / maxFlowScale) * 100));
     const upkeepPct = Math.min(100, Math.round((upkeep / maxFlowScale) * 100));
 
-    const color = resourceIconColors[res.toLowerCase()] || 'var(--accent-color)';
-    const projectionText = net >= 0 ? `<span style="color: #2ecc71;">(+${displayNum(net)} ➔ ${displayNum(projectedStock)})</span>` : `<span style="color: #e74c3c;">(${displayNum(net)} ➔ ${displayNum(projectedStock)})</span>`;
+    const color = resourceColor(res);
+    const projectionText = net >= 0 ? `<span class="text-positive">(+${displayNum(net)} ➔ ${displayNum(projectedStock)})</span>` : `<span class="text-negative">(${displayNum(net)} ➔ ${displayNum(projectedStock)})</span>`;
 
     chartsHTML += `
       <div class="resource-chart-row">
@@ -256,22 +255,22 @@ export function renderResourceProfileHTML(player, gameState, isCompact = false) 
           <span class="resource-chart-name" style="color: ${color};">
             ● ${res}
           </span>
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <span style="font-size: 11px; color: var(--text-muted);">Stock: <strong>${displayNum(stock)}</strong> ${projectionText}</span>
+          <div class="flex-row">
+            <span class="text-muted-small">Stock: <strong>${displayNum(stock)}</strong> ${projectionText}</span>
             <span class="resource-chart-net ${netClass}">${netStr}</span>
           </div>
         </div>
 
         ${stockBarHTML}
 
-        <div class="stacked-bar-container" style="margin-top: 2px;">
+        <div class="stacked-bar-container stacked-bar-spaced">
           <div class="stacked-bar-yield" style="width: ${yieldPct}%;" title="Yields: +${displayNum(yields)}/turn"></div>
           <div class="stacked-bar-upkeep" style="width: ${upkeepPct}%;" title="Upkeep: -${displayNum(upkeep)}/turn"></div>
         </div>
 
         <div class="resource-details-line">
-          <span style="color: #2ecc71;">▲ Yield: +${displayNum(yields)}/turn</span>
-          <span style="color: #e74c3c;">▼ Upkeep: -${displayNum(upkeep)}/turn</span>
+          <span class="text-positive">▲ Yield: +${displayNum(yields)}/turn</span>
+          <span class="text-negative">▼ Upkeep: -${displayNum(upkeep)}/turn</span>
         </div>
       </div>
     `;
@@ -286,13 +285,13 @@ export function renderResourceProfileHTML(player, gameState, isCompact = false) 
     });
 
     const chips = Object.entries(entityCounts)
-      .map(([name, count]) => `<span style="background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); padding: 4px 8px; border-radius: 4px; font-size: 11px; text-transform: uppercase;"><strong>${name}</strong> x${count}</span>`)
+      .map(([name, count]) => `<span class="entity-chip"><strong>${name}</strong> x${count}</span>`)
       .join(' ');
 
     entityBreakdownHTML = `
-      <div class="divider" style="margin: 16px 0 12px 0;"></div>
+      <div class="divider divider-spaced"></div>
       <div class="section-title">Owned Entities Breakdown</div>
-      <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px;">
+      <div class="flex-wrap-gap">
         ${chips}
       </div>
     `;
@@ -321,11 +320,11 @@ export function renderResourceProfileHTML(player, gameState, isCompact = false) 
         if (entries.length === 0) continue;
 
         historyEntriesHTML += `
-          <div class="history-round-group" style="margin-bottom: 12px;">
-            <div class="history-round-header" style="font-weight: 600; color: var(--accent-color); margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid var(--border-color);">
+          <div class="history-round-group">
+            <div class="history-round-header">
               Round ${round} (${entries.length} events)
             </div>
-            <div class="history-entries" style="display: flex; flex-direction: column; gap: 4px;">
+            <div class="history-entries">
         `;
 
         for (const entry of entries) {
@@ -342,11 +341,11 @@ export function renderResourceProfileHTML(player, gameState, isCompact = false) 
 
           historyEntriesHTML += `
             <div class="history-entry" style="font-size: 11px; padding: 6px 8px; background: rgba(255,255,255,0.03); border-radius: 4px; border-left: 3px solid ${categoryColor};">
-              <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div class="flex-row-between">
                 <span style="color: ${categoryColor}; font-weight: 600; text-transform: uppercase; font-size: 10px;">${entry.category}</span>
-                <span style="color: var(--text-muted); font-size: 10px;">${time}</span>
+                <span class="text-muted-tiny">${time}</span>
               </div>
-              <div style="margin-top: 2px; color: var(--text-main);">
+              <div class="history-entry-text">
                 ${entry.details}
               </div>
             </div>
@@ -359,25 +358,25 @@ export function renderResourceProfileHTML(player, gameState, isCompact = false) 
         `;
       }
     } else {
-      historyEntriesHTML = '<div style="color: var(--text-muted); font-size: 12px; text-align: center; padding: 20px;">No history entries yet.</div>';
+      historyEntriesHTML = '<div class="history-empty">No history entries yet.</div>';
     }
 
     // Simple pagination controls (fixed 5 rounds per page)
     const paginationHTML = totalPages > 1 ? `
-      <div class="history-pagination" style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border-color);">
-        <button id="history-prev-page" class="btn btn-small" ${validPage === 0 ? 'disabled' : ''} style="width: auto;">← Prev</button>
-        <span style="font-size: 12px; color: var(--text-muted);">Page ${validPage + 1} of ${totalPages} (5 rounds/page)</span>
-        <button id="history-next-page" class="btn btn-small" ${validPage >= totalPages - 1 ? 'disabled' : ''} style="width: auto;">Next →</button>
+      <div class="history-pagination">
+        <button id="history-prev-page" class="btn btn-small btn-auto" ${validPage === 0 ? 'disabled' : ''}>← Prev</button>
+        <span class="pagination-label">Page ${validPage + 1} of ${totalPages} (5 rounds/page)</span>
+        <button id="history-next-page" class="btn btn-small btn-auto" ${validPage >= totalPages - 1 ? 'disabled' : ''}>Next →</button>
       </div>
     ` : '';
 
     historyHTML = `
-      <div class="divider" style="margin: 16px 0 12px 0;"></div>
-      <div class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
+      <div class="divider divider-spaced"></div>
+      <div class="section-title section-title-row">
         <span>History</span>
-        <span style="font-size: 11px; color: var(--text-muted);">${allRounds.length} rounds recorded</span>
+        <span class="text-muted-small">${allRounds.length} rounds recorded</span>
       </div>
-      <div id="history-panel-content" style="max-height: 300px; overflow-y: auto;">
+      <div id="history-panel-content" class="history-scroll">
         ${historyEntriesHTML}
       </div>
       ${paginationHTML}
@@ -385,16 +384,16 @@ export function renderResourceProfileHTML(player, gameState, isCompact = false) 
   }
 
   const titleHeader = isCompact ? `
-    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+    <div class="flex-row flex-row-spaced">
       <span class="player-color-dot" style="background-color: ${player.color};"></span>
-      <strong style="font-size: 13px; text-transform: uppercase;">${player.name} Resource Profile</strong>
+      <strong class="profile-title">${player.name} Resource Profile</strong>
     </div>
   ` : '';
 
   return `
     ${titleHeader}
     ${summaryHTML}
-    <div class="section-title" style="margin-bottom: 8px;">Resource Flow & Balance</div>
+    <div class="section-title section-title-spaced">Resource Flow & Balance</div>
     ${chartsHTML}
     ${entityBreakdownHTML}
     ${historyHTML}
