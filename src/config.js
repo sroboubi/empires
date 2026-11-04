@@ -34,6 +34,7 @@ export var CONFIG = {
   TREASURES_URL: './definitions/treasures.json',
   TERRAINS_URL: './definitions/terrains.json',
   AUDIO_URL: './definitions/audio.json',
+  RESOURCES_URL: './definitions/resources.json',
   DEFAULT_SETTINGS_URL: './definitions/defaultSettings.json',
 };
 
