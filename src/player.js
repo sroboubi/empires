@@ -154,8 +154,8 @@ export class Player {
     this.score = { military: 0, economic: 0 };
     const ownedEntities = this.getEntities();
     for (const entity of ownedEntities) {
-      this.score.military += entity.state.score.military;
-      this.score.economic += entity.state.score.economic;
+      this.score.military += entity.state.score.military ?? 0;
+      this.score.economic += entity.state.score.economic ?? 0;
     }
 
     this.score.exploration = Math.round(Math.pow(this.visibleCells.size * this.exploredCells.size, 1 / 3));
