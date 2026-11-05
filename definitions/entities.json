@@ -1240,7 +1240,8 @@
       "catapult"      
     ],
     "score": {
-      "military": 6
+      "military": 6,
+      "economic": 0
     },
     "sfx": {
       "select": "select_unit.mp3",
