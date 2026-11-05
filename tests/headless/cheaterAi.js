@@ -43,6 +43,10 @@ export default class CheaterAi extends BaseManager {
     probe('opponent.orders hidden', () => opponent.orders, 'undefined');
     probe('opponent.exploredCells hidden', () => opponent.exploredCells, 'undefined');
     probe('opponent name visible', () => { if (opponent.name === undefined) throw new Error('blocked'); return opponent.name; });
+    probe('opponent.score is read-only', () => {
+      try { opponent.score.total = 0; } catch (e) { return; } // throw = blocked
+      if (opponent.score.total === 0) throw new Error('score mutation stuck!');
+    });
 
     // --- 2. Opponent data via entity.owner path ---
     const visibleEnemies = gs.entities.filter(e => {
@@ -54,6 +58,9 @@ export default class CheaterAi extends BaseManager {
       probe('enemy.owner.resources hidden', () => enemy.owner.resources, 'undefined');
       probe('enemy.owner.history hidden', () => enemy.owner.history, 'undefined');
       probe('enemy.owner.getEntities blocked', () => enemy.owner.getEntities(), 'undefined');
+      probe('opponent identity stable (players[i] === enemy.owner)', () => {
+        if (enemy.owner !== opponent) throw new Error('split proxy identity!');
+      });
 
       // --- 3. Action ownership ---
       probe('enemy.getActions()[0].do throws', () => {

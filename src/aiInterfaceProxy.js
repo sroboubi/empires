@@ -205,9 +205,15 @@ function createOtherPlayerProxy(player, aiName, seen = new WeakMap()) {
   const proxy = new Proxy(player, {
     get(target, prop, receiver) {
       if (prop === UNWRAP) return target;
-      if (prop === 'name' || prop === 'score' || prop === 'description' ||
+      if (prop === 'name' || prop === 'description' ||
         prop === 'id' || prop === 'color' || prop === 'isAI') {
         return Reflect.get(target, prop, receiver);
+      }
+      if (prop === 'score') {
+        // score is an object — return a read-only wrapped copy, not the raw
+        // mutable one (opponent.score.total = 0 would otherwise stick).
+        const score = Reflect.get(target, prop, receiver);
+        return score ? deepWrap(score, aiName, seen, null) : score;
       }
       if (HIDDEN_PLAYER_PROPS.has(prop)) {
         return undefined;
@@ -330,7 +336,7 @@ export function createGameStateProxy(gameState, ownPlayer, aiName, seen = new We
     if (playerCache.has(p.id)) return playerCache.get(p.id);
     const wrapped = p.id === ownPlayerId
       ? deepWrap(p, aiName, seen, ownPlayer)
-      : createOtherPlayerProxy(p, aiName);
+      : createOtherPlayerProxy(p, aiName, seen);
     playerCache.set(p.id, wrapped);
     return wrapped;
   }
