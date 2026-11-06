@@ -635,7 +635,7 @@ export default class Entity {
 
           this.spendActionCost(check.cost, check.ordersRequired);
           const targetHealthBefore = entity.health;
-          entity.receiveDamage({ value: check.rawDamage, ...this.damage }, this);
+          entity.receiveDamage({ ...this.damage, value: check.rawDamage }, this);
           const actualDamage = targetHealthBefore - entity.health;
           this.state.battleExhaustion++;
 
