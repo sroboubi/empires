@@ -47,7 +47,9 @@ export function showToast(message, isError = false, timeout = 2500) {
 export function calculateAttackMultiplier(gameState, sourceCell, elevationAdjustment, targetEntity) {
     const multiplier = { direction: 1.0, elevation: 1.0, total: 1.0 };
 
-    if (gameState && gameState.hexGrid && targetEntity.facing) {
+    // Directional damage only applies to things that can move (units).
+    // Constructs have a facing but no movement — no front/side/back.
+    if (gameState && gameState.hexGrid && targetEntity.facing && targetEntity.state?.movement) {
         const dirFromTargetToAttacker = gameState.hexGrid.directionTo(targetEntity.cell, sourceCell).fromSource;
         const idxTarget = DIRECTIONS_LIST.indexOf(targetEntity.facing);
         const idxAttacker = DIRECTIONS_LIST.indexOf(dirFromTargetToAttacker);
