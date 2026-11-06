@@ -200,10 +200,18 @@ export class LlmBaseManager extends BaseManager {
 
     summarizeGameState() {
         const helper = this.helper;
-        const opponents = this.player.getOpponents(this.gameState);
-        Object.values(opponents).forEach(opp => {
-            opp.entities = (opp.entities || []).map(e => this.summarizeEntity(e));
-        });
+        // getOpponents() returns proxied, read-only objects: build plain copies
+        // instead of writing to them (a write throws "Illegal write").
+        const opponents = {};
+        for (const [key, opp] of Object.entries(this.player.getOpponents(this.gameState))) {
+            opponents[key] = {
+                id: opp.id,
+                name: opp.name,
+                score: opp.score,
+                description: opp.description,
+                entities: (opp.entities || []).map(e => this.summarizeEntity(e))
+            };
+        }
 
         const resourceProfile = this.player.getResourceProfile(this.gameState);
         const ownSummaries = this.player.getEntities(this.gameState).map(e => this.summarizeEntity(e));

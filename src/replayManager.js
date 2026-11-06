@@ -29,6 +29,10 @@ export class ReplayRecorder {
     if (safeSettings.llm && safeSettings.llm.apiKey) {
       safeSettings.llm.apiKey = '';
     }
+    // Per-player LLM keys live at players[].controller.config.apiKey
+    for (const p of safeSettings.players || []) {
+      if (p?.controller?.config?.apiKey) delete p.controller.config.apiKey;
+    }
 
     // Capture all cell resources once in initialState (resources are only removed, never added)
     const initialCellResources = {};
@@ -60,7 +64,11 @@ export class ReplayRecorder {
       initialState: {
         cells: gameState.hexGrid ? structuredClone(gameState.hexGrid.getCellsObject()) : {},
         mapSize: settings?.mapSize || 15,
-        players: gameState.players.map(p => structuredClone(p.toJSON())),
+        players: gameState.players.map(p => {
+          const pj = structuredClone(p.toJSON());
+          if (pj.controller?.config?.apiKey) delete pj.controller.config.apiKey;
+          return pj;
+        }),
         activePlayerIndex: gameState.activePlayerIndex,
         currentRound: gameState.currentRound,
         timeOfDay: getTimeOfDay(),
