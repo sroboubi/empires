@@ -49,7 +49,7 @@ export function calculateAttackMultiplier(gameState, sourceCell, elevationAdjust
 
     // Directional damage only applies to things that can move (units).
     // Constructs have a facing but no movement — no front/side/back.
-    if (gameState && gameState.hexGrid && targetEntity.facing && targetEntity.state?.movement) {
+    if (gameState && gameState.hexGrid && targetEntity.facing && !targetEntity.isConstruct) {
         const dirFromTargetToAttacker = gameState.hexGrid.directionTo(targetEntity.cell, sourceCell).fromSource;
         const idxTarget = DIRECTIONS_LIST.indexOf(targetEntity.facing);
         const idxAttacker = DIRECTIONS_LIST.indexOf(dirFromTargetToAttacker);
