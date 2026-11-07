@@ -52,9 +52,13 @@ export class HexGrid {
   /**
    * Generates a hexagonal grid of the given radius using TerrainProvider.
    * @param {number} radius - Grid radius (number of hex rings from center)
-   * @param {Array|Object} [terrainConfig=null] - Optional terrain definitions
+   * @param {Array|Object} terrainConfig - Terrain definitions (mandatory — a
+   *   missing config used to silently fill every cell with "Default" terrain)
    */
   constructor(radius, terrainConfig = null) {
+    if (!terrainConfig) {
+      throw new Error('HexGrid requires a terrain config — refusing to generate a map of "Default" terrain.');
+    }
     this.radius = radius;
     this.cells = new Map();
 

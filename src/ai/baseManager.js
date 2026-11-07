@@ -3,11 +3,10 @@
  * Abstract base class for AI turn controllers (e.g. SmartManager, Harness).
  * Provides unified interface and access to player and gameState references.
  *
- * The optional `helper` is the engine's `AiHelper` instance: the AI module's
+ * The `helper` is the engine's `AiHelper` instance: the AI module's
  * only channel to engine features (hex distance, config, renderer callbacks,
- * etc.). A user-provided manager may ignore it, but the built-in managers rely
- * on it. It is optional so a custom manager can still be constructed with the
- * original three arguments.
+ * etc.). It is required — the constructor throws without it. (An earlier
+ * docstring called it optional; the code has always required both arguments.)
  *
  * NOTE: BaseManager does NOT apply the AI interface proxy itself. The game
  * constructs managers via createAiManager() (src/aiInterfaceProxy.js), which
