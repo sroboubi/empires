@@ -26,9 +26,19 @@ export class LlmBaseManager extends BaseManager {
     getLLMClient() {
         if (!this.llmClient) {
             const cc = this.player.controller?.config || {};
+            // H1: resolve the API key from sessionStorage at construction —
+            // it is never stored in the controller config, so it can't leak
+            // into saves or replay exports.
+            let apiKey = cc.apiKey;
+            if (!apiKey && typeof sessionStorage !== 'undefined') {
+                try {
+                    const saved = JSON.parse(sessionStorage.getItem('empires_provider_keys') || '{}');
+                    apiKey = saved[cc.provider] || undefined;
+                } catch (e) { /* ignore */ }
+            }
             this.llmClient = new LLMClient({
                 baseUrl: cc.baseUrl,
-                apiKey: cc.apiKey,
+                apiKey,
                 orderedModels: cc.model,
                 timeoutMs: cc.timeoutMs ?? 30000,
                 callDelayMs: cc.callDelayMs ?? 0,
@@ -63,6 +73,27 @@ export class LlmBaseManager extends BaseManager {
      * Processes a player's turn by summarizing the game state and interacting with the AI controller.     
      */
 
+    /**
+     * B8: normalize a chat message list for strict-alternation models:
+     * merge consecutive same-role messages and ensure the first message
+     * is from the user (an assistant-first history is rejected).
+     */
+    normalizeChatMessages(messages) {
+        const out = [];
+        for (const msg of messages) {
+            const last = out[out.length - 1];
+            if (last && last.role === msg.role) {
+                last.content = `${last.content}\n${msg.content}`;
+            } else {
+                out.push({ role: msg.role, content: msg.content });
+            }
+        }
+        if (out.length > 0 && out[0].role === 'assistant') {
+            out.unshift({ role: 'user', content: '[Conversation continues.]' });
+        }
+        return out;
+    }
+
     async chat(initiator, receiver, initialMessage = null, maxExchanges = null) {
         return await this.helper.chat(initiator, receiver, initialMessage, maxExchanges);
     }
@@ -89,7 +120,10 @@ export class LlmBaseManager extends BaseManager {
         const systemPromptMarkdown = await response.text();
         return systemPromptMarkdown
             .replace('{NAME}', this.player.name)
-            .replace('{DESCRIPTION}', this.player.description ? `You are described as: ${this.player.description}` : '')
+            // B7: use personaBlock() — the persona lives on
+            // player.controller (Phase 23), not player.description, which
+            // is empty, so the chat prompt had no leader persona.
+            .replace('{DESCRIPTION}', this.personaBlock())
             .replace('{OPPONENT_NAME}', otherPlayer.name)
             .replace('{OPPONENT_DESCRIPTION}', otherPlayer.description ? ` (${otherPlayer.description})` : '')
             .replace('{ROUND}', this.gameState.currentRound)
@@ -135,9 +169,17 @@ export class LlmBaseManager extends BaseManager {
             messages.push({ role: 'user', content: `[Diplomatic channel opened by ${otherPlayer.name}. State your opening position or greeting.]` });
         }
 
+        // B8: strict-alternation models (Gemma) reject histories that start
+        // with assistant or have two consecutive same-role messages.
+        const normalized = this.normalizeChatMessages(messages);
+
         console.log(`[Harness] ${this.player.name} generating chat reply to ${otherPlayer.name}...`);
-        const rawResponse = await client.generate(messages, systemPrompt, {
+        const rawResponse = await client.generate(normalized, systemPrompt, {
             temperature: 0.7,
+            // B9: thinkingBudget 0 — the client's default thinkingBudget
+            // (1000) equalled maxOutputTokens (1000), leaving no room for
+            // the reply on providers that count thinking against output.
+            thinkingBudget: 0,
             maxOutputTokens: 1000
         });
 
@@ -149,7 +191,10 @@ export class LlmBaseManager extends BaseManager {
         }
 
         const rawText = typeof rawResponse === 'string' ? rawResponse : JSON.stringify(rawResponse);
-        const ended = rawText.includes('[END_CHAT]');
+        // B17: detect case-insensitively, matching the strip below — the
+        // old code detected '[END_CHAT]' exactly but stripped /gi, so a
+        // lowercase [end_chat] was stripped without ending the chat.
+        const ended = /\[END_CHAT\]/i.test(rawText);
         const cleanContent = rawText.replace(/\[END_CHAT\]/gi, '').trim();
 
         return {
@@ -176,10 +221,16 @@ export class LlmBaseManager extends BaseManager {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             let summaryPrompt = await response.text();
-            summaryPrompt = summaryPrompt.replace("{OPPONENT_NAME}", otherPlayer.name).replace("{RECENT_CHAT}", recent);
+            // B15: use function replacements — a string replacement
+            // interprets $ patterns ($&, $', $1...) in the chat text, so a
+            // message containing "$" would corrupt the prompt.
+            summaryPrompt = summaryPrompt.replace("{OPPONENT_NAME}", () => otherPlayer.name).replace("{RECENT_CHAT}", () => recent);
             const noteSystemPrompt = `You are a strategic advisor for ${this.player.name}. Summarize diplomacy with ${otherPlayer.name} into concise internal notes.`;
             const summary = await this.getLLMClient().generate(summaryPrompt, noteSystemPrompt, {
                 temperature: 0.3,
+                // B9: thinkingBudget 0 — same as the chat reply; a plain-text
+                // summary needs no reasoning budget.
+                thinkingBudget: 0,
                 maxOutputTokens: 1000
             });
 
@@ -216,7 +267,9 @@ export class LlmBaseManager extends BaseManager {
         const resourceProfile = this.player.getResourceProfile(this.gameState);
         const ownSummaries = this.player.getEntities(this.gameState).map(e => this.summarizeEntity(e));
         const history = {};
-        for (let roundNum = this.gameState.currentRound; roundNum > Math.max(this.gameState.currentRound - 3, 1); roundNum--) {
+        // B3: >= (was >) — the > bound excluded round 1 entirely, so the
+        // setup round's notes never reached the LLM.
+        for (let roundNum = this.gameState.currentRound; roundNum >= Math.max(this.gameState.currentRound - 3, 1); roundNum--) {
             const h = this.player.history.get(roundNum);
             if (h) history[roundNum] = h;
         }

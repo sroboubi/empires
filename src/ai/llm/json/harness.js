@@ -60,6 +60,14 @@ export class JsonHarness extends LlmBaseManager {
             console.debug("system prompt:", commandSystemPrompt);
             console.debug("user content:", userContent);
 
+            // B13 (revised per Shahin): start each iteration clean — the
+            // processing blocks below set these for the next prompt, or
+            // leave them null when nothing went wrong. A stale record can
+            // never leak into the next prompt, and no early exit needs its
+            // own clear.
+            lastFailedCommand = null;
+            lastResponseError = null;
+
             response = await client.generate(userContent, commandSystemPrompt, { responseSchema });
             console.debug("response:", response);
 
@@ -96,7 +104,10 @@ export class JsonHarness extends LlmBaseManager {
                 }
 
                 let target = null;
-                if (response.targetId) {
+                // B14: resolve targetId only for ATTACK/REPAIR — a stray
+                // targetId on BUILD/EXPLORE (carried over from a previous
+                // command) used to fail the lookup and abort the command.
+                if (response.targetId && (command === 'ATTACK' || command === 'REPAIR')) {
                     target = this.gameState.getEntityById(response.targetId);
                     if (!target) {
                         lastResponseError = `Target entity not found: ${response.targetId}`;
@@ -125,7 +136,11 @@ export class JsonHarness extends LlmBaseManager {
                     }
                     actionOutcome = this.helper.build(this.gameState, entity, response.entityName);
                 } else if (command === "EXPLORE") {
-                    actionOutcome = this.helper.explore(this.gameState, entity, response.direction, true);
+                    // B6: only seek treasure when no direction was given.
+                    // The old call passed getTreasure=true always, and the
+                    // treasure branch recursed with direction null — so the
+                    // LLM's chosen direction was silently ignored.
+                    actionOutcome = this.helper.explore(this.gameState, entity, response.direction, !response.direction);
                 }
 
                 ordersUsed = actionOutcome.ordersUsed;
@@ -143,10 +158,8 @@ export class JsonHarness extends LlmBaseManager {
                     lastActionResult = null;
                     continue;
                 }
-                lastFailedCommand = null;
                 // Feed the outcome back to the LLM: completed, partial, or the failure reason
                 lastActionResult = `[${actionOutcome.result.status}] ${actionOutcome.result.message}`;
-                lastResponseError = null;
 
                 // Action successfully executed: reconcile and render
                 await this.helper.onActionDone(this.gameState, null, this.describeAction(response));
@@ -173,7 +186,10 @@ export class JsonHarness extends LlmBaseManager {
                 }
 
                 console.log(`[Harness] ${this.player.name} initiating diplomatic chat with ${targetPlayer.name}`);
-                const chatRes = await this.chat(this.player, targetPlayer, response.message || response.thoughtProcess);
+                // B2: never fall back to thoughtProcess as the opening line —
+                // the opponent would read the AI's reasoning. Null lets the
+                // chat generate its opening from the prompt.
+                const chatRes = await this.chat(this.player, targetPlayer, response.message || null);
                 if (chatRes === false) {
                     lastResponseError = 'Failed to initiate chat.';
                     continue;
@@ -181,7 +197,6 @@ export class JsonHarness extends LlmBaseManager {
 
                 await this.helper.onActionDone(this.gameState, null, `Chat with ${targetPlayer.name}`);
                 lastActionResult = `[completed] Concluded diplomatic session with ${targetPlayer.name}`;
-                lastResponseError = null;
                 turnResponseLog.push(response);
             } else if (command === 'END_TURN') {
                 this.player.addHistoryEntry(this.gameState.currentRound, { category: 'note', details: response.note });

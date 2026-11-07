@@ -1,3 +1,5 @@
+import { reconcileEntities } from '../renderer.js';
+
 /**
  * Returns all border cells on the hex grid (cells with fewer than 6 neighbors).
  * @param {Object} helper - AiHelper instance
@@ -110,7 +112,8 @@ export async function manageBarbarians(config, helper) {
           }
 
           const meta = gameState.manifestData?.entities?.[unitName];
-          const dummy = helper.createEntity(meta, null, gameState, null);
+          // Probe only — must not consume an unowned-counter value.
+          const dummy = helper.createEntity(meta, null, gameState, null, { id: '__probe__' });
 
           const spawnCellIndex = candidateBorderCells.findIndex(cell => {
             if (!dummy || typeof dummy.canStandOn !== 'function') return false;
@@ -171,11 +174,24 @@ export async function manageBarbarians(config, helper) {
         if (distDiff !== 0) return distDiff;
         return a.health - b.health;
       });
-      const targetEnemy = visibleEnemies[0];
-      console.debug(`[Barbarians] ${entity.name} at (${entity.q}, ${entity.r}) attacking ${targetEnemy.name} (Owner: ${targetEnemy.owner?.name || 'neutral'}) at (${targetEnemy.q}, ${targetEnemy.r})`);
-      helper.attack(gameState, entity, targetEnemy, Infinity);
-      await helper.onActionDone(gameState, [entity.cell, targetEnemy.cell], `${entity.name} attacked ${targetEnemy.name}`);
-    } else {
+      // G10: try each visible enemy in order — if the nearest is across
+      // water, attack() spends nothing and the barbarian would otherwise
+      // stand off forever. Fall through to marching if none is reachable.
+      let attacked = false;
+      for (const targetEnemy of visibleEnemies) {
+        console.debug(`[Barbarians] ${entity.name} at (${entity.q}, ${entity.r}) attacking ${targetEnemy.name} (Owner: ${targetEnemy.owner?.name || 'neutral'}) at (${targetEnemy.q}, ${targetEnemy.r})`);
+        const res = helper.attack(gameState, entity, targetEnemy, Infinity);
+        if (res && res.ordersUsed > 0) {
+          attacked = true;
+          await helper.onActionDone(gameState, [entity.cell, targetEnemy.cell], `${entity.name} attacked ${targetEnemy.name}`);
+          break;
+        }
+      }
+      if (attacked) continue;
+    }
+
+    // No reachable enemy: march (falls through from the combat branch too).
+    {
       // Restore target cell reference if needed
       if (!entity.targetCell && entity.state.targetCell) {
         entity.targetCell = helper.getCell(entity.state.targetCell.q, entity.state.targetCell.r);
@@ -193,35 +209,21 @@ export async function manageBarbarians(config, helper) {
       if (entity.targetCell) {
         const moveAction = entity.getActions().find(a => a.name === "Move");
         if (moveAction) {
-          // Move towards target cell while action points remain
-          while (entity.actionPoints > 0 && !entity.destroyed) {
-            const currentDist = helper.distance(entity, entity.targetCell);
-            if (currentDist < 5) {
-              entity.targetCell = findOppositeBorderCell(entity.cell || entity, helper, entity);
-              if (entity.targetCell) {
-                entity.state.targetCell = { q: entity.targetCell.q, r: entity.targetCell.r };
-                console.debug(`[Barbarians] ${entity.name} reached proximity of target. New target assigned at (${entity.targetCell.q}, ${entity.targetCell.r})`);
-              }
+          // G1: follow a real BFS path instead of greedy straight-line steps.
+          // The greedy version oscillated (A<->B) whenever the direct route
+          // was blocked by water/mountains, burning the whole turn.
+          let path = helper.findWalkablePath(gameState, entity, entity.targetCell);
+          if (path) {
+            for (const nextCell of path) {
+              if (entity.actionPoints <= 0 || entity.destroyed) break;
+              if (gameState.getEntityAt(nextCell.q, nextCell.r)) break;
+              const check = moveAction.canDo(nextCell, null);
+              if (!check || !check.possible) break;
+              const moved = moveAction.do(nextCell, null);
+              if (!moved) break;
+              await helper.onActionDone(gameState, [entity.cell], `${entity.name} moved to (${nextCell.q}, ${nextCell.r})`);
+              console.debug(`[Barbarians] ${entity.name} moved to (${nextCell.q}, ${nextCell.r}) (Target: (${entity.targetCell.q}, ${entity.targetCell.r}), Remaining AP: ${entity.actionPoints})`);
             }
-
-            const neighbors = helper.getNeighbors(entity.q, entity.r);
-            const validCandidates = neighbors.filter(nb => {
-              if (gameState.getEntityAt(nb.q, nb.r)) return false;
-              const check = moveAction.canDo(nb, null);
-              return check && check.possible;
-            });
-
-            if (validCandidates.length === 0) break;
-
-            // Sort candidate neighbors by proximity to targetCell
-            validCandidates.sort((a, b) => helper.distance(a, entity.targetCell) - helper.distance(b, entity.targetCell));
-            const bestNeighbor = validCandidates[0];
-
-            const moved = moveAction.do(bestNeighbor, null);
-            if (!moved) break;
-            await helper.onActionDone(gameState, [entity.cell], `${entity.name} moved to (${bestNeighbor.q}, ${bestNeighbor.r})`);
-
-            console.debug(`[Barbarians] ${entity.name} moved to (${bestNeighbor.q}, ${bestNeighbor.r}) (Target: (${entity.targetCell.q}, ${entity.targetCell.r}), Remaining AP: ${entity.actionPoints})`);
           }
         }
       }
@@ -229,5 +231,5 @@ export async function manageBarbarians(config, helper) {
   }
 
   // ensure entities are in the right place after all moves (e.g. in case SHOW_ALL is true)
-  helper.reconcileEntities(gameState);
+  reconcileEntities(gameState);
 }

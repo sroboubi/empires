@@ -1,8 +1,8 @@
 import { HexGrid } from './hexGrid.js';
 import { Player } from './player.js';
-import { manageBarbarians } from './ai/barbarians/manager.js';
+import { manageBarbarians } from './barbarians/manager.js';
 import { AiHelper } from './aiHelper.js';
-import { spawnCellResources } from './resources.js';
+import { spawnCellResources, checkTreasurePickup } from './resources.js';
 import { CONFIG } from './config.js';
 import Entity from './entity.js';
 
@@ -21,6 +21,9 @@ export class GameState {
     this.players = [];
     this.activePlayerIndex = 0;
     this.currentRound = 1;
+    // Counter for ownerless entity IDs (barbarians etc.):
+    // <name>_neutral_<n>. Saved/loaded with the game.
+    this.unownedEntityCounter = 0;
     this.hexGrid = null;  // HexGrid instance
     this.entities = [];   // List of active BaseEntity instances
     this.manifestData = null;
@@ -35,6 +38,9 @@ export class GameState {
     this.onActionDone = callbacks.onActionDone || null;
     this.onOpenChatModal = callbacks.onOpenChatModal || null;
     this.onCloseChatModal = callbacks.onCloseChatModal || null;
+    // M5: called at the clean turn boundary (round-end done, next turn not
+    // yet started) so the driver can autosave a complete state.
+    this.onCleanBoundary = callbacks.onCleanBoundary || null;
   }
 
   /**
@@ -127,7 +133,7 @@ export class GameState {
    * @param {Object} manifestData - Loaded game manifest metadata
    * @param {Object} [settings=null] - Loaded or configured game settings
    */
-  initializeManifest(manifestData, settings = null, onTurnEnd) {
+  initializeManifest(manifestData, settings = null) {
     if (!manifestData) return;
     this.manifestData = manifestData;
     this.settings = settings || {};
@@ -176,12 +182,17 @@ export class GameState {
 
       this.players.forEach((player, playerIdx) => {
         const angle = (2 * Math.PI * playerIdx) / numPlayers - Math.PI / 2;
-        const targetQ = Math.round(targetRadius * Math.cos(angle));
-        const targetR = Math.round(targetRadius * Math.sin(angle));
+        // M5: generate the ring in pixel space and convert to axial — feeding
+        // cos/sin straight into (q, r) distorted the ring (4p neighbours 6
+        // apart instead of ~8.5, and uneven centre distances). Pixel radius
+        // uses the centre-to-centre hex spacing (sqrt(3) * size).
+        const px = targetRadius * Math.sqrt(3) * CONFIG.HEX_SIZE * Math.cos(angle);
+        const pz = targetRadius * Math.sqrt(3) * CONFIG.HEX_SIZE * Math.sin(angle);
+        const { q: targetQ, r: targetR } = HexGrid.pixelToAxial(px, pz);
 
         const getUnitCanStandOnFn = (unitName) => {
           const uMeta = manifestData.entities[unitName];
-          const dummy = new Entity(uMeta, player, this, null);
+          const dummy = new Entity(uMeta, player, this, null, { id: '__probe__' });
           return dummy.canStandOn.bind(dummy);
         };
 
@@ -234,7 +245,9 @@ export class GameState {
             if (cell) {
               const key = `${cell.q},${cell.r}`;
               occupiedCoords.add(key);
-              this.spawnEntity(unitName, cell, player);
+              const spawned = this.spawnEntity(unitName, cell, player);
+              // L6: a starting unit placed on a treasure collects it.
+              if (spawned) checkTreasurePickup(spawned);
             } else {
               console.warn(`Could not find valid unoccupied cell to spawn ${unitName} for ${player.name}`);
             }
@@ -243,10 +256,15 @@ export class GameState {
       });
     }
 
-    // Start turn for the initial player. The driver supplies onTurnEnd
-    // when it wants AI turns to run and chain (the browser passes its
-    // nextTurn); without one, only the synchronous bookkeeping runs.
-    this.startTurn(onTurnEnd);
+    // Setup starts NO turn: the driver owns the first turn (the browser
+    // calls startTurn with its nextTurn continuation; headless drives
+    // turns itself). The old code fired startTurn here, un-awaited, so
+    // player 1's AI turn ran at setup AND again in the driver's round 1
+    // — two concurrent processTurn calls on the same player, plus a
+    // second orders refill whose overflow converted to free resources.
+    // (Player.step runs the AI turn regardless of onTurnEnd, so passing
+    // no continuation did NOT suppress the setup turn as the old comment
+    // claimed.)
   }
 
   /**
@@ -274,6 +292,21 @@ export class GameState {
       this.activePlayerIndex = -1;
       await this.onRoundEnd();
       this.activePlayerIndex = 0;
+    }
+    // M4: recalculate all scores and judge the win BEFORE starting the
+    // next turn — the old code checked after endTurn returned, by which
+    // time the next AI had already started acting on stale scores.
+    for (const p of this.players) p.recalculateScore();
+    const win = this.checkWinConditions();
+    if (win) {
+      this.gameOver = true;
+      return;
+    }
+    // M5: clean boundary — round-end is done, scores are fresh, and the
+    // next player's turn has NOT started yet. The driver may save here;
+    // a save taken after startTurn would capture a partial AI turn.
+    if (typeof this.onCleanBoundary === 'function') {
+      this.onCleanBoundary();
     }
     this.startTurn(onTurnEnd);
     if (this.replayRecorder?.isRecording()) {
@@ -346,15 +379,17 @@ export class GameState {
    * @param {Object} cell - Target cell
    * @param {Player|null} owner - Owning player
    * @param {Object} [initialState] - Optional state override
+   * @param {Object} [entityData] - Optional manifest entry override (Q4: a
+   *   saved entity carries its own data, so it loads even if the live
+   *   manifest changed or dropped the type; otherwise the manifest is used)
    * @returns {BaseEntity|null} Spawned entity instance
    */
-  spawnEntity(entityName, cell, owner = null, initialState = null) {
-    if (!this.manifestData || !this.manifestData.entities[entityName]) {
-      console.warn(`Cannot spawn entity "${entityName}": metadata not found in manifest.`);
+  spawnEntity(entityName, cell, owner = null, initialState = null, entityData = null) {
+    const meta = entityData || this.manifestData?.entities[entityName];
+    if (!meta) {
+      console.warn(`Cannot spawn entity "${entityName}": metadata not found in manifest or save.`);
       return null;
     }
-
-    const meta = this.manifestData.entities[entityName];
 
     const entity = new Entity(meta, owner, this, cell, initialState);
     this.entities.push(entity);
@@ -450,6 +485,7 @@ export class GameState {
       gameOver: this.gameOver,
       players: this.players.map(p => p.toJSON()),
       entities: this.entities.map(e => e.toJSON()),
+      unownedEntityCounter: this.unownedEntityCounter,
       cells: this.hexGrid ? this.hexGrid.getCellsObject() : {},
       settings: this.settings,
       chatHistory: this.chatHistory || {}
@@ -468,6 +504,11 @@ export class GameState {
         this.settings = data.settings;
       }
 
+      // M2: initializationSettings (starting resources etc.) was only set in
+      // initializeManifest, so a loaded game left AI economics blind
+      // (startingResources = {}). Re-derive it from the serialized settings.
+      this.initializationSettings = this.settings?.initialization || {};
+
       this.chatHistory = data.chatHistory || {};
 
       if (data.activePlayerIndex !== undefined) {
@@ -478,6 +519,9 @@ export class GameState {
       }
       if (data.gameOver !== undefined) {
         this.gameOver = data.gameOver;
+      }
+      if (data.unownedEntityCounter !== undefined) {
+        this.unownedEntityCounter = data.unownedEntityCounter;
       }
 
       // Re-hydrate Players
@@ -497,13 +541,28 @@ export class GameState {
           const cell = this.hexGrid ? this.hexGrid.getCell(eData.q, eData.r) : null;
           const owner = this.players.find(p => p.id === eData.ownerId) || null;
           if (cell) {
-            const entity = this.spawnEntity(eData.name, cell, owner, eData.state);
+            // M1: id is a top-level field in toJSON(), not in state — pass it
+            // through so entity IDs survive a load (history entries, AI goals
+            // and anything keyed by id depend on stable IDs).
+            const entity = this.spawnEntity(eData.name, cell, owner, { ...eData.state, id: eData.id }, eData.data);
             // Age lives on the instance, not in state: restore it so a
             // loaded game does not reset every entity's age to 0.
             // Guarded: saves written before age was serialized lack it.
             if (entity && eData.age !== undefined) entity.age = eData.age;
           }
         });
+      }
+
+      // Counters may be missing or stale (pre-counter saves): advance each
+      // counter past the highest numeric suffix among that owner's loaded
+      // entities, so a fresh spawn can never collide with an existing ID.
+      // Old random suffixes aren't numeric and are skipped.
+      for (const e of this.entities) {
+        const suffix = e.id.split('_').pop();
+        if (!/^\d+$/.test(suffix)) continue;
+        const n = parseInt(suffix, 10);
+        if (e.owner) e.owner.entityCounter = Math.max(e.owner.entityCounter ?? 0, n);
+        else this.unownedEntityCounter = Math.max(this.unownedEntityCounter ?? 0, n);
       }
 
       this.players.forEach(p => p.updateVisibility(this));

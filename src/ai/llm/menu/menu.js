@@ -18,11 +18,11 @@ function dist(a, b, helper) {
     return helper.distance(ac, bc);
 }
 
-/** Short human-readable entity reference, e.g. "Red swordsman" / "your worker". */
+/** Short human-readable entity reference, e.g. "Red swordsman_2_1" / "your worker_1_3". IDs are counter-based (<name>_<owner>_<n>) and unique, so every menu label is unique by construction. */
 function entLabel(e, player) {
     const own = e.owner && player && e.owner.id === player.id;
     const who = own ? 'your' : (e.owner?.name ? `${e.owner.name}'s` : 'a');
-    return `${who} ${e.name}`;
+    return `${who} ${e.id || e.name}`;
 }
 
 function distLabel(d) {
@@ -85,6 +85,9 @@ export function buildMenu(gameState, player, cfg = {}, helper) {
 
     for (const unit of myEntities) {
         if (unit.destroyed || !unit.cell) continue;
+        // B11: inactive units (maintenance unpaid) get no options — the old
+        // check only skipped AP-exhausted units.
+        if (!unit.active) continue;
         if ((unit.actionPoints ?? 0) < 1) continue; // exhausted units get no options
         const def = manifestList.find(m => m.name === unit.name);
 
@@ -111,6 +114,13 @@ export function buildMenu(gameState, player, cfg = {}, helper) {
             const affordable = Object.entries(cost).every(([res, amt]) =>
                 !(amt > 0) || (player.resources?.[res] || 0) >= amt);
             if (!affordable) continue;
+            // B11: cost alone isn't enough — check there's actually a valid
+            // build site, or the option always fails and wastes a failure.
+            // Only when a real grid exists (mock/test states have none).
+            if (gameState.hexGrid && helper.findBuildCandidates) {
+                const { candidates } = helper.findBuildCandidates(gameState, unit, item);
+                if (candidates && candidates.length === 0) continue;
+            }
             push(`Build ${item} with ${entLabel(unit, player)}`,
                 { verb: 'build', actorId: unit.id, itemName: item });
         }
@@ -135,10 +145,10 @@ export function buildMenu(gameState, player, cfg = {}, helper) {
             }
         }
 
-        // Explore: units that can explore.
-        const hasExplore = unit.getActions
-            ? unit.getActions().some(a => a.name === 'Explore')
-            : false;
+        // Explore: any mobile unit can explore. The old check looked for an
+        // 'Explore' action, which no real entity has (actions are
+        // Move/Face/Attack/Repair/Build) — so the menu never offered Explore.
+        const hasExplore = helper.isMobile(unit);
         if (hasExplore) {
             push(`Explore with ${entLabel(unit, player)}`,
                 { verb: 'explore', actorId: unit.id });
@@ -157,6 +167,10 @@ export function buildMenu(gameState, player, cfg = {}, helper) {
             for (const t of cands) {
                 const d = dist(unit, t, helper);
                 if (d === 0) continue;
+                // B11: skip adjacent targets in "move towards" — the path
+                // ends on the target's occupied cell, so the move always
+                // fails and wastes one of the 4 per-turn failures.
+                if (d === 1) continue;
                 push(`Move ${entLabel(unit, player)} towards ${entLabel(t, player)} (${distLabel(d)})`,
                     { verb: 'move', actorId: unit.id, targetId: t.id });
             }
@@ -175,17 +189,8 @@ export function buildMenu(gameState, player, cfg = {}, helper) {
 
     push('End turn', { verb: 'end', actorId: null });
 
-    // Disambiguate identical labels (two identical units) with an id suffix.
-    const labelCounts = new Map();
-    for (const o of options) labelCounts.set(o.label, (labelCounts.get(o.label) || 0) + 1);
-    for (const o of options) {
-        if ((labelCounts.get(o.label) || 0) > 1) {
-            const ent = o.action.actorId ? findEntity(gameState, o.action.actorId) : null;
-            const suffix = ent ? `#${String(ent.id).slice(-4)}` : '';
-            o.label = `${o.label}${suffix ? ' ' + suffix : ''}`;
-        }
-    }
-
+    // No dedup needed: entLabel carries the entity id, so every label is
+    // unique by construction (B16's suffix hack is superseded).
     return { options };
 }
 

@@ -63,6 +63,23 @@ const activeEffects = [];
 // GLTF model caching and entity mesh map
 const modelCache = {};
 const entityMeshMap = {}; // Maps entity.id -> Three.js Group
+// L2: shared owner-ring resources — one geometry for all entities, one
+// material per owner color. Created lazily, never disposed per-entity.
+let ownerRingGeometry = null;
+const ownerRingMaterials = {};
+function getOwnerRingGeometry() {
+  if (!ownerRingGeometry) {
+    ownerRingGeometry = new THREE.RingGeometry(CONFIG.HEX_SIZE * cellSizeScale.ownerRing.inner, CONFIG.HEX_SIZE * cellSizeScale.ownerRing.outer, 16);
+    ownerRingGeometry.rotateX(-Math.PI / 2);
+  }
+  return ownerRingGeometry;
+}
+function getOwnerRingMaterial(colorHex) {
+  if (!ownerRingMaterials[colorHex]) {
+    ownerRingMaterials[colorHex] = new THREE.MeshBasicMaterial({ color: new THREE.Color(colorHex), side: THREE.DoubleSide });
+  }
+  return ownerRingMaterials[colorHex];
+}
 let gltfLoader = null;
 
 // Material caches to reuse materials for performance
@@ -244,6 +261,7 @@ export function initRenderer(canvas) {
   window.addEventListener('resize', onWindowResize);
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
+  window.addEventListener('blur', onWindowBlur);
 
   // Optional Performance Monitor (Stats.js)
   if (CONFIG.SHOW_FPS) {
@@ -694,6 +712,13 @@ function onKeyUp(event) {
   keysPressed[event.key] = false;
 }
 
+// L9: clear all held keys when the window loses focus — otherwise a key
+// held during Alt-Tab stays "pressed" (no keyup fires) and the camera
+// keeps moving.
+function onWindowBlur() {
+  for (const key of Object.keys(keysPressed)) keysPressed[key] = false;
+}
+
 function onWindowResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
@@ -992,10 +1017,31 @@ export function reconcileEntities(gameState) {
   for (const id in entityMeshMap) {
     if (!activeIds.has(id)) {
       const meshGroup = entityMeshMap[id];
-      if (meshGroup) scene.remove(meshGroup);
+      if (meshGroup) {
+        scene.remove(meshGroup);
+        // L2: dispose GPU resources — the old code removed the mesh from
+        // the scene but never freed its geometries/materials.
+        disposeEntityMesh(meshGroup);
+      }
       delete entityMeshMap[id];
     }
   }
+}
+
+/**
+ * L2: dispose geometries/materials owned by a mesh group. Model clones
+ * share geometry/material with the modelCache and must NOT be disposed —
+ * only resources created fresh in spawnEntityMesh (owner ring, fallback
+ * box) carry userData.owned.
+ */
+function disposeEntityMesh(group) {
+  group.traverse(node => {
+    if (!node.isMesh) return;
+    if (!node.userData.owned) return;
+    if (node.geometry) node.geometry.dispose();
+    const mats = Array.isArray(node.material) ? node.material : [node.material];
+    for (const m of mats) if (m) m.dispose();
+  });
 }
 
 function spawnEntityMesh(entity, gameState, x, terrainHeight, z, rotationY) {
@@ -1005,10 +1051,12 @@ function spawnEntityMesh(entity, gameState, x, terrainHeight, z, rotationY) {
 
   if (entity.owner) {
     const colorHex = entity.owner.color || '#ffffff';
-    const ringGeom = new THREE.RingGeometry(CONFIG.HEX_SIZE * cellSizeScale.ownerRing.inner, CONFIG.HEX_SIZE * cellSizeScale.ownerRing.outer, 16);
-    ringGeom.rotateX(-Math.PI / 2);
-    const ringMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(colorHex), side: THREE.DoubleSide });
+    // L2: share one ring geometry/material per owner color instead of
+    // recreating them for every spawn.
+    const ringGeom = getOwnerRingGeometry();
+    const ringMat = getOwnerRingMaterial(colorHex);
     const ringMesh = new THREE.Mesh(ringGeom, ringMat);
+    ringMesh.userData.owned = false; // shared — never dispose per-entity
     ringMesh.position.y = 0.01;
     group.add(ringMesh);
   }
@@ -1041,6 +1089,7 @@ function spawnEntityMesh(entity, gameState, x, terrainHeight, z, rotationY) {
     const color = entity.owner ? entity.owner.color : '#cccccc';
     const mat = new THREE.MeshStandardMaterial({ color: color });
     const fallbackMesh = new THREE.Mesh(geom, mat);
+    fallbackMesh.userData.owned = true; // created fresh here — dispose on removal
     fallbackMesh.position.y = 0.15;
     group.add(fallbackMesh);
   }
@@ -1055,7 +1104,10 @@ function spawnEntityMesh(entity, gameState, x, terrainHeight, z, rotationY) {
 
 export function clearEntityMeshes() {
   for (const id in entityMeshMap) {
-    if (entityMeshMap[id]) scene.remove(entityMeshMap[id]);
+    if (entityMeshMap[id]) {
+      scene.remove(entityMeshMap[id]);
+      disposeEntityMesh(entityMeshMap[id]);
+    }
   }
   for (const key in entityMeshMap) {
     delete entityMeshMap[key];
@@ -1437,8 +1489,13 @@ function unfadeResourceSlot(slot) {
  * move units or change visibility.
  */
 export function reconcileCellResources(gameState) {
+  // L3: only VISIBLE entities fade a resource — the old code counted every
+  // entity (including hidden enemies), so a faded resource told the human
+  // an unseen unit was standing on it.
   const occupied = new Set();
-  for (const e of gameState.entities || []) occupied.add(`${e.q},${e.r}`);
+  for (const e of gameState.entities || []) {
+    if (e.cell && gameState.isVisibleToHuman(e.cell)) occupied.add(`${e.q},${e.r}`);
+  }
   for (const key of Object.keys(cellResourceSlots)) {
     const cell = gameState.hexGrid.cells.get(key);
     const slots = cellResourceSlots[key];
