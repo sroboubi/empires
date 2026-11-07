@@ -37,6 +37,8 @@ let currentGameSettings = null;
 let replayRecorder = new ReplayRecorder();
 let replayPlayer = null;
 let isReplayMode = false;
+let turnAdvanceInProgress = false; // H2: guards the turn ADVANCE (endTurn), not the turn itself — endTurn returns as soon as the AI turn is kicked off (startTurn is fire-and-forget), so this is only true for the brief advance window: advancing the player, round-end, win check, kickoff. A second call in that window (double click, stale continuation) does nothing. The long AI turn itself is guarded by the Next Turn button being disabled.
+const HISTORY_ROUNDS_PER_PAGE = 5; // L9: history pagination page size
 
 const mouse = { x: 0, y: 0 };
 let selectedEntity = null;
@@ -67,6 +69,10 @@ async function onActionDone(involvedCells = null, actionDesc = '') {
   console.debug("AI action done (visible)");
   reconcileEntities(gameState);
   updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
+  // L9: refresh fog after an AI action — the old code never called
+  // updateHexFog here, so newly revealed cells stayed dark until the
+  // next turn.
+  updateHexFog(gameState);
   await new Promise(r => setTimeout(r, CONFIG.AI_ACTION_SLEEP ?? 0));
 }
 
@@ -262,6 +268,13 @@ async function init() {
 
         if (!targetAi) return;
 
+        // L9: replay mode offers Chat, and clicking it deducts an order
+        // from the replay state. No actions in replay mode.
+        if (isReplayMode) {
+          showToast('Chat is not available in replay mode.', true);
+          return;
+        }
+
         const activeP = gameState.activePlayer;
         if (!activeP || activeP.isAI) {
           showToast('You can only initiate chat during your turn.', true);
@@ -310,13 +323,26 @@ async function init() {
 
     // AI setup UI bindings (Phase 23): load definitions, then build
     // provider keys + controller/leader selectors.
+    // L8: disable START until the definitions load — clicking it early
+    // silently turned AI players into humans (aiJson.controllers empty).
+    const startBtn = document.getElementById('btn-start-game');
+    if (startBtn) startBtn.disabled = true;
     loadAiDefinitions().then(() => {
       setupAiConfigUI();
       renderSetupPlayers();
-    }).catch(e => console.warn('Failed to load AI definitions:', e));
+      if (startBtn) startBtn.disabled = false;
+    }).catch(e => {
+      console.warn('Failed to load AI definitions:', e);
+      if (startBtn) startBtn.disabled = false;
+    });
 
     // Open Setup Modal automatically on initial load, or the replay file
     // selector when REPLAY_MODE is enabled.
+    // First load is NOT closable: the flow is start a new game, then load
+    // what you want from inside the game (Shahin, 2026-11-07).
+    // TODO: consider adding a Load button to the setup modal itself, so a
+    // save can be loaded on first load without starting a throwaway game.
+    // Not implementing now (L4 revert, 2026-11-07).
     if (CONFIG.REPLAY_MODE) {
       document.getElementById('replay-mode-overlay').classList.add('active');
     } else {
@@ -342,16 +368,17 @@ function openSetupModal(canClose = true) {
   // Map size
   document.getElementById('setup-map-size').value = defaultSettings.mapSize || 64;
 
-  // Orders
-  const orders = defaultSettings.initialization?.orders || { max: 8, perTurn: 6 };
+  // Orders — L1: no hardcoded fallback; the value comes from
+  // defaultSettings.json (mistakes.md rule 3). A missing field is a
+  // config error, not something to paper over.
+  const orders = defaultSettings.initialization?.orders;
+  if (!orders) throw new Error('defaultSettings.json is missing initialization.orders');
   document.getElementById('setup-orders-max').value = orders.max;
   document.getElementById('setup-orders-perturn').value = orders.perTurn;
 
-  // Players
-  setupPlayers = JSON.parse(JSON.stringify(defaultSettings.players || [
-    { id: 1, name: 'Red Empire', color: '#ff4d4d', controller: null },
-    { id: 2, name: 'Blue Alliance', color: '#3399ff', controller: null }
-  ]));
+  // Players — L1: same, no hardcoded default players.
+  if (!defaultSettings.players) throw new Error('defaultSettings.json is missing players');
+  setupPlayers = JSON.parse(JSON.stringify(defaultSettings.players));
   renderSetupPlayers();
 
   // Resources
@@ -362,8 +389,9 @@ function openSetupModal(canClose = true) {
   populateUnitSelectOptions();
   renderSetupUnits();
 
-  // Auto-Save
-  const autoSave = defaultSettings.autoSave || { enabled: true, intervalTurns: 5, maxAutoSaves: 10 };
+  // Auto-Save — L1: no hardcoded fallback (see Orders above).
+  const autoSave = defaultSettings.autoSave;
+  if (!autoSave) throw new Error('defaultSettings.json is missing autoSave');
   document.getElementById('setup-autosave-enabled').checked = autoSave.enabled;
   document.getElementById('setup-autosave-interval').value = autoSave.intervalTurns;
   document.getElementById('setup-autosave-max').value = autoSave.maxAutoSaves;
@@ -378,16 +406,18 @@ function openSetupModal(canClose = true) {
   // Render one range-slider widget per horde unit key found in settings
   renderBarbarianHordeSliders(barbarians?.horde || {});
   updateAllRangeFills();
-  document.getElementById('setup-barbarian-spawn-frequency').value = barbarians?.spawnFrequencyTurns || 5;
-  document.getElementById('setup-barbarian-max-number').value = barbarians?.maxNumber || 20;
-  document.getElementById('setup-barbarian-max-age').value = barbarians?.maxAge || 30;
+  // L1: barbarian numbers come from the config, not hardcoded fallbacks.
+  document.getElementById('setup-barbarian-spawn-frequency').value = barbarians?.spawnFrequencyTurns ?? '';
+  document.getElementById('setup-barbarian-max-number').value = barbarians?.maxNumber ?? '';
+  document.getElementById('setup-barbarian-max-age').value = barbarians?.maxAge ?? '';
 
-  // Win Conditions
-  const winCondition = defaultSettings.winCondition || { absoluteScore: 1000, relativeScore: 2 };
+  // Win Conditions — L1: no hardcoded fallback (see Orders above).
+  const winCondition = defaultSettings.winCondition;
+  if (!winCondition) throw new Error('defaultSettings.json is missing winCondition');
   const absoluteEnabled = winCondition.absoluteScore !== undefined && winCondition.absoluteScore !== null;
   const relativeEnabled = winCondition.relativeScore !== undefined && winCondition.relativeScore !== null;
   document.getElementById('setup-win-absolute-enabled').checked = absoluteEnabled;
-  document.getElementById('setup-win-absolute-value').value = winCondition.absoluteScore || 1000;
+  document.getElementById('setup-win-absolute-value').value = winCondition.absoluteScore ?? '';
   document.getElementById('setup-win-absolute-value').disabled = !absoluteEnabled;
   document.getElementById('setup-win-relative-enabled').checked = relativeEnabled;
   document.getElementById('setup-win-relative-value').value = winCondition.relativeScore || 2;
@@ -432,10 +462,11 @@ function renderSetupPlayers() {
     if (isAI) {
       const leaderOpts = `<option value="" disabled${!leadersJson.some(l => l.name === p.name) ? ' selected' : ''}>Select leader…</option>` +
         leadersJson.map(l =>
-          `<option value="${l.name}"${p.name === l.name ? ' selected' : ''}>${l.name}</option>`).join('');
-      nameField = `<select name="leader" class="form-input leader-select" style="flex: 1;" title="${leaderTitle(p.name)}">${leaderOpts}</select>`;
+          `<option value="${escapeHTML(l.name)}"${p.name === l.name ? ' selected' : ''}>${escapeHTML(l.name)}</option>`).join('');
+      nameField = `<select name="leader" class="form-input leader-select" style="flex: 1;" title="${escapeHTML(leaderTitle(p.name))}">${leaderOpts}</select>`;
     } else {
-      nameField = `<input name="player-name" type="text" class="form-input" value="${p.name}" placeholder="Player Name" style="flex: 1;">`;
+      // L7: escape the name — a quote in it breaks the value attribute.
+      nameField = `<input name="player-name" type="text" class="form-input" value="${escapeHTML(p.name)}" placeholder="Player Name" style="flex: 1;">`;
     }
 
     row.innerHTML = `
@@ -726,8 +757,8 @@ let setupProviderKeys = {}; // { providerName: apiKey }
 async function loadAiDefinitions() {
   if (!aiJson) {
     const [aiRes, leadersRes] = await Promise.all([
-      fetch('./definitions/ai.json'),
-      fetch('./definitions/leaders.json')
+      fetch(CONFIG.AI_URL || './definitions/ai.json'),
+      fetch(CONFIG.LEADERS_URL || './definitions/leaders.json')
     ]);
     if (!aiRes.ok) throw new Error(`ai.json: HTTP ${aiRes.status}`);
     if (!leadersRes.ok) throw new Error(`leaders.json: HTTP ${leadersRes.status}`);
@@ -806,7 +837,9 @@ function buildController(key, playerName) {
   const provDef = aiJson.providers?.[cfg.provider];
   if (provDef) {
     cfg.baseUrl = provDef.url;
-    if (setupProviderKeys[cfg.provider]) cfg.apiKey = setupProviderKeys[cfg.provider];
+    // H1: the API key is NOT copied into the config — it would be
+    // serialized into IndexedDB saves and replay exports. The LLM client
+    // resolves it from sessionStorage at construction instead.
   }
   return controller;
 }
@@ -821,6 +854,10 @@ function initNumberInputSpinners() {
 
   const spinners = modal.querySelectorAll('.number-input-wrapper');
   spinners.forEach(wrapper => {
+    // M6: guard against double-binding — initNumberInputSpinners runs on
+    // every render/open, and each call added another set of listeners.
+    if (wrapper.dataset.spinnersBound) return;
+    wrapper.dataset.spinnersBound = '1';
     const input = wrapper.querySelector('input[type="number"]');
     const upBtn = wrapper.querySelector('.spinner-btn.up');
     const downBtn = wrapper.querySelector('.spinner-btn.down');
@@ -842,18 +879,9 @@ function initNumberInputSpinners() {
       input.dispatchEvent(new Event('change', { bubbles: true }));
     };
 
-    upBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      updateValue(1);
-    });
-
-    downBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      updateValue(-1);
-    });
-
+    // M6: no separate 'click' handler — mousedown already fires
+    // updateValue, so a click handler doubled every press. Long-press
+    // (mousedown + timer) is the only path.
     // Also support long-press for rapid increment/decrement
     let pressTimer = null;
     const startPress = (delta) => {
@@ -900,7 +928,7 @@ function handleStartGameClicked() {
   // Win conditions
   const winCondition = {};
   if (document.getElementById('setup-win-absolute-enabled').checked) {
-    winCondition.absoluteScore = parseInt(document.getElementById('setup-win-absolute-value').value, 10) || 1000;
+    winCondition.absoluteScore = parseInt(document.getElementById('setup-win-absolute-value').value, 10) || 500;
   }
   if (document.getElementById('setup-win-relative-enabled').checked) {
     winCondition.relativeScore = parseFloat(document.getElementById('setup-win-relative-value').value) || 2;
@@ -909,7 +937,9 @@ function handleStartGameClicked() {
   // Phase 23.5: provider keys were captured live into setupProviderKeys.
 
   const settings = {
-    mapSize: parseInt(document.getElementById('setup-map-size').value, 10),
+    // L9: parseInt of an empty/invalid select value is NaN — fall back to
+    // the config map size instead of starting a NaN-sized map.
+    mapSize: parseInt(document.getElementById('setup-map-size').value, 10) || defaultSettings.mapSize || 64,
     players: setupPlayers.map((p, i) => {
       return {
         id: i + 1,
@@ -966,20 +996,23 @@ function startNewGame(settings) {
   hideContextMenu();
   clearEntityMeshes();
 
-  const button = document.getElementById('btn-next-turn');
-  button.disabled = false;
-  button.textContent = 'Next Turn';
-
   gameState = new GameState({
     onActionDone,
     onOpenChatModal: (humanPlayer, aiPlayer) => openChatModal(humanPlayer, aiPlayer),
     onCloseChatModal: () => closeChatModal(),
+    // M5: autosave at the clean turn boundary, not after the next AI starts.
+    onCleanBoundary: () => checkAutoSave(),
   });
   gameState.generateMap(settings.mapSize, manifestData.terrains, manifestData);
 
-  // The browser drives turns: pass nextTurn as the continuation so the
-  // initial AI player's turn runs and chains exactly as before.
-  gameState.initializeManifest(manifestData, settings, () => nextTurn());
+  // The browser drives turns: setup starts no turn (see initializeManifest),
+  // so kick off the initial player's turn here, chained into nextTurn.
+  gameState.initializeManifest(manifestData, settings);
+
+  // H2/H3: set the turn buttons from the active player AFTER init — the
+  // old code enabled Next Turn unconditionally, so during a player-0 AI
+  // turn the user could click it and double-advance.
+  setTurnButtons();
 
   // Start recording AFTER initializeManifest so initialState contains the
   // generated players and starting units (otherwise owners/entities are lost).
@@ -991,6 +1024,10 @@ function startNewGame(settings) {
   } else {
     gameState.replayRecorder = null;
   }
+
+  // Start the initial player's turn now that recording is set up, chained
+  // into nextTurn so AI turns keep advancing.
+  gameState.startTurn(() => nextTurn());
 
   setMapCameraLimits(settings.mapSize);
   drawGrid(gameState);
@@ -1062,11 +1099,11 @@ async function renderSavesList() {
       item.innerHTML = `
         <div style="display: flex; flex-direction: column; gap: 4px;">
           <div style="display: flex; align-items: center; gap: 8px;">
-            <strong style="font-size: 14px;">${save.name}</strong>
+            <strong style="font-size: 14px;">${escapeHTML(save.name)}</strong>
             <span class="save-badge ${badgeClass}">${badgeText}</span>
           </div>
           <div style="font-size: 11px; color: var(--text-muted);">
-            Round ${save.turnNumber || 1} • Saved on ${dateStr}
+            Round ${save.turnNumber || 1} • Saved on ${escapeHTML(dateStr)}
           </div>
         </div>
         <div style="display: flex; gap: 6px;">
@@ -1142,9 +1179,26 @@ async function doLoadGame(saveName) {
     onActionDone,
     onOpenChatModal: (humanPlayer, aiPlayer) => openChatModal(humanPlayer, aiPlayer),
     onCloseChatModal: () => closeChatModal(),
+    // M5: autosave at the clean turn boundary, not after the next AI starts.
+    onCleanBoundary: () => checkAutoSave(),
   });
     gameState.manifestData = manifestData;
     gameState.deserialize(record.data);
+
+    // H4: restore the settings the save was made with — the old code never
+    // set currentGameSettings, so auto-save and other setting-dependent
+    // behaviour used stale (or null) settings after a load.
+    currentGameSettings = gameState.settings || null;
+
+    // H4: a save taken during round-end has activePlayerIndex -1 (barbarian
+    // phase) — loading it left no active player. Advance to player 0.
+    // NOTE: unreachable for saves taken after the H3 change — manual saves
+    // only happen during human turns (index >= 0) and autosaves fire at the
+    // clean boundary, after the index is restored to 0. Kept for pre-fix
+    // saves that captured -1.
+    if (gameState.activePlayerIndex < 0) {
+      gameState.activePlayerIndex = 0;
+    }
 
     // Restart recording after a load: deserialize() builds a fresh GameState
     // whose replayRecorder is null, so without this no further actions record.
@@ -1159,6 +1213,17 @@ async function doLoadGame(saveName) {
     reconcileEntities(gameState);
     buildCellResources(gameState);
     updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
+
+    // H4: resume the active player — the old code never restarted an AI's
+    // turn after a load, so the game soft-locked (AI never moves) or
+    // skipped the AI entirely. Set the turn buttons from the active player too.
+    // NOTE: manual saves never need this (the active player is human), but
+    // autosaves capture the clean boundary with player 0 active before
+    // their turn starts — so this still fires when player 0 is an AI.
+    setTurnButtons();
+    if (gameState.activePlayer && gameState.activePlayer.isAI && !gameState.gameOver) {
+      gameState.startTurn(() => nextTurn());
+    }
 
     // Focus camera on center of mass of active player's entities
     if (gameState.activePlayer && gameState.entities.length > 0) {
@@ -1212,6 +1277,8 @@ async function startReplayMode(replayData) {
     onActionDone,
     onOpenChatModal: (humanPlayer, aiPlayer) => openChatModal(humanPlayer, aiPlayer),
     onCloseChatModal: () => closeChatModal(),
+    // M5: autosave at the clean turn boundary, not after the next AI starts.
+    onCleanBoundary: () => checkAutoSave(),
   });
   gameState.settings = replayData.settings || {};
   gameState.manifestData = manifestData;
@@ -1302,6 +1369,25 @@ function updateReplayUI(state) {
 /**
  * Next Turn: triggers endTurn on gameState, cycling to next player turn and updating Fog of War.
  */
+// H3: Save/Load are enabled exactly when Next Turn is — during a human
+// turn (or when the game is over, when nothing is running). A load during
+// an AI turn would replace gameState while the old AI's continuation is
+// pending, and a save would capture a partial AI turn. This replaces the
+// old gs === gameState continuation check: with no load possible mid-turn,
+// there is nothing for it to guard.
+function setTurnButtons() {
+  const aiTurn = !!(gameState && !gameState.gameOver && gameState.activePlayer && gameState.activePlayer.isAI);
+  const nextBtn = document.getElementById('btn-next-turn');
+  if (nextBtn) {
+    nextBtn.disabled = aiTurn;
+    nextBtn.textContent = aiTurn ? 'Running AI...' : 'Next Turn';
+  }
+  const saveBtn = document.getElementById('btn-save-game');
+  if (saveBtn) saveBtn.disabled = aiTurn;
+  const loadBtn = document.getElementById('btn-load-game');
+  if (loadBtn) loadBtn.disabled = aiTurn;
+}
+
 export async function nextTurn() {
   if (isReplayMode) return;
   if (gameState.gameOver) {
@@ -1309,9 +1395,28 @@ export async function nextTurn() {
     return;
   }
 
-  const button = document.getElementById('btn-next-turn');
-  button.disabled = true;
-  button.textContent = 'Running AI...';
+  // H2: guard against double advance — a second call while endTurn is
+  // still processing does nothing.
+  if (turnAdvanceInProgress) return;
+  turnAdvanceInProgress = true;
+
+  // H3: capture this turn's gameState. No gs === gameState check — Save/Load
+  // are disabled during AI turns (setTurnButtons), so no load can replace
+  // gameState while a continuation is pending.
+  const gs = gameState;
+  const continuation = () => {
+    if (!gameState.gameOver) nextTurn();
+  };
+
+  // H3: disable Save/Load with Next Turn — no save/load during the advance
+  // or the AI turn that follows. (The active player is still the human who
+  // clicked, so setTurnButtons() can't be used here — it reads the active
+  // player, which hasn't advanced yet.)
+  for (const id of ['btn-next-turn', 'btn-save-game', 'btn-load-game']) {
+    const b = document.getElementById(id);
+    if (b) b.disabled = true;
+  }
+  document.getElementById('btn-next-turn').textContent = 'Running AI...';
 
   deselectEntity();
   hideContextMenu();
@@ -1319,42 +1424,48 @@ export async function nextTurn() {
   // this updates the gameState.activePlayer and increments the round if needed.
   // The browser drives turn advancement: nextTurn is the continuation
   // that runs when an AI player's turn settles (see Player.step).
-  await gameState.endTurn(() => nextTurn());
+  await gs.endTurn(continuation);
+  turnAdvanceInProgress = false;
 
-  // enable the button again if the next player is human
-  if (gameState.activePlayer && !gameState.activePlayer.isAI) {
-    button.disabled = false;
-    button.textContent = 'Next Turn';
-  }
+  // Re-enable the turn buttons if the next player is human (setTurnButtons
+  // reads the new active player; an AI turn keeps them disabled).
+  setTurnButtons();
 
-  updateHexFog(gameState);
-  reconcileEntities(gameState);
-  reconcileCellResources(gameState);
-  updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
+  updateHexFog(gs);
+  reconcileEntities(gs);
+  reconcileCellResources(gs);
+  updatePlayersUI(gs, { onContextMenu: showPlayerContextMenu });
 
   // Focus camera on center of mass of active player's entities
-  if (gameState.activePlayer && gameState.entities.length > 0 &&
-    ((gameState.activePlayer.isAI && CONFIG.PAN_CAMERA_ON_AI_TURN) ||
-      (!gameState.activePlayer.isAI && CONFIG.PAN_CAMERA_ON_HUMAN_TURN))) {
-    const playerEntities = gameState.activePlayer.getEntities(gameState);
+  if (gs.activePlayer && gs.entities.length > 0 &&
+    ((gs.activePlayer.isAI && CONFIG.PAN_CAMERA_ON_AI_TURN) ||
+      (!gs.activePlayer.isAI && CONFIG.PAN_CAMERA_ON_HUMAN_TURN))) {
+    const playerEntities = gs.activePlayer.getEntities(gs);
     if (playerEntities.length > 0) {
       focusCameraOnEntities(playerEntities);
     }
   }
 
-  showToast(`Turn passed to ${gameState.activePlayer ? gameState.activePlayer.name : ''} (Round ${gameState.currentRound})`);
+  showToast(`Turn passed to ${gs.activePlayer ? gs.activePlayer.name : ''} (Round ${gs.currentRound})`);
 
   // Chime when the turn comes back to a human player.
-  if (gameState.activePlayer && !gameState.activePlayer.isAI) {
+  if (gs.activePlayer && !gs.activePlayer.isAI) {
     audio.playUi('turn');
   }
 
-  // Check auto-save condition
-  checkAutoSave();
+  // M5: autosave now fires from the onCleanBoundary hook inside endTurn
+  // (round-end done, next turn not started) — not here, where the next AI
+  // has already begun acting.
 
   // Check win conditions (pure check on GameState; render the modal here)
-  const win = gameState.checkWinConditions();
-  if (win) showVictoryModal(win.winner, win.reasons);
+  const win = gs.checkWinConditions();
+  if (win) {
+    showVictoryModal(win.winner, win.reasons);
+    // L9: after a victory the button was left disabled reading
+    // "Running AI..." — reset it so the state isn't confusing.
+    button.disabled = false;
+    button.textContent = 'Next Turn';
+  }
 }
 
 async function checkAutoSave() {
@@ -1379,10 +1490,10 @@ function showVictoryModal(player, reasons) {
   const messageDiv = document.getElementById('victory-message');
 
   messageDiv.innerHTML = `
-    <div style="font-size: 24px; font-weight: 700; color: ${player.color}; margin-bottom: 12px;">${player.name.toUpperCase()} WINS!</div>
+    <div style="font-size: 24px; font-weight: 700; color: ${player.color}; margin-bottom: 12px;">${escapeHTML(player.name.toUpperCase())} WINS!</div>
     <div style="font-size: 14px; color: var(--text-muted); margin-bottom: 16px;">Round ${gameState.currentRound}</div>
     <div style="text-align: left; font-size: 13px; color: var(--text-main);">
-      ${reasons.map(r => `<div style="margin: 8px 0; padding: 8px; background: rgba(52, 152, 219, 0.1); border-radius: 4px;">${r}</div>`).join('')}
+      ${reasons.map(r => `<div style="margin: 8px 0; padding: 8px; background: rgba(52, 152, 219, 0.1); border-radius: 4px;">${escapeHTML(r)}</div>`).join('')}
     </div>
   `;
 
@@ -1431,14 +1542,19 @@ function renderChatMessages() {
   if (!history || history.length === 0) {
     container.innerHTML = `
       <div style="color: var(--text-muted); font-size: 13px; text-align: center; margin: auto; padding: 20px;">
-        No diplomatic correspondence on record. Send a message to open negotiations with ${currentChatSession.aiPlayer.name}.
+        No diplomatic correspondence on record. Send a message to open negotiations with ${escapeHTML(currentChatSession.aiPlayer.name)}.
       </div>
     `;
     return;
   }
 
   container.innerHTML = history.map(msg => {
-    const isHuman = msg.sender === currentChatSession.humanPlayer.name;
+    // L6: identify the human by player id, not name — a human who types a
+    // leader's name used to see every message rendered as their own.
+    // (senderId is absent in pre-fix saves; fall back to the name there.)
+    const isHuman = msg.senderId != null
+      ? msg.senderId === currentChatSession.humanPlayer.id
+      : msg.sender === currentChatSession.humanPlayer.name;
     const authorColor = isHuman ? 'var(--accent-color)' : currentChatSession.aiPlayer.color;
     const timeStr = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : '';
     const bubbleClass = isHuman ? 'chat-msg chat-msg-sent' : 'chat-msg chat-msg-received';
@@ -1499,23 +1615,29 @@ async function closeChatModal() {
   overlay.classList.remove('active');
 
   const { humanPlayer, aiPlayer, resolvePromise } = currentChatSession;
-  if (aiPlayer && humanPlayer) {
-    // Requirement 7: When human exits chat, allow the AI player to add a note to summarize the chat
-    const mgr = await aiPlayer.getAiManager();
-    if (mgr) await mgr.summarizeChatAndAddNote(humanPlayer);
-  }
+  // L6: try/finally — a throwing summarize used to hang the AI turn
+  // forever (the promise never resolved). The session always resets.
+  try {
+    if (aiPlayer && humanPlayer) {
+      // Requirement 7: When human exits chat, allow the AI player to add a note to summarize the chat
+      const mgr = await aiPlayer.getAiManager();
+      if (mgr) await mgr.summarizeChatAndAddNote(humanPlayer);
+    }
+  } catch (e) {
+    console.warn('Chat summary failed (non-fatal):', e);
+  } finally {
+    updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
 
-  updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
-
-  if (resolvePromise) {
-    resolvePromise();
+    if (resolvePromise) {
+      resolvePromise();
+    }
+    currentChatSession = {
+      humanPlayer: null,
+      aiPlayer: null,
+      resolvePromise: null,
+      isWaitingForAi: false
+    };
   }
-  currentChatSession = {
-    humanPlayer: null,
-    aiPlayer: null,
-    resolvePromise: null,
-    isWaitingForAi: false
-  };
 }
 
 async function sendChatMessage() {
@@ -1530,6 +1652,11 @@ async function sendChatMessage() {
   const { humanPlayer, aiPlayer } = currentChatSession;
   if (!humanPlayer || !aiPlayer) return;
 
+  // L6: capture this session — the modal may be closed while the reply is
+  // pending, and the reply must not touch the (possibly new) session's
+  // waiting flag or UI state.
+  const session = currentChatSession;
+
   // Add human message to gameState
   gameState.addChatMessage(humanPlayer, aiPlayer, text);
   input.value = '';
@@ -1541,7 +1668,7 @@ async function sendChatMessage() {
   sendBtn.disabled = true;
   statusIndicator.innerHTML = `
     <span style="display: inline-block; animation: pulse 1.5s infinite;">⏳</span>
-    <span>${aiPlayer.name} is formulating a response...</span>
+    <span>${escapeHTML(aiPlayer.name)} is formulating a response...</span>
   `;
 
   try {
@@ -1551,12 +1678,16 @@ async function sendChatMessage() {
 
       // Add AI message to gameState
       gameState.addChatMessage(aiPlayer, humanPlayer, reply.content);
+      // L6: the reply belongs in the history even if the modal closed
+      // while it was pending — but nothing below may touch the UI or the
+      // session if this is no longer the live one.
+      if (currentChatSession !== session) return;
       renderChatMessages();
 
       if (reply.ended) {
         // Summary note is added by closeChatModal() when the human closes the
         // modal — summarizing here too would double the note and the LLM call.
-        statusIndicator.innerHTML = `<span style="color: #f1c40f;">[ ${aiPlayer.name} has concluded the negotiations. ]</span>`;
+        statusIndicator.innerHTML = `<span style="color: #f1c40f;">[ ${escapeHTML(aiPlayer.name)} has concluded the negotiations. ]</span>`;
         updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
       } else {
         statusIndicator.innerHTML = '';
@@ -1567,11 +1698,15 @@ async function sendChatMessage() {
     }
   } catch (err) {
     console.error('Error generating AI chat reply:', err);
-    statusIndicator.innerHTML = `<span style="color: #e74c3c;">Failed to get response from ${aiPlayer.name}.</span>`;
+    if (currentChatSession !== session) return;
+    statusIndicator.innerHTML = `<span style="color: #e74c3c;">Failed to get response from ${escapeHTML(aiPlayer.name)}.</span>`;
     input.disabled = false;
     sendBtn.disabled = false;
   } finally {
-    currentChatSession.isWaitingForAi = false;
+    // L6: only clear the flag on the session that actually waited — a stale
+    // reply used to clear a NEW session's flag (and re-enable its input)
+    // while its own reply was still pending.
+    if (currentChatSession === session) currentChatSession.isWaitingForAi = false;
   }
 }
 
@@ -1657,7 +1792,7 @@ function updatePlayersUI(gameState, callbacks = {}) {
       <div class="flex-row-between">
         <div class="flex-row">
           <span class="player-color-dot" style="background-color: ${player.color};"></span>
-          <strong style="font-size: 14px; color: ${isActive ? '#ffffff' : 'var(--text-muted)'};">${player.name} ${isActive ? '◀ ACTIVE' : ''}</strong>
+          <strong style="font-size: 14px; color: ${isActive ? '#ffffff' : 'var(--text-muted)'};">${escapeHTML(player.name)} ${isActive ? '◀ ACTIVE' : ''}</strong>
         </div>
         <span class="profile-link">📊 Profile</span>
       </div>
@@ -1884,8 +2019,8 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
     // Get all rounds that have history (newest first)
     const allRounds = Array.from(player.history.keys()).sort((a, b) => b - a);
 
-    // Pagination settings - fixed 5 rounds per page
-    const roundsPerPage = 5;
+    // Pagination settings — L9: was a magic 5 buried in the function.
+    const roundsPerPage = HISTORY_ROUNDS_PER_PAGE;
     const currentPage = parseInt(sessionStorage.getItem('historyCurrentPage') || '0', 10);
     const totalPages = Math.ceil(allRounds.length / roundsPerPage);
     const validPage = Math.max(0, Math.min(currentPage, totalPages - 1));
@@ -1923,11 +2058,11 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
           historyEntriesHTML += `
             <div class="history-entry" style="font-size: 11px; padding: 6px 8px; background: rgba(255,255,255,0.03); border-radius: 4px; border-left: 3px solid ${categoryColor};">
               <div class="flex-row-between">
-                <span style="color: ${categoryColor}; font-weight: 600; text-transform: uppercase; font-size: 10px;">${entry.category}</span>
-                <span class="text-muted-tiny">${time}</span>
+                <span style="color: ${categoryColor}; font-weight: 600; text-transform: uppercase; font-size: 10px;">${escapeHTML(entry.category)}</span>
+                <span class="text-muted-tiny">${escapeHTML(time)}</span>
               </div>
               <div class="history-entry-text">
-                ${entry.details}
+                ${escapeHTML(entry.details)}
               </div>
             </div>
           `;
@@ -1967,7 +2102,7 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
   const titleHeader = isCompact ? `
     <div class="flex-row flex-row-spaced">
       <span class="player-color-dot" style="background-color: ${player.color};"></span>
-      <strong class="profile-title">${player.name} Resource Profile</strong>
+      <strong class="profile-title">${escapeHTML(player.name)} Resource Profile</strong>
     </div>
   ` : '';
 
@@ -2026,6 +2161,8 @@ function openProfileModal(player, gameState) {
    ========================================================================== */
 
 function handleLeftClick(event) {
+  // M4: no actions after the game is over.
+  if (gameState.gameOver) return;
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
@@ -2085,23 +2222,32 @@ function handleRightClick(event) {
   }
 
   const targetCell = gameState.hexGrid.cells.get(`${hovered.q},${hovered.r}`);
-  const targetEntity = gameState.getEntityAt(hovered.q, hovered.r);
+  // M2: only pass the target entity if the cell is visible to a human —
+  // the old code passed any entity (including hidden enemies) to
+  // action.canDo, whose reason text leaked the enemy's presence, type
+  // and HP, and allowed attacking unseen units.
+  const targetEntity = gameState.isVisibleToHuman(hovered)
+    ? gameState.getEntityAt(hovered.q, hovered.r)
+    : null;
 
   const candidateActions = selectedEntity.getActions();
   showContextMenu(event.clientX, event.clientY, selectedEntity, candidateActions, targetCell, targetEntity);
 }
 
-function selectEntity(entity) {
+function selectEntity(entity, quiet = false) {
   selectedEntity = entity;
-  audio.playEntitySfx(entity, 'select');
+  // L9: quiet re-selects (after an action) skip the SFX/toast so they
+  // don't overwrite the action result.
+  if (!quiet) {
+    audio.playEntitySfx(entity, 'select');
+    showToast(`Selected ${entity.name.toUpperCase()}`);
+  }
   const cell = entity.cell || gameState.hexGrid.cells.get(`${entity.q},${entity.r}`);
 
   if (cell) {
     const { x, z } = HexGrid.axialToPixel(cell.q, cell.r);
     setEntitySelectionHighlight(x, cell.terrain ? cell.terrain.height : 1.0, z);
   }
-
-  showToast(`Selected ${entity.name.toUpperCase()}`);
 }
 
 function deselectEntity() {
@@ -2188,6 +2334,12 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
         ev.stopPropagation();
         hideContextMenu();
 
+        // M4: no actions after the game is over.
+        if (gameState.gameOver) {
+          showToast('Game is over. Start a new game.', true);
+          return;
+        }
+
         if (!isPossible) {
           showToast(check.reason || 'Action cannot be performed.', true);
           return;
@@ -2214,7 +2366,10 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
         if (selectedEntity && !gameState.entities.includes(selectedEntity)) {
           deselectEntity();
         } else if (selectedEntity) {
-          selectEntity(selectedEntity);
+          // L9: re-select quietly — the full selectEntity plays the select
+          // SFX and shows a "Selected X" toast, overwriting the action
+          // result toast shown just above.
+          selectEntity(selectedEntity, true);
         }
       });
       actionsDiv.appendChild(btn);
@@ -2303,8 +2458,12 @@ function onMouseMove(event) {
   const activePlayer = gameState.activePlayer;
 
   if (hovered) {
-    const isExplored = CONFIG.SHOW_ALL || (activePlayer ? !activePlayer.isAI && activePlayer.isExplored(hovered.q, hovered.r) : true);
-    const isVisible = CONFIG.SHOW_ALL || (activePlayer ? !activePlayer.isAI && activePlayer.isVisible(hovered.q, hovered.r) : true);
+    // M1: use the renderer's POV (gameState.isVisibleToHuman /
+    // isExploredByHuman) — the old code fell back to `true` when there was
+    // no active player (round-end, activePlayerIndex -1), leaking full
+    // entity info for seconds each round.
+    const isExplored = CONFIG.SHOW_ALL || gameState.isExploredByHuman(hovered);
+    const isVisible = CONFIG.SHOW_ALL || gameState.isVisibleToHuman(hovered);
 
     highlightCell(hovered.q, hovered.r, isExplored ? hovered.terrain.height : 3.0);
 

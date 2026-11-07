@@ -38,7 +38,6 @@ const DEFAULT_AI_CONFIG = {
     threatRadius: 3,
     opportunisticRange: 10,
     opportunisticEnemyRadius: 5,
-    opportunisticPowerRatio: 1.3,
     offensivePowerRatio: 1.05,
     maxProductionSteps: 20,
     maxProductionDepth: 4,
@@ -327,27 +326,12 @@ export class AdaptiveManager extends BaseManager {
             || this.gameState?.settings?.initialization?.startingResources
             || {};
 
-        // Entity.step() only grants yields while health > 95%. getResourceProfile()
-        // does not apply that rule, so subtract yields from damaged active entities
-        // to avoid treating a disabled farm/mine as productive income.
-        const effectiveTotalYields = { ...(profile.totalYields || {}) };
-        const effectiveNetIncome = { ...(profile.netIncome || {}) };
-        for (const entity of this.getActiveEntities()) {
-            const maxHealth = asNumber(entity.maxHealth);
-            if (maxHealth <= 0) continue;
-            if (asNumber(entity.health) > maxHealth * 0.95) continue;
-            for (const [res, amount] of Object.entries(entity.yields || {})) {
-                if (res === ORDERS_RESOURCE) continue;
-                if (asNumber(amount) <= 0) continue;
-                effectiveTotalYields[res] = Math.max(0, asNumber(effectiveTotalYields[res]) - asNumber(amount));
-                effectiveNetIncome[res] = asNumber(effectiveNetIncome[res]) - asNumber(amount);
-            }
-        }
-        const effectiveProfile = {
-            ...profile,
-            totalYields: effectiveTotalYields,
-            netIncome: effectiveNetIncome,
-        };
+        // B (Shahin, 2026-11-05): no manual yield adjustment here anymore.
+        // getResourceProfile() already excludes entities that can't yield
+        // (damaged or inactive) via Entity.canYield(), so subtracting their
+        // yields again double-counted — a healthy farm plus a damaged farm
+        // read as zero income. totalYields is the actual income as-is.
+        const effectiveProfile = { ...profile };
 
         const resourceKeys = new Set([
             ...Object.keys(stock),
@@ -434,12 +418,21 @@ export class AdaptiveManager extends BaseManager {
         const weights = this.computeWeights(directive);
 
         if (critical.length > 0 || deficits.length > 0) {
-            this.helper.aiLog(
-                this.player,
-                'econ',
-                `Resource pressure | Critical: [${critical.map(info => `${info.res}(stock=${info.stock}, net=${info.net}, turns=${Number.isFinite(info.turnsRemaining) ? info.turnsRemaining : 'inf'})`).join(', ') || 'none'}] `
-                + `| Deficit: [${deficits.map(info => `${info.res}(stock=${info.stock}, net=${info.net}, turns=${Number.isFinite(info.turnsRemaining) ? info.turnsRemaining : 'inf'})`).join(', ') || 'none'}]`
-            );
+            // B15: analyzeEconomy runs every action step — only log when
+            // the pressure actually changed, not the same line each time.
+            const signature = JSON.stringify({
+                c: critical.map(i => [i.res, i.stock, i.net]),
+                d: deficits.map(i => [i.res, i.stock, i.net]),
+            });
+            if (this.turnState.lastPressureLog !== signature) {
+                this.turnState.lastPressureLog = signature;
+                this.helper.aiLog(
+                    this.player,
+                    'econ',
+                    `Resource pressure | Critical: [${critical.map(info => `${info.res}(stock=${info.stock}, net=${info.net}, turns=${Number.isFinite(info.turnsRemaining) ? info.turnsRemaining : 'inf'})`).join(', ') || 'none'}] `
+                    + `| Deficit: [${deficits.map(info => `${info.res}(stock=${info.stock}, net=${info.net}, turns=${Number.isFinite(info.turnsRemaining) ? info.turnsRemaining : 'inf'})`).join(', ') || 'none'}]`
+                );
+            }
         }
 
         return { profile: effectiveProfile, stock, resources, critical, deficits, negative, lowStock, surpluses, urgent, weights };
@@ -635,6 +628,8 @@ export class AdaptiveManager extends BaseManager {
         const cost = meta?.spawnCost || {};
         const costText = Object.entries(stripOrders(cost)).map(([res, amount]) => `${amount} ${res}`).join(', ') || 'free';
         const start = { q: builder.q, r: builder.r };
+        // Snapshot entity IDs so we can find the newly built entity's cell.
+        const beforeIds = new Set(this.getActiveEntities().map(e => e.id));
 
         this.helper.aiLog(
             this.player,
@@ -646,12 +641,16 @@ export class AdaptiveManager extends BaseManager {
         const result = this.helper.build(this.gameState, builder, targetName);
         const used = ordersUsedFrom(result);
         if (used > 0) {
-            involvedCells.push(start, builder.cell);
+            // B15: log the BUILT cell, not the builder's cell — the UI
+            // refreshes involvedCells, and the built entity is adjacent.
+            const built = this.getActiveEntities().find(e => !beforeIds.has(e.id) && e.name === targetName);
+            const builtCell = built ? { q: built.q, r: built.r } : builder.cell;
+            involvedCells.push(start, builtCell);
             this.helper.aiLog(
                 this.player,
                 category,
                 `Build result | ${builder.name}#${String(builder.id).slice(-4)} -> ${this.helper.camelToTitle(targetName)} `
-                + `at (${builder.cell?.q},${builder.cell?.r}) | Orders used: ${used} | ${result?.result?.message || 'done'}`
+                + `at (${builtCell?.q},${builtCell?.r}) | Orders used: ${used} | ${result?.result?.message || 'done'}`
             );
         }
         return used;
@@ -741,7 +740,16 @@ export class AdaptiveManager extends BaseManager {
                     `resolve ${need.res} ${need.status} (stock=${need.stock}, net=${need.net}, target producer=${this.helper.camelToTitle(producer.name)}); building ${chainText}`,
                     involvedCells
                 );
-                if (used > 0) return true;
+                if (used > 0) {
+                    // B13: if this was a prerequisite step, reserve the final
+                    // producer's cost so proactive growth doesn't spend it
+                    // before the chain completes.
+                    if (step.finalTarget && step.finalTarget !== step.targetName) {
+                        const finalCost = this.manifestEntities[step.finalTarget]?.spawnCost || {};
+                        this.reserveCost(finalCost);
+                    }
+                    return true;
+                }
             }
         }
 
@@ -805,7 +813,9 @@ export class AdaptiveManager extends BaseManager {
 
     getStance(ownerId) {
         const stanceMap = this.turnState.directive?.stance || {};
-        if (ownerId === null || ownerId === undefined) return 'neutral';
+        // Ownerless entities are barbarians: treat the stance toward them
+        // as defensive — engage if they come within threat range.
+        if (ownerId === null || ownerId === undefined) return 'defensive';
         return stanceMap[ownerId] || stanceMap[String(ownerId)] || 'neutral';
     }
 
@@ -900,6 +910,13 @@ export class AdaptiveManager extends BaseManager {
         if (options.emergency) {
             const nonBuilders = own.filter(entity => !this.helper.isBuilder(entity));
             pool = dedicated.length > 0 ? dedicated : (nonBuilders.length > 0 ? nonBuilders : own);
+            // Emergency defence only pulls nearby units — a unit 10+ hexes
+            // away can't help with a threat here now. (B2's canAttackTarget
+            // check was reverted: helper.attack already closes distance or
+            // burns nothing, so the check only removed useful progress.)
+            pool = pool.filter(entity =>
+                this.helper.distance(entity, target) <= this.config.opportunisticRange
+            );
         } else {
             const nonSupport = own.filter(entity =>
                 !this.helper.isBuilder(entity) && !this.helper.isRepairer(entity)
@@ -1031,17 +1048,19 @@ export class AdaptiveManager extends BaseManager {
             if (nearestOwn > this.config.threatRadius * 2) return false;
         }
 
+        // B1: the construct branch used to return before the requireKill
+        // check, so one swordsman qualified against any farm/mine (construct
+        // power is armor×10, tiny vs a unit). Apply the same kill threshold
+        // as for units — an opportunistic attack must be able to finish the
+        // target, not just out-power it 0.5x.
         if (target.isConstruct) {
-            return localPower >= enemyPower * 1.1 && localPower >= targetPower * 0.5;
+            const killRatio = requireKill ? 1.2 : 0.5;
+            return localPower >= enemyPower * 1.1 && localPower >= targetPower * killRatio;
         }
 
         if (requireKill && localPower < targetPower * 1.2) return false;
         return localPower >= enemyPower * powerRatio
             && localPower >= targetPower * (requireKill ? 1.2 : 0.8);
-    }
-
-    isSafeOpportunity(target, foreign) {
-        return this.isFavorableEngagement(target, foreign, this.config.opportunisticPowerRatio, true);
     }
 
     hasOffensiveAdvantage(target, foreign) {
@@ -1097,10 +1116,13 @@ export class AdaptiveManager extends BaseManager {
                 ? nearestOwn <= this.config.threatRadius
                 : (stance === 'defensive' && nearestOwn <= this.config.threatRadius);
             const alliedThreat = alliedEntities.length > 0 && nearestAlly <= targetReach;
+            // B9: a hostile-stance enemy within threat radius is NOT an
+            // automatic threat — it must go through hasOffensiveAdvantage
+            // (the hostileStance branch below). Auto-allowing it skipped the
+            // force-balance check entirely (mistakes.md #13 regression).
             const isThreat = attackerDamage > 0
                 || proximityThreat
-                || alliedThreat
-                || (hostileStance && nearestOwn <= this.config.threatRadius);
+                || alliedThreat;
 
             let allowed = false;
             let reason = '';
@@ -1116,11 +1138,11 @@ export class AdaptiveManager extends BaseManager {
             } else if (stance === 'defensive') {
                 allowed = nearestOwn <= this.config.threatRadius + 2;
                 reason = 'defensive engagement range';
-            } else if (stance === 'caution') {
+            } else if (stance === 'caution' || stance === 'neutral') {
+                // Neutral is below caution: no special targeting — never
+                // initiate an attack. (Retaliation/defense still apply via
+                // the isThreat branch above, same as caution.)
                 allowed = false;
-            } else if (this.isSafeOpportunity(target, foreign)) {
-                allowed = true;
-                reason = 'safe opportunity';
             }
 
             if (!allowed) continue;
@@ -1375,7 +1397,10 @@ export class AdaptiveManager extends BaseManager {
                 + `| Target: ${target.name}#${String(target.id).slice(-4)} (${target.owner?.name || 'Neutral'}) at (${target.q},${target.r}) `
                 + `| HP: ${Math.round(target.health)}/${target.maxHealth}`
             );
-            const result = this.helper.support(this.gameState, repairer, target, 'Repair', 1);
+            // B7: maxOrders 2, not 1 — with 1 order, support() could move the
+            // repairer adjacent but never repair in the same call, so the unit
+            // ping-ponged between retreat (step 4, outranks repair) and repair.
+            const result = this.helper.support(this.gameState, repairer, target, 'Repair', 2);
             const used = ordersUsedFrom(result);
             if (used > 0) {
                 involvedCells.push(from, repairer.cell);
@@ -1628,7 +1653,9 @@ export class AdaptiveManager extends BaseManager {
         for (const builder of own) {
             if (!this.helper.isBuilder(builder)) continue;
             if (this.getBuildCharges(builder) <= 0) continue;
-            if (asNumber(builder.actionPoints, 0) <= 0) continue;
+            // B15: build costs 1 AP — a builder with 0 < AP < 1 can never
+            // build, but was retried up to 12× per iteration.
+            if (asNumber(builder.actionPoints, 0) < 1) continue;
 
             for (const rawTarget of this.getBuilderBuildables(builder)) {
                 const targetName = canonicalKey(this.manifestEntities, rawTarget);
@@ -1803,7 +1830,11 @@ export class AdaptiveManager extends BaseManager {
             involvedCells.push(start, builder.cell);
         }
 
-        if (this.player.orders <= ordersUsed) return ordersUsed;
+        // B14: check REMAINING orders, not orders-used-so-far. The old check
+        // compared live player.orders against the local ordersUsed count, so
+        // after a move (1 spent, 1 left) it read 1 <= 1 and returned without
+        // building, even though an order remained.
+        if (this.player.orders <= 0) return ordersUsed;
         if (this.helper.distance(builder, best.cell) !== 1) return ordersUsed;
 
         const check = buildAction.canDo(best.cell, null);
@@ -1930,7 +1961,13 @@ export class AdaptiveManager extends BaseManager {
             if (options.goalOnly) return false;
         }
 
-        const startCell = this.getStartCell();
+        // B8: measure direction stats from the EXPLORER's cell, not the
+        // player's start coord — the old code picked a direction relative to
+        // home, but the explorer moves relative to where it stands, so the
+        // target hopped every turn as the unit moved.
+        const startCell = explorers.length > 0
+            ? { q: explorers[0].q, r: explorers[0].r }
+            : this.getStartCell();
         const stats = this.getUnexploredDirectionStats(startCell);
         const hasUnexplored = stats.some(item => item.count > 0);
 

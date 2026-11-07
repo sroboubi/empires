@@ -51,7 +51,8 @@ class AudioManager {
   /** Hand the manager the loaded manifest so it can resolve file names. */
   setManifest(manifest) {
     if (!manifest) return;
-    const sfx = manifest.audio.sfx || {};
+    // L9: unguarded deref — manifest.audio may be undefined.
+    const sfx = manifest.audio?.sfx || {};
     if (typeof sfx.basePath === 'string' && sfx.basePath) this.basePath = sfx.basePath;
     if (sfx.ui && typeof sfx.ui === 'object') this.uiSounds = sfx.ui;
   }

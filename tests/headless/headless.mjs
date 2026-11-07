@@ -224,8 +224,8 @@ async function main() {
   // Run turns headlessly through the real Player.step(), with a no-op
   // continuation: the harness drives advancement itself, so step() must
   // not chain into the browser's nextTurn(). Passing a function (rather
-  // than nothing) is what makes AI players act; setup intentionally
-  // passed no continuation, so no background AI turn fires at setup.
+  // than nothing) is what makes AI players act. initializeManifest starts
+  // no turn at all, so the first AI turn happens here, in round 1.
   // roundsDone rounds already happened (0 on fresh runs); the loop runs
   // exactly the remaining rounds, so completed rounds are never replayed.
   let roundsRun = 0;

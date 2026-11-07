@@ -52,6 +52,105 @@ function isExploredByPlayer(player, q, r) {
 }
 
 /**
+ * Shared proxy guards (P1). Every proxy handler gets:
+ * - getOwnPropertyDescriptor: re-wraps the value exactly as `get` would, so
+ *   Object.getOwnPropertyDescriptor(proxy, 'x').value can't reach the raw object.
+ * - defineProperty / setPrototypeOf / preventExtensions: throw.
+ * Call with a getter for the proxy itself (assigned after construction).
+ */
+function addProxyGuards(handler, getProxy, aiName, label) {
+  handler.getOwnPropertyDescriptor = function (target, prop) {
+    if (prop === UNWRAP) return undefined;
+    const desc = Reflect.getOwnPropertyDescriptor(target, prop);
+    if (!desc || !('value' in desc)) return desc;
+    return { ...desc, value: handler.get(target, prop, getProxy()) };
+  };
+  handler.defineProperty = function (target, prop) {
+    throw new Error(
+      `[AI Interface] Illegal defineProperty: AI '${aiName}' attempted to define '${String(prop)}' on ${label}.`
+    );
+  };
+  handler.setPrototypeOf = function () {
+    throw new Error(
+      `[AI Interface] Illegal setPrototypeOf: AI '${aiName}' attempted to change the prototype of ${label}.`
+    );
+  };
+  handler.preventExtensions = function () {
+    throw new Error(
+      `[AI Interface] Illegal preventExtensions: AI '${aiName}' attempted to freeze ${label}.`
+    );
+  };
+  return handler;
+}
+
+/**
+ * P2 — method allowlist. A blanket forward let ANY engine method run with
+ * raw `this` (player.addResources, gs.spawnEntity, gs.serialize,
+ * entity.destroy...). Only these methods may be called through a proxy;
+ * everything else reads as `undefined`.
+ * Types are duck-typed (no imports — player.js imports this module).
+ */
+const PLAYER_METHODS = new Set([
+  'getEntities', 'getOpponents', 'isExplored', 'isVisible', 'hasResources',
+  'hasOrders', 'getResourceProfile', 'getHistory', 'getHistoryRange',
+  'addHistoryEntry',
+]);
+const GAMESTATE_METHODS = new Set([
+  'getEntityAt', 'getEntityById', 'getChatHistory', 'getChatKey',
+]);
+const ENTITY_METHODS = new Set([
+  'getActions', 'canStandOn', 'getMovementCost', 'getCostToMaintain',
+  'getCostToSpawn', 'getOrdersRequired', 'info', 'canYield',
+]);
+const MAP_READ_METHODS = new Set(['get', 'has', 'keys', 'values', 'entries', 'forEach']);
+const SET_READ_METHODS = new Set(['has', 'keys', 'values', 'entries', 'forEach']);
+const HELPER_METHODS = new Set([
+  'distance', 'getNeighbors', 'getCellsArray', 'getCell', 'getCellCount',
+  'directionTo', 'movementCostTo', 'getSightAndTrajectory', 'getConfig',
+  'calculateAttackMultiplier', 'camelToTitle', 'aiLog', 'findReachableCells',
+  'findBuildCandidates', 'isBuilder', 'isRepairer', 'isCombatCapable',
+  'isMobile', 'getCombatPower', 'combatEffectiveness', 'isDedicatedMilitary',
+  'isMilitary', 'getEntitiesByCapability', 'getEntitiesSortedByPower',
+  'getEntitiesSortedByEffectiveness', 'findClosestEntity',
+  'findPathTowardsUnexplored', 'findWalkablePath', 'selectCandidateCombatUnits',
+  'attack', 'build', 'support', 'explore', 'moveAlongPath', 'chat',
+  'onActionDone',
+]);
+
+function isEntityObject(obj) {
+  return obj !== null && typeof obj === 'object' &&
+    typeof obj.getActions === 'function' &&
+    typeof obj.health === 'number' && 'cell' in obj;
+}
+
+function isGameStateObject(obj) {
+  return obj !== null && typeof obj === 'object' &&
+    Array.isArray(obj.entities) && Array.isArray(obj.players) &&
+    obj.hexGrid !== undefined && typeof obj.getEntityAt === 'function';
+}
+
+function isHelperObject(obj) {
+  return obj !== null && typeof obj === 'object' &&
+    typeof obj.attack === 'function' && typeof obj.build === 'function' &&
+    'gameState' in obj;
+}
+
+/**
+ * Returns true if `prop` may be called as a method on `obj` through a proxy.
+ * Plain data objects (manifest entries, config, cells) allow all methods;
+ * engine objects (Player, GameState, Entity, AiHelper, Map, Set) are allowlisted.
+ */
+function isAllowedMethod(obj, prop) {
+  if (obj instanceof Map) return MAP_READ_METHODS.has(prop);
+  if (obj instanceof Set) return SET_READ_METHODS.has(prop);
+  if (isPlayerObject(obj)) return PLAYER_METHODS.has(prop);
+  if (isGameStateObject(obj)) return GAMESTATE_METHODS.has(prop);
+  if (isEntityObject(obj)) return ENTITY_METHODS.has(prop);
+  if (isHelperObject(obj)) return HELPER_METHODS.has(prop);
+  return true;
+}
+
+/**
  * Duck-type check for Player objects. We can't import Player here
  * (player.js imports this module — would be a cycle), so we check for
  * the distinctive combination of player-only properties.
@@ -95,8 +194,12 @@ function wrapActionsWithOwnership(actions, entityTarget, entityName, aiName, see
  * Wrap a function so that:
  * - Arguments from the AI are unwrapped to real objects before the call.
  * - Return values are wrapped before going back to the AI.
+ * Returns undefined for methods not on the allowlist (P2).
  */
-function wrapFunction(fn, target, aiName, seen, ownPlayer = null) {
+function wrapFunction(fn, target, aiName, seen, ownPlayer = null, propName = null) {
+  if (propName && !isAllowedMethod(target, propName)) {
+    return undefined;
+  }
   const bound = fn.bind(target);
   return new Proxy(bound, {
     apply(fnTarget, thisArg, args) {
@@ -126,12 +229,23 @@ function deepWrap(obj, aiName, seen = new WeakMap(), ownPlayer = null) {
 
   const isCell = typeof obj.q === 'number' && typeof obj.r === 'number' && (obj.terrain !== undefined || obj.key);
 
-  const proxy = new Proxy(obj, {
+  const handler = addProxyGuards({
     get(target, prop, receiver) {
       if (prop === UNWRAP) return target;
 
+      // P4: back-references must return the filtered proxies, never a plain
+      // deepWrap of the raw gameState/helper.
+      if (prop === 'gameState' && ownPlayer) {
+        const gs = target.gameState;
+        if (gs && seen.has(gs)) return seen.get(gs);
+      }
+      if (prop === 'aiHelper' && ownPlayer) {
+        const h = target.aiHelper;
+        if (h && seen.has(h)) return seen.get(h);
+      }
+
       // Gap 1: Fog-of-war on cell terrain and resources
-      if (isCell && ownPlayer && (prop === 'terrain' || prop === 'resources')) {
+      if (isCell && ownPlayer && (prop === 'terrain' || prop === 'resource' || prop === 'resources')) {
         if (!isExploredByPlayer(ownPlayer, target.q, target.r)) {
           return undefined;
         }
@@ -161,7 +275,36 @@ function deepWrap(obj, aiName, seen = new WeakMap(), ownPlayer = null) {
         value = Reflect.get(target, prop);
       }
       if (typeof value === 'function') {
-        return wrapFunction(value, target, aiName, seen, ownPlayer);
+        // P3: array methods must not hand callbacks raw elements. Read-only
+        // iteration runs with `this` = the proxy (elements come through the
+        // get trap, already wrapped). Mutating methods (sort/splice/...) run
+        // on a copy of wrapped elements — the AI works with a view, so its
+        // sort must not reorder the real array, and callbacks still get
+        // wrapped elements.
+        if (Array.isArray(target)) {
+          const READ_ONLY = new Set(['forEach', 'map', 'filter', 'find', 'findIndex',
+            'findLast', 'findLastIndex', 'some', 'every', 'reduce', 'reduceRight',
+            'includes', 'indexOf', 'lastIndexOf', 'slice', 'concat', 'join',
+            'keys', 'values', 'entries', 'at', 'toString', 'toLocaleString',
+            'flat', 'flatMap']);
+          if (READ_ONLY.has(prop)) {
+            return function (...args) {
+              const realArgs = args.map(unwrap);
+              const result = Reflect.apply(value, receiver, realArgs);
+              return deepWrap(result, aiName, seen, ownPlayer);
+            };
+          }
+          return function (...args) {
+            const realArgs = args.map(unwrap);
+            const copy = [];
+            for (let i = 0; i < target.length; i++) {
+              copy.push(deepWrap(target[i], aiName, seen, ownPlayer));
+            }
+            const result = Reflect.apply(value, copy, realArgs);
+            return deepWrap(result, aiName, seen, ownPlayer);
+          };
+        }
+        return wrapFunction(value, target, aiName, seen, ownPlayer, prop);
       }
       if (value !== null && typeof value === 'object') {
         // Opponent players reached via any path (e.g. entity.owner) get the
@@ -190,7 +333,9 @@ function deepWrap(obj, aiName, seen = new WeakMap(), ownPlayer = null) {
       if (prop === UNWRAP) return true;
       return Reflect.has(target, prop);
     },
-  });
+  }, () => proxy, aiName, 'object');
+
+  const proxy = new Proxy(obj, handler);
 
   seen.set(obj, proxy);
   return proxy;
@@ -202,35 +347,10 @@ function deepWrap(obj, aiName, seen = new WeakMap(), ownPlayer = null) {
  */
 function createOtherPlayerProxy(player, aiName, seen = new WeakMap()) {
   if (seen.has(player)) return seen.get(player);
-  const proxy = new Proxy(player, {
+  let proxy;
+  const handler = addProxyGuards({
     get(target, prop, receiver) {
-      if (prop === UNWRAP) return target;
-      if (prop === 'name' || prop === 'description' ||
-        prop === 'id' || prop === 'color' || prop === 'isAI') {
-        return Reflect.get(target, prop, receiver);
-      }
-      if (prop === 'score') {
-        // score is an object — return a read-only wrapped copy, not the raw
-        // mutable one (opponent.score.total = 0 would otherwise stick).
-        const score = Reflect.get(target, prop, receiver);
-        return score ? deepWrap(score, aiName, seen, null) : score;
-      }
-      if (HIDDEN_PLAYER_PROPS.has(prop)) {
-        return undefined;
-      }
-      // Reflect.get with receiver can throw for built-in accessors (e.g. Set.prototype.size
-      // when target is a Set): the getter runs with `this` = proxy, which lacks the internal slots.
-      // Fall back to target-bound lookup in that case.
-      let value;
-      try {
-        value = Reflect.get(target, prop, receiver);
-      } catch (e) {
-        value = Reflect.get(target, prop);
-      }
-      if (typeof value === 'function') {
-        return () => undefined;
-      }
-      return undefined;
+      return otherPlayerGet(target, prop, receiver, aiName, seen);
     },
     set(target, prop) {
       throw new Error(
@@ -249,16 +369,48 @@ function createOtherPlayerProxy(player, aiName, seen = new WeakMap()) {
       if (prop === UNWRAP) return true;
       return Reflect.has(target, prop);
     },
-  });
+  }, () => proxy, aiName, 'other player');
+  proxy = new Proxy(player, handler);
   seen.set(player, proxy);
   return proxy;
+}
+
+// Shared get logic for the other-player proxy, used by both the get trap
+// and the getOwnPropertyDescriptor trap so they can't disagree.
+function otherPlayerGet(target, prop, receiver, aiName, seen) {
+  if (prop === UNWRAP) return target;
+  if (prop === 'name' || prop === 'description' ||
+    prop === 'id' || prop === 'color' || prop === 'isAI') {
+    return Reflect.get(target, prop, receiver);
+  }
+  if (prop === 'score') {
+    const score = Reflect.get(target, prop, receiver);
+    return score ? deepWrap(score, aiName, seen, null) : score;
+  }
+  if (HIDDEN_PLAYER_PROPS.has(prop)) {
+    return undefined;
+  }
+  let value;
+  try {
+    value = Reflect.get(target, prop, receiver);
+  } catch (e) {
+    value = Reflect.get(target, prop);
+  }
+  if (typeof value === 'function') {
+    return () => undefined;
+  }
+  return undefined;
 }
 
 /**
  * Proxy for HexGrid enforcing Gap 1 (unexplored cell masking).
  */
 function createHexGridProxy(hexGrid, ownPlayer, aiName, seen) {
-  return new Proxy(hexGrid, {
+  // P9: build the proxy once and cache it in `seen` — a fresh proxy on
+  // every access broke `gs.hexGrid === gs.hexGrid`.
+  if (seen.has(hexGrid)) return seen.get(hexGrid);
+  let proxy;
+  const handler = addProxyGuards({
     get(target, prop, receiver) {
       if (prop === UNWRAP) return target;
 
@@ -273,6 +425,12 @@ function createHexGridProxy(hexGrid, ownPlayer, aiName, seen) {
       if (prop === 'getNeighbors') {
         return (q, r) => {
           const neighbors = target.getNeighbors(q, r);
+          // Consistent with helper.getNeighbors (Shahin, 2026-11-06): return
+          // ALL neighbours, each deepWrapped — the cell mask hides
+          // terrain/resource on unexplored cells, coordinates stay visible.
+          // Filtering to explored-only contradicted the helper path. The
+          // engine algorithms running on the filtered gameState (P8) only
+          // read n.resource here, which the mask hides on unexplored cells.
           return (neighbors || []).map(c => deepWrap(c, aiName, seen, ownPlayer));
         };
       }
@@ -280,9 +438,12 @@ function createHexGridProxy(hexGrid, ownPlayer, aiName, seen) {
       if (prop === 'getCellsArray') {
         return () => {
           const cells = target.getCellsArray ? target.getCellsArray() : [];
-          return cells
-            .filter(c => isExploredByPlayer(ownPlayer, c.q, c.r))
-            .map(c => deepWrap(c, aiName, seen, ownPlayer));
+          // Consistent with helper.getCellsArray (Shahin, 2026-11-06): ALL
+          // cells, masked — filtering to explored-only contradicted the
+          // helper path and hid coordinates the spec leaves visible (the
+          // map shape is known from config). No engine consumer calls the
+          // proxied grid's getCellsArray (helpers use the raw grid).
+          return cells.map(c => deepWrap(c, aiName, seen, ownPlayer));
         };
       }
 
@@ -296,7 +457,7 @@ function createHexGridProxy(hexGrid, ownPlayer, aiName, seen) {
         value = Reflect.get(target, prop);
       }
       if (typeof value === 'function') {
-        return wrapFunction(value, target, aiName, seen, ownPlayer);
+        return wrapFunction(value, target, aiName, seen, ownPlayer, prop);
       }
       if (value !== null && typeof value === 'object') {
         return deepWrap(value, aiName, seen, ownPlayer);
@@ -320,7 +481,10 @@ function createHexGridProxy(hexGrid, ownPlayer, aiName, seen) {
       if (prop === UNWRAP) return true;
       return Reflect.has(target, prop);
     },
-  });
+  }, () => proxy, aiName, 'hexGrid');
+  proxy = new Proxy(hexGrid, handler);
+  seen.set(hexGrid, proxy);
+  return proxy;
 }
 
 /**
@@ -341,7 +505,8 @@ export function createGameStateProxy(gameState, ownPlayer, aiName, seen = new We
     return wrapped;
   }
 
-  return new Proxy(gameState, {
+  let proxy;
+  const handler = addProxyGuards({
     get(target, prop, receiver) {
       if (prop === UNWRAP) return target;
 
@@ -427,7 +592,7 @@ export function createGameStateProxy(gameState, ownPlayer, aiName, seen = new We
         value = Reflect.get(target, prop);
       }
       if (typeof value === 'function') {
-        return wrapFunction(value, target, aiName, seen, ownPlayer);
+        return wrapFunction(value, target, aiName, seen, ownPlayer, prop);
       }
       if (value !== null && typeof value === 'object') {
         return deepWrap(value, aiName, seen, ownPlayer);
@@ -451,7 +616,9 @@ export function createGameStateProxy(gameState, ownPlayer, aiName, seen = new We
       if (prop === UNWRAP) return true;
       return Reflect.has(target, prop);
     },
-  });
+  }, () => proxy, aiName, 'gameState');
+  proxy = new Proxy(gameState, handler);
+  return proxy;
 }
 
 /**
@@ -469,7 +636,8 @@ export function createPlayerProxy(player, aiName, seen = new WeakMap()) {
  * All other return values are deep-wrapped.
  */
 function createHelperProxy(helper, ownPlayer, aiName, seen = new WeakMap(), proxiedGameState = null) {
-  return new Proxy(helper, {
+  let proxy;
+  const handler = addProxyGuards({
     get(target, prop, receiver) {
       if (prop === UNWRAP) return target;
 
@@ -479,12 +647,31 @@ function createHelperProxy(helper, ownPlayer, aiName, seen = new WeakMap(), prox
         return () => proxiedGameState;
       }
 
+      // P7: helper cell methods read the raw grid. getCell routes through
+      // the filtered hexGrid proxy (undefined for unexplored, per spec).
+      // getCellsArray/getNeighbors return ALL cells, each deepWrapped — the
+      // cell mask hides terrain/resource on unexplored cells, but the
+      // coordinates stay visible (the map shape is known from config, and
+      // adaptiveManager needs unexplored coordinates for exploration).
+      // Filtering them out entirely broke exploration (it could no longer
+      // tell whether unexplored cells exist).
+      if (prop === 'getCell' && proxiedGameState) {
+        const hg = proxiedGameState.hexGrid;
+        if (hg && typeof hg.getCell === 'function') return hg.getCell.bind(hg);
+      }
+
       const val = Reflect.get(target, prop, receiver);
       if (typeof val === 'function') {
+        // P2: only allowlisted helper methods are callable. createEntity
+        // and applyResourceYieldBonus are engine-internal.
+        if (!HELPER_METHODS.has(prop)) return undefined;
         return function (...args) {
           if (['attack', 'build', 'support', 'explore'].includes(prop)) {
             const sourceEntity = unwrap(args[1]);
-            if (sourceEntity && sourceEntity.owner && sourceEntity.owner.id !== ownPlayer.id) {
+            // P6: a missing owner counts as not-owned (barbarians are
+            // ownerless) — the old check passed them through.
+            const ownerId = sourceEntity ? (sourceEntity.owner?.id ?? sourceEntity.ownerId) : undefined;
+            if (sourceEntity && ownerId !== ownPlayer.id) {
               throw new Error(
                 `[AI Interface] Illegal action: AI '${aiName}' cannot command entity '${sourceEntity.name}' owned by another player.`
               );
@@ -493,13 +680,33 @@ function createHelperProxy(helper, ownPlayer, aiName, seen = new WeakMap(), prox
           if (prop === 'moveAlongPath') {
             const player = unwrap(args[0]);
             const unit = unwrap(args[1]);
-            if ((player && player.id !== ownPlayer.id) || (unit && unit.owner && unit.owner.id !== ownPlayer.id)) {
+            const unitOwnerId = unit ? (unit.owner?.id ?? unit.ownerId) : undefined;
+            if ((player && player.id !== ownPlayer.id) || (unit && unitOwnerId !== ownPlayer.id)) {
               throw new Error(
                 `[AI Interface] Illegal action: AI '${aiName}' cannot move entity owned by another player.`
               );
             }
           }
-          const realArgs = args.map(unwrap);
+          // P5: chat must be initiated as yourself — an AI can't spend
+          // another player's orders or speak as them.
+          if (prop === 'chat') {
+            const initiator = unwrap(args[0]);
+            if (initiator && initiator.id !== ownPlayer.id) {
+              throw new Error(
+                `[AI Interface] Illegal chat: AI '${aiName}' cannot chat as another player.`
+              );
+            }
+          }
+          // P8: hand the helper the caller's FILTERED gameState, not the raw
+          // one, so its algorithms (build candidates, paths, reachability)
+          // only see what the AI can see. The helper methods only use
+          // getEntityAt/entities/manifestData/hexGrid on this argument, all
+          // of which the gameState proxy filters.
+          const realArgs = args.map(a => {
+            const u = unwrap(a);
+            if (u === target.gameState && proxiedGameState) return proxiedGameState;
+            return u;
+          });
           return deepWrap(val.apply(target, realArgs), aiName, seen, ownPlayer);
         };
       }
@@ -525,7 +732,9 @@ function createHelperProxy(helper, ownPlayer, aiName, seen = new WeakMap(), prox
       if (prop === UNWRAP) return true;
       return Reflect.has(target, prop);
     },
-  });
+  }, () => proxy, aiName, 'helper');
+  proxy = new Proxy(helper, handler);
+  return proxy;
 }
 
 /**
@@ -548,8 +757,14 @@ export function createAiManager(ManagerClass, player, helper) {
   // the same underlying player.
   const seen = new WeakMap();
   const proxiedPlayer = createPlayerProxy(player, aiName, seen);
-  const proxiedGameState = createGameStateProxy(helper.getGameState(), player, aiName, seen);
+  const rawGameState = helper.getGameState();
+  const proxiedGameState = createGameStateProxy(rawGameState, player, aiName, seen);
   const proxiedHelper = createHelperProxy(helper, player, aiName, seen, proxiedGameState);
+  // P4: register the filtered gameState/helper proxies in `seen` so any
+  // back-reference (player.gameState, entity.gameState, gs.aiHelper)
+  // resolves to the filtered proxy instead of a plain deepWrap of the raw object.
+  seen.set(rawGameState, proxiedGameState);
+  seen.set(helper, proxiedHelper);
 
   const manager = new ManagerClass(proxiedPlayer, proxiedHelper);
   manager.gameState = proxiedGameState;

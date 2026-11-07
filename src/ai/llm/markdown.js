@@ -252,7 +252,14 @@ export function serializeStateToMarkdown(summary, manifestEntities = []) {
   const memLines = [];
   const roundNums = Object.keys(historyRounds).map(Number).sort((a, b) => b - a);
   for (const r of roundNums) {
-    const entries = [...(historyRounds[r] || [])].reverse();
+    // B3: pin END_TURN notes first — the old code reversed entries within
+    // each round and capped at 12 lines, so the notes (the most important
+    // entries, recorded last in the round) were cut first.
+    const entries = [...(historyRounds[r] || [])].sort((a, b) => {
+      const aNote = a.category === 'note' ? 0 : 1;
+      const bNote = b.category === 'note' ? 0 : 1;
+      return aNote - bNote;
+    });
     for (const h of entries) {
       if (memLines.length >= 12) break;
       memLines.push(`* [Round ${r}] ${h.category || 'note'}: ${h.details || ''}`);

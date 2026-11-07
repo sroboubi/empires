@@ -115,10 +115,31 @@ def run_player_test(turns: int = 3, url: str = GAME_URL):
 
         player_rows = page.query_selector_all("#setup-players-container .dynamic-row")
         print(f"Found {len(player_rows)} player rows", flush=True)
+        # B5: the .ai-checkbox was removed — controllers are now a
+        # .controller-select dropdown (human or a key from ai.json). Pick the
+        # first coded-AI controller (not an LLM — localhost:1234 is
+        # unreachable from Modal, so an LLM controller would silently
+        # become a human and the game would stall waiting for input).
         for row in player_rows:
-            checkbox = row.query_selector(".ai-checkbox")
-            if checkbox and not checkbox.is_checked():
-                checkbox.check()
+            select = row.query_selector(".controller-select")
+            if not select:
+                continue
+            options = select.query_selector_all("option")
+            ai_keys = []
+            for opt in options:
+                val = opt.get_attribute("value") or ""
+                label = (opt.text_content() or "").lower()
+                if val == "human" or not val:
+                    continue
+                # Skip LLM controllers — they need a reachable provider.
+                if "llm" in val.lower() or "llm" in label or "localhost" in label:
+                    continue
+                ai_keys.append(val)
+            if ai_keys:
+                select.select_option(ai_keys[0])
+                print(f"Player set to AI controller: {ai_keys[0]}", flush=True)
+            else:
+                print("WARNING: no coded-AI controller found; player stays human", flush=True)
         print("All players set to AI", flush=True)
 
         page.click("#btn-start-game")
@@ -366,3 +387,24 @@ def main(turns: int = 3, url: str = GAME_URL):
         with open(path, "wb") as f:
             f.write(base64.b64decode(shot["data"]))
         print(f"Screenshot: {path}")
+
+    # B5: errors used to never fail the run (exit 0 always). Fail loudly so
+    # a broken game can't pass silently.
+    failures = []
+    if results["console_errors"]:
+        failures.append(f"{len(results['console_errors'])} console error(s)")
+    if results["page_errors"]:
+        failures.append(f"{len(results['page_errors'])} page error(s)")
+    if results["turns_completed"] < results["turns_requested"] and not results["victory"]:
+        failures.append(f"only {results['turns_completed']}/{results['turns_requested']} turns completed")
+    if not results["game_responsive"]:
+        failures.append("game unresponsive")
+    for c in results["state_checks"]:
+        if not c["passed"]:
+            failures.append(f"state check failed at turn {c['turn']}: {c['reason']}")
+    if failures:
+        print("\nFAILURES:")
+        for f in failures:
+            print(f"  - {f}")
+        sys.exit(1)
+    print("\nAll checks passed.")
