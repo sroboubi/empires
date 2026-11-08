@@ -22,6 +22,14 @@
             "url": "./ai/tactical/adaptiveManager.js",
             "config": {}
         },
+        "hark": {
+            "url": "./ai/tactical/harkManager.js",
+            "config": {
+                "foreignStructureBuffer": 3,
+                "builderCombatRatio": 1.0,
+                "builderLastResortRatio": 0.5
+            }
+        },
         "llm-json-gemma-4": {
             "url": "./ai/llm/json/harness.js",
             "config": {
