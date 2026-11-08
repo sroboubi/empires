@@ -27,7 +27,10 @@
             "config": {
                 "foreignStructureBuffer": 3,
                 "builderCombatRatio": 1.0,
-                "builderLastResortRatio": 0.5
+                "builderLastResortRatio": 0.5,
+                "territoryRadius": 3,
+                "stanceOffensiveRatio": 1.5,
+                "stanceCautionRatio": 2.0
             }
         },
         "llm-json-gemma-4": {

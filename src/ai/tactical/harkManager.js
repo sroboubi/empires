@@ -32,8 +32,8 @@ import { AdaptiveManager } from './adaptiveManager.js';
  *       always outrank prerequisite steps.
  * - B6  Retreat threats are combat-capable AND (hostile stance, or have
  *       attacked us). Hostile = barbarian, offensive, defensive, caution.
- *       Retreat steps head into our territory (`territoryRadius` hexes of
- *       our structures) and never end closer to the threat.
+ *       (A territory-based retreat step was tested on paired seeds and not
+ *       kept: it lost more games than it won; see the PR notes.)
  * - B9  Two distance measures in general combat: threat DETECTION uses the
  *       distance to ANY own entity (an enemy next to a farm is a threat to
  *       the farm); engagement RANGE and PRIORITY use the distance to the
@@ -50,7 +50,7 @@ import { AdaptiveManager } from './adaptiveManager.js';
  *
  * The strategy points are AdaptiveManager hooks (respondToImmediateThreats,
  * getEngagementDistance, engageCombatTargets, isRetreatThreat,
- * pickRetreatCell, rankDeficitCandidates, isExplorerCandidate,
+ * rankDeficitCandidates, isExplorerCandidate,
  * filterBuildCandidates, resolveDirective), so nothing is copied from it.
  */
 
@@ -136,15 +136,19 @@ export class HarkManager extends AdaptiveManager {
     }
 
     /**
-     * Per visible opponent player (barbarians keep their fixed stance):
-     * - attacked us in the attacker-history window: offensive if our combat
-     *   power is at least `stanceOffensiveRatio` x theirs, else defensive;
-     * - else military units inside our territory (`territoryRadius` hexes of
-     *   our structures): defensive;
-     * - else their visible combat power is at least `stanceCautionRatio` x
-     *   ours: caution;
-     * - else neutral (the default).
-     * Returns null (feature off) when a config key is missing.
+     * Per visible opponent player (barbarians keep their fixed stance).
+     * Power = summed combat power of mobile combat-capable units (ours, and
+     * their visible ones); structures are left out so a village's armour
+     * does not read as an army.
+     * - attacked us in the attacker-history window: offensive if our power
+     *   is at least `stanceOffensiveRatio` x theirs, else defensive;
+     * - else their military units are inside our territory (within
+     *   `territoryRadius` hexes of one of our structures): defensive;
+     * - else their power is at least `stanceCautionRatio` x ours: caution;
+     * - else neutral (the default). Hark never turns offensive on a player
+     *   that has not attacked it: a tested pre-emptive rule (offensive when
+     *   3x stronger) lost more games than it won against adaptive.
+     * Returns null (feature off) when one of DYNAMIC_STANCE_KEYS is missing.
      */
     chooseDynamicStances() {
         if (DYNAMIC_STANCE_KEYS.some(key => typeof this.harkConfig[key] !== 'number')) return null;
@@ -152,9 +156,8 @@ export class HarkManager extends AdaptiveManager {
 
         const own = this.getActiveEntities();
         const anchors = own.filter(entity => entity.isConstruct);
-        const ourPower = own
-            .filter(entity => this.helper.isCombatCapable(entity))
-            .reduce((sum, entity) => sum + this.combatPower(entity), 0);
+        const isArmy = entity => !entity.isConstruct && this.helper.isCombatCapable(entity);
+        const ourPower = own.filter(isArmy).reduce((sum, entity) => sum + this.combatPower(entity), 0);
         const history = this.getAttackerHistory();
 
         const byOwner = new Map();
@@ -166,10 +169,9 @@ export class HarkManager extends AdaptiveManager {
             const record = byOwner.get(item.ownerId);
             const entity = item.entity;
             if (num(history.get(entity.id)) > 0) record.attacked = true;
-            if (!this.helper.isCombatCapable(entity)) continue;
+            if (!isArmy(entity)) continue;
             record.power += this.combatPower(entity);
-            if (!entity.isConstruct
-                && this.helper.isDedicatedMilitary(entity, this.manifest)
+            if (this.helper.isDedicatedMilitary(entity, this.manifest)
                 && this.distanceToTerritory(entity, anchors) <= territoryRadius) {
                 record.intruding = true;
             }
@@ -470,58 +472,11 @@ export class HarkManager extends AdaptiveManager {
         return hostile || attacked;
     }
 
-    /** Own structures: the anchors of our territory. */
-    getTerritoryAnchors() {
-        return this.getActiveEntities().filter(entity => entity.isConstruct);
-    }
-
     /** Hex distance from `cell` to our nearest structure (Infinity with none). */
     distanceToTerritory(cell, anchors) {
         return anchors.length
             ? Math.min(...anchors.map(anchor => this.helper.distance(cell, anchor)))
             : Infinity;
-    }
-
-    /**
-     * B6 retreat into territory. Territory is every cell within
-     * `territoryRadius` hexes of one of our structures. A retreat step never
-     * ends closer to the nearest threat. It qualifies if it gets farther from
-     * the threat, or keeps the distance while stepping from outside our
-     * territory into it. Ranking: inside territory first, then farther from
-     * the threat, then closer to our nearest structure. Without the config
-     * key, or with no structures left, the adaptive rule applies.
-     */
-    pickRetreatCell(unit, threats, currentMin, moveAction) {
-        const radius = this.harkConfig.territoryRadius;
-        const anchors = this.getTerritoryAnchors();
-        if (typeof radius !== 'number' || anchors.length === 0) {
-            return super.pickRetreatCell(unit, threats, currentMin, moveAction);
-        }
-
-        const homeNow = this.distanceToTerritory(unit, anchors);
-        let best = null;
-        for (const cell of this.helper.getNeighbors(unit.q, unit.r)) {
-            if (this.gameState.getEntityAt(cell.q, cell.r)) continue;
-            if (!unit.canStandOn(cell)) continue;
-            const check = moveAction.canDo(cell, null);
-            if (!check || !check.possible) continue;
-
-            const threatDist = Math.min(...threats.map(item => this.helper.distance(cell, item.entity)));
-            const home = this.distanceToTerritory(cell, anchors);
-            const inside = home <= radius;
-            const entersTerritory = inside && homeNow > radius;
-            if (threatDist < currentMin) continue;
-            if (threatDist === currentMin && !entersTerritory) continue;
-
-            const better = !best
-                || (inside !== best.inside ? inside
-                    : threatDist !== best.threatDist ? threatDist > best.threatDist
-                        : home < best.home);
-            if (better) best = { cell, threatDist, home, inside };
-        }
-        return best
-            ? { cell: best.cell, score: best.threatDist }
-            : { cell: null, score: currentMin };
     }
 
     // ==================== B5: production chains ====================
