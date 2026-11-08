@@ -22,7 +22,7 @@ npm test -- 20
 npm test -- --config config.example.json
 npm test -- 20 --config mygame.json
 
-# Reproducible map: the same seed gives the same map
+# Reproducible game: the same seed gives the same map and the same game
 npm test -- 20 --seed 42
 ```
 
@@ -34,7 +34,7 @@ Game configuration comes from an optional JSON config file (see `config.example.
 |-------|-------------|
 | `turns` | Number of turns to simulate |
 | `mapSize` | Hex map size (default 12; Small is 32) |
-| `seed` | Map seed (number or string). The same seed and `mapSize` give the same map; `--seed N` on the command line overrides it. Omitted = random map. Only map generation is seeded; gameplay randomness (barbarians, treasure rewards) is not. |
+| `seed` | Game seed (number or string); `--seed N` on the command line overrides it. The same seed and `mapSize` give the same map, and the in-game randomness (barbarian hordes, treasure rewards, the overflow-resource pick) is seeded too, so a game between AI players replays exactly. Omitted = random, as before. LLM players are not deterministic. |
 | `players` | Array of `{id, name, color, controller}` — `controller` is `'ai'` (SmartManager) or `'llm'` (LLM harness) |
 | `barbarians` | Barbarian settings object, or null to disable |
 | `llm` | `{apiKey, baseUrl, orderedModels}` — required for `'llm'` players |
@@ -99,10 +99,9 @@ and never carry credentials: `settings.llm.apiKey` is stripped on write,
 since config `${VAR}` expansion can put a real key into settings.
 Base URL and model list are kept (harmless, useful provenance).
 
-**Not preserved / not deterministic.** Gameplay randomness is ambient
-`Math.random` (entity-id suffixes, one overflow-resource pick) with no
-seeded RNG state to save, so a resumed game continues correctly but is
-not a bit-identical replay of the killed process's future. Map
+**Not preserved / not deterministic.** The in-game RNG state is not
+saved (a resumed game draws from Math.random), so it continues correctly
+but is not a bit-identical replay of the killed process's future. Map
 generation randomness does not matter: the generated cells are saved.
 
 ## How it works

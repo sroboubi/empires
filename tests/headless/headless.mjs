@@ -8,7 +8,7 @@
  *   npm test -- 20                     # 20 turns, default config
  *   npm test -- --config mygame.json   # custom game setup
  *   npm test -- 20 --config mygame.json
- *   npm test -- 20 --seed 42          # reproducible map (same seed = same map)
+ *   npm test -- 20 --seed 42          # reproducible game (same seed = same map and same game)
  *
  * Checkpoint / resume (long LLM games outlive single runtime sessions):
  *   npm test -- --config mygame.json --checkpoint-dir /path/to/run-dir
@@ -21,8 +21,10 @@
  * Config file (JSON) supports everything in the game settings:
  *   turns            - number of turns to simulate
  *   mapSize          - hex map radius (default 12)
- *   seed             - map seed (number or string); --seed overrides it.
- *                      Omitted = random map, as before. Only the map is seeded.
+ *   seed             - game seed (number or string); --seed overrides it.
+ *                      Seeds the map and the in-game randomness (barbarians,
+ *                      treasure rewards), so a game with AI players replays
+ *                      exactly. Omitted = random, as before.
  *   players          - array of {id, name, color, controller, description}
  *                      controller: 'ai' = SmartManager, 'llm' = LLM harness,
  *                      null = human (no AI)
@@ -192,7 +194,7 @@ async function main() {
     const mapSize = cfg.mapSize || ds.mapSize || 12;
     const seed = opts.seed ?? cfg.seed ?? null;
     gameState.generateMap(mapSize, manifest.terrains, manifest, seed);
-    if (seed !== null) console.log(`[headless] Map seed: ${seed}`);
+    if (seed !== null) console.log(`[headless] Game seed: ${seed}`);
     const settings = {
       players,
       initialization: cfg.initialization || ds.initialization || {},

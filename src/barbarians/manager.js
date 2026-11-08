@@ -88,7 +88,7 @@ export async function manageBarbarians(config, helper) {
       for (const [unitName, range] of Object.entries(hordeConfig)) {
         const min = range.min !== undefined ? range.min : 1;
         const max = range.max !== undefined ? range.max : min;
-        const count = Math.floor(Math.random() * (max - min + 1)) + min;
+        const count = Math.floor(gameState.random() * (max - min + 1)) + min;
         for (let i = 0; i < count; i++) {
           toSpawn.push(unitName);
         }
@@ -98,12 +98,12 @@ export async function manageBarbarians(config, helper) {
         console.debug(`[Barbarians] Round ${gameState.currentRound}: Spawning horde (${toSpawn.join(', ')})`);
 
         // Shuffle spawn queue
-        toSpawn.sort(() => Math.random() - 0.5);
+        toSpawn.sort(() => gameState.random() - 0.5);
 
         // Get unoccupied border cells and shuffle them
         const borderCells = getBorderCells(helper);
         const candidateBorderCells = borderCells.filter(c => !gameState.getEntityAt(c.q, c.r));
-        candidateBorderCells.sort(() => Math.random() - 0.5);
+        candidateBorderCells.sort(() => gameState.random() - 0.5);
 
         for (const unitName of toSpawn) {
           if (availableSlots <= 0) {

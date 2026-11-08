@@ -221,7 +221,7 @@ export function checkTreasurePickup(unit) {
 
   if (unit.owner && rewards.length > 0) {
     for (let i = 0; i < picks; i++) {
-      const reward = pickRandom(rewards);
+      const reward = pickRandom(rewards, gameState.random || Math.random);
       granted[reward.type] = (granted[reward.type] || 0) + reward.quantity;
     }
     unit.owner.addResources(granted);

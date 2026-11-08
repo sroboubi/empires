@@ -25,6 +25,10 @@ export class GameState {
     // Counter for ownerless entity IDs (barbarians etc.):
     // <name>_neutral_<n>. Saved/loaded with the game.
     this.unownedEntityCounter = 0;
+    // In-game randomness (barbarian hordes, treasure rewards, the overflow
+    // resource pick). Math.random unless generateMap() got a seed, in which
+    // case the whole game replays from that one seed.
+    this.random = () => Math.random();
     this.hexGrid = null;  // HexGrid instance
     this.entities = [];   // List of active BaseEntity instances
     this.manifestData = null;
@@ -119,11 +123,15 @@ export class GameState {
    * @param {Object} [manifestData=null] - Optional manifest (spawns natural resources & treasures)
    * @param {number|string|null} [seed=null] - Map seed. The same seed, radius and
    *   manifest give the same terrain and resources. Without one the map is random
-   *   (Math.random), as before. Only map generation is seeded.
+   *   (Math.random), as before. With a seed, the in-game randomness
+   *   (this.random) is also seeded, from `${seed}:game`, so a headless game
+   *   replays exactly; without one it stays Math.random.
    */
   generateMap(radius, terrainConfig = null, manifestData = null, seed = null) {
     const config = terrainConfig || this.manifestData?.terrains || null;
-    const random = seed === null || seed === undefined ? Math.random : createSeededRandom(seed);
+    const seeded = seed !== null && seed !== undefined;
+    const random = seeded ? createSeededRandom(seed) : Math.random;
+    this.random = seeded ? createSeededRandom(`${seed}:game`) : () => Math.random();
     this.hexGrid = new HexGrid(radius, config, random);
     if (manifestData) {
       spawnCellResources(this.hexGrid, manifestData, CONFIG.HEX_SIZE, random);
