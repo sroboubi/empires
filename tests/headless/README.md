@@ -228,3 +228,5 @@ game-over line), process exit code, and the save/load result.
 - The win check used to duplicate `main.js` `checkWinConditions`
   (absolute + relative with the `nextHighest > 0` guard). It is now the
   single pure `GameState.checkWinConditions()` used by both drivers.
+  Only the top scorer can win; a tie for top means no winner; a
+  second-highest of 0 no longer blocks a relative win.

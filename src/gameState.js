@@ -349,35 +349,29 @@ export class GameState {
 
     const winCondition = this.settings.winCondition;
 
-    for (const player of this.players) {
-      const reasons = [];
+    // Only the leader can win. Take the two highest totals: if they are
+    // equal nobody has won (even above absoluteScore). Otherwise the leader
+    // wins on absoluteScore or on relativeScore x second-highest. A
+    // second-highest of 0 is fine: 0 x multiplier = 0, so a leader with
+    // any score beats a zeroed opponent (cube-root totals drop to 0 when
+    // any one pillar hits 0).
+    const ranked = [...this.players].sort((a, b) => b.score.total - a.score.total);
+    const leader = ranked[0];
+    if (!leader) return null;
+    const secondHighest = ranked.length > 1 ? ranked[1].score.total : null;
+    if (secondHighest !== null && leader.score.total === secondHighest) return null;
 
-      // Check absolute score
-      if (winCondition.absoluteScore && player.score.total >= winCondition.absoluteScore) {
-        reasons.push(`Absolute Score: ${player.score.total} >= ${winCondition.absoluteScore}`);
-      }
-
-      // Check relative score
-      if (winCondition.relativeScore) {
-        // Find the next highest score among other players
-        let nextHighest = 0;
-        for (const other of this.players) {
-          if (other.id !== player.id && other.score.total > nextHighest) {
-            nextHighest = other.score.total;
-          }
-        }
-        const threshold = winCondition.relativeScore * nextHighest;
-        if (nextHighest > 0 && player.score.total >= threshold) {
-          reasons.push(`Relative Score: ${player.score.total} >= ${winCondition.relativeScore} × ${nextHighest} (next highest)`);
-        }
-      }
-
-      if (reasons.length > 0) {
-        return { winner: player, reasons };
-      }
+    const reasons = [];
+    if (winCondition.absoluteScore && leader.score.total >= winCondition.absoluteScore) {
+      reasons.push(`Absolute Score: ${leader.score.total} >= ${winCondition.absoluteScore}`);
+    }
+    // Relative needs an opponent: a one-player game wins on absolute only.
+    if (winCondition.relativeScore && secondHighest !== null
+        && leader.score.total >= winCondition.relativeScore * secondHighest) {
+      reasons.push(`Relative Score: ${leader.score.total} >= ${winCondition.relativeScore} × ${secondHighest} (second highest)`);
     }
 
-    return null;
+    return reasons.length > 0 ? { winner: leader, reasons } : null;
   }
 
   /**
