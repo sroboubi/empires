@@ -42,7 +42,7 @@ Controls resource allocation priority across the three score pillars. The tactic
 
 Per-opponent behavior. Keyed by player ID. Default for any opponent not listed: `"neutral"`.
 
-If no directives are set at all, all opponents default to `"neutral"` — the AI treats everyone as a potential threat but doesn't seek conflict.
+If no directives are set at all, all opponents default to `"neutral"` — the AI treats everyone as a potential threat but doesn't seek conflict — unless the tactical AI chooses its own stances (see Defaults).
 
 | Value | Meaning |
 | :---- | :---- |
@@ -100,6 +100,8 @@ When no directive is set:
 ```
 
 The AI expands economically, defends its territory, explores opportunistically, and treats all opponents as neutral (doesn't seek fights, doesn't avoid them either).
+
+**Internal stance/focus.** Only when no directive is provided, a tactical AI may choose its own per-opponent stances and focus each turn from the game state (e.g. relative strength, who attacked it, proximity). When a directive is provided, the tactical AI must obey it and never substitute its own stances or focus.
 
 ## Implementation Notes
 

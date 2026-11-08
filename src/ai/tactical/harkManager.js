@@ -32,6 +32,8 @@ import { AdaptiveManager } from './adaptiveManager.js';
  *       always outrank prerequisite steps.
  * - B6  Retreat threats are combat-capable AND (hostile stance, or have
  *       attacked us). Hostile = barbarian, offensive, defensive, caution.
+ *       Retreat steps head into our territory (`territoryRadius` hexes of
+ *       our structures) and never end closer to the threat.
  * - B9  Two distance measures in general combat: threat DETECTION uses the
  *       distance to ANY own entity (an enemy next to a farm is a threat to
  *       the farm); engagement RANGE and PRIORITY use the distance to the
@@ -42,6 +44,14 @@ import { AdaptiveManager } from './adaptiveManager.js';
  * - B11 Build sites within `foreignStructureBuffer` hexes of a visible
  *       structure owned by a player we are neutral or cautious toward are
  *       excluded. Friendly/ally (and hostile) owners: no restriction.
+ * - Dynamic stance: ONLY when no directive is set, per-opponent stances are
+ *   chosen each turn from the game state (chooseDynamicStances). A provided
+ *   directive always overrides this completely.
+ *
+ * The strategy points are AdaptiveManager hooks (respondToImmediateThreats,
+ * getEngagementDistance, engageCombatTargets, isRetreatThreat,
+ * pickRetreatCell, rankDeficitCandidates, isExplorerCandidate,
+ * filterBuildCandidates, resolveDirective), so nothing is copied from it.
  */
 
 const ORDERS_RESOURCE = 'orders';
@@ -51,7 +61,13 @@ const HARK_CONFIG_KEYS = [
     'foreignStructureBuffer',
     'builderCombatRatio',
     'builderLastResortRatio',
+    'territoryRadius',
+    'stanceOffensiveRatio',
+    'stanceCautionRatio',
 ];
+
+/** Keys the dynamic stance needs; if any is missing it stays off (all neutral). */
+const DYNAMIC_STANCE_KEYS = ['territoryRadius', 'stanceOffensiveRatio', 'stanceCautionRatio'];
 
 /** Stances under which an opponent's combat units are retreat threats (B6). */
 const HOSTILE_STANCES = new Set(['offensive', 'defensive', 'caution']);
@@ -102,6 +118,86 @@ export class HarkManager extends AdaptiveManager {
             restrictedStructures: null,
             loggedOnce: new Set(),
         };
+    }
+
+    // ==================== Dynamic stance (only when no directive is set) ====================
+
+    /**
+     * A provided directive (director/LLM or config) always wins and is used
+     * unchanged. Only when none is set does Hark pick per-opponent stances
+     * from the game state (chooseDynamicStances). Focus is left to the
+     * adaptive pillar weighting.
+     */
+    resolveDirective() {
+        const directive = super.resolveDirective();
+        if (this.getExplicitDirective()) return directive;
+        const stance = this.chooseDynamicStances();
+        return stance ? { ...directive, stance } : directive;
+    }
+
+    /**
+     * Per visible opponent player (barbarians keep their fixed stance):
+     * - attacked us in the attacker-history window: offensive if our combat
+     *   power is at least `stanceOffensiveRatio` x theirs, else defensive;
+     * - else military units inside our territory (`territoryRadius` hexes of
+     *   our structures): defensive;
+     * - else their visible combat power is at least `stanceCautionRatio` x
+     *   ours: caution;
+     * - else neutral (the default).
+     * Returns null (feature off) when a config key is missing.
+     */
+    chooseDynamicStances() {
+        if (DYNAMIC_STANCE_KEYS.some(key => typeof this.harkConfig[key] !== 'number')) return null;
+        const { territoryRadius, stanceOffensiveRatio, stanceCautionRatio } = this.harkConfig;
+
+        const own = this.getActiveEntities();
+        const anchors = own.filter(entity => entity.isConstruct);
+        const ourPower = own
+            .filter(entity => this.helper.isCombatCapable(entity))
+            .reduce((sum, entity) => sum + this.combatPower(entity), 0);
+        const history = this.getAttackerHistory();
+
+        const byOwner = new Map();
+        for (const item of this.getVisibleForeignEntities()) {
+            if (this.isBarbarianOwner(item.ownerId)) continue;
+            if (!byOwner.has(item.ownerId)) {
+                byOwner.set(item.ownerId, { power: 0, attacked: false, intruding: false });
+            }
+            const record = byOwner.get(item.ownerId);
+            const entity = item.entity;
+            if (num(history.get(entity.id)) > 0) record.attacked = true;
+            if (!this.helper.isCombatCapable(entity)) continue;
+            record.power += this.combatPower(entity);
+            if (!entity.isConstruct
+                && this.helper.isDedicatedMilitary(entity, this.manifest)
+                && this.distanceToTerritory(entity, anchors) <= territoryRadius) {
+                record.intruding = true;
+            }
+        }
+
+        const stance = {};
+        const notes = [];
+        for (const [ownerId, record] of byOwner) {
+            let choice = 'neutral';
+            let why = '';
+            if (record.attacked) {
+                choice = ourPower >= record.power * stanceOffensiveRatio ? 'offensive' : 'defensive';
+                why = 'attacked us';
+            } else if (record.intruding) {
+                choice = 'defensive';
+                why = 'military units in our territory';
+            } else if (record.power > 0 && record.power >= ourPower * stanceCautionRatio) {
+                choice = 'caution';
+                why = 'much stronger';
+            }
+            if (choice === 'neutral') continue;
+            stance[ownerId] = choice;
+            notes.push(`${ownerId}:${choice} (${why}; power ours ${Math.round(ourPower)} / theirs ${Math.round(record.power)})`);
+        }
+        if (notes.length > 0) {
+            this.helper.aiLog(this.player, 'turn', `Dynamic stance (no directive set) | ${notes.join(', ')}`);
+        }
+        return stance;
     }
 
     // ==================== Shared predicates ====================
@@ -372,6 +468,60 @@ export class HarkManager extends AdaptiveManager {
         const attacked = num(this.getAttackerHistory().get(item.entity.id)) > 0;
         const hostile = this.isBarbarianOwner(item.ownerId) || HOSTILE_STANCES.has(stance);
         return hostile || attacked;
+    }
+
+    /** Own structures: the anchors of our territory. */
+    getTerritoryAnchors() {
+        return this.getActiveEntities().filter(entity => entity.isConstruct);
+    }
+
+    /** Hex distance from `cell` to our nearest structure (Infinity with none). */
+    distanceToTerritory(cell, anchors) {
+        return anchors.length
+            ? Math.min(...anchors.map(anchor => this.helper.distance(cell, anchor)))
+            : Infinity;
+    }
+
+    /**
+     * B6 retreat into territory. Territory is every cell within
+     * `territoryRadius` hexes of one of our structures. A retreat step never
+     * ends closer to the nearest threat. It qualifies if it gets farther from
+     * the threat, or keeps the distance while stepping from outside our
+     * territory into it. Ranking: inside territory first, then farther from
+     * the threat, then closer to our nearest structure. Without the config
+     * key, or with no structures left, the adaptive rule applies.
+     */
+    pickRetreatCell(unit, threats, currentMin, moveAction) {
+        const radius = this.harkConfig.territoryRadius;
+        const anchors = this.getTerritoryAnchors();
+        if (typeof radius !== 'number' || anchors.length === 0) {
+            return super.pickRetreatCell(unit, threats, currentMin, moveAction);
+        }
+
+        const homeNow = this.distanceToTerritory(unit, anchors);
+        let best = null;
+        for (const cell of this.helper.getNeighbors(unit.q, unit.r)) {
+            if (this.gameState.getEntityAt(cell.q, cell.r)) continue;
+            if (!unit.canStandOn(cell)) continue;
+            const check = moveAction.canDo(cell, null);
+            if (!check || !check.possible) continue;
+
+            const threatDist = Math.min(...threats.map(item => this.helper.distance(cell, item.entity)));
+            const home = this.distanceToTerritory(cell, anchors);
+            const inside = home <= radius;
+            const entersTerritory = inside && homeNow > radius;
+            if (threatDist < currentMin) continue;
+            if (threatDist === currentMin && !entersTerritory) continue;
+
+            const better = !best
+                || (inside !== best.inside ? inside
+                    : threatDist !== best.threatDist ? threatDist > best.threatDist
+                        : home < best.home);
+            if (better) best = { cell, threatDist, home, inside };
+        }
+        return best
+            ? { cell: best.cell, score: best.threatDist }
+            : { cell: null, score: currentMin };
     }
 
     // ==================== B5: production chains ====================
