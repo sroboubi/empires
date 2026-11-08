@@ -253,10 +253,17 @@ export class AdaptiveManager extends BaseManager {
 
     // ==================== Directives & weights ====================
 
+    /** The directive set by a director/LLM or the config, or null when none is set. */
+    getExplicitDirective() {
+        const controller = this.player.controller || {};
+        const config = controller.config || {};
+        return controller.directive || config.directive || config.aiDirective || null;
+    }
+
     resolveDirective() {
         const controller = this.player.controller || {};
         const config = controller.config || {};
-        const explicit = controller.directive || config.directive || config.aiDirective || null;
+        const explicit = this.getExplicitDirective();
 
         let focus = 'balanced';
         let focusBias = { economy: 1, military: 1, exploration: 1 };
@@ -725,9 +732,7 @@ export class AdaptiveManager extends BaseManager {
                 continue;
             }
 
-            actionCandidates.sort((a, b) => b.score - a.score);
-
-            for (const candidate of actionCandidates) {
+            for (const candidate of this.rankDeficitCandidates(actionCandidates)) {
                 const { step, producer } = candidate;
                 const chainText = step.finalTarget && step.finalTarget !== step.targetName
                     ? `${this.helper.camelToTitle(step.targetName)} (prerequisite for ${this.helper.camelToTitle(step.finalTarget)})`
@@ -758,6 +763,11 @@ export class AdaptiveManager extends BaseManager {
         // scrapping here: prefer destroying the lowest-value entity whose
         // maintenance is blocking recovery, and remove it from the game state.
         return false;
+    }
+
+    /** Order in which affordable deficit-remedy steps are tried: best score first. */
+    rankDeficitCandidates(candidates) {
+        return candidates.sort((a, b) => b.score - a.score);
     }
 
     // ==================== Combat ====================
@@ -940,6 +950,15 @@ export class AdaptiveManager extends BaseManager {
         const foreign = this.getVisibleForeignEntities();
         if (own.length === 0 || foreign.length === 0) return false;
 
+        const immediate = this.getImmediateThreats(own, foreign);
+        return this.respondToImmediateThreats(immediate, econ, involvedCells);
+    }
+
+    /**
+     * Foreign entities that need an answer this action (attacked us, can
+     * strike us now, or are striking an ally), most urgent first.
+     */
+    getImmediateThreats(own, foreign) {
         const history = this.getAttackerHistory();
         const immediate = [];
         const alliedEntities = foreign
@@ -977,7 +996,11 @@ export class AdaptiveManager extends BaseManager {
 
         immediate.sort((a, b) => b.attackerDamage - a.attackerDamage
             || Math.min(a.nearestOwn, a.nearestAlly) - Math.min(b.nearestOwn, b.nearestAlly));
+        return immediate;
+    }
 
+    /** Attack the most urgent immediate threat, else save adjacent vulnerable units. */
+    respondToImmediateThreats(immediate, econ, involvedCells) {
         for (const item of immediate) {
             const target = item.entity;
             const candidates = this.selectAttackers(target, { emergency: true });
@@ -1107,6 +1130,7 @@ export class AdaptiveManager extends BaseManager {
                 ? Math.min(...alliedEntities.map(ally => this.helper.distance(target, ally)))
                 : Infinity;
             const attackerDamage = asNumber(history.get(target.id));
+            const engagementDistance = this.getEngagementDistance(target, own, nearestOwn);
 
             const isBarbarian = item.ownerId === null || item.ownerId === undefined;
             const hostileStance = stance === 'offensive';
@@ -1136,7 +1160,7 @@ export class AdaptiveManager extends BaseManager {
                 allowed = this.hasOffensiveAdvantage(target, foreign);
                 reason = allowed ? 'offensive stance' : 'offensive stance (unfavorable local balance)';
             } else if (stance === 'defensive') {
-                allowed = nearestOwn <= this.config.threatRadius + 2;
+                allowed = engagementDistance <= this.config.threatRadius + 2;
                 reason = 'defensive engagement range';
             } else if (stance === 'caution' || stance === 'neutral') {
                 // Neutral is below caution: no special targeting — never
@@ -1168,19 +1192,48 @@ export class AdaptiveManager extends BaseManager {
                 stance,
                 nearestOwn,
                 nearestAlly,
+                engagementDistance,
                 attackerDamage,
                 isThreat,
                 reason,
                 priority: (isThreat ? 1000 + attackerDamage * 10 : 0)
                     + value
-                    - Math.min(nearestOwn, nearestAlly) * 2
+                    - Math.min(engagementDistance, nearestAlly) * 2
                     + (stance === 'offensive' ? 50 : 0)
                     + ownerScore * 0.05,
             });
         }
 
         targets.sort((a, b) => b.priority - a.priority);
+        if (this.engageCombatTargets(targets, involvedCells)) return true;
 
+        // Only workers/repairers are combat-capable but none was suitable for
+        // offensive action. If threatened, invest this action in a real defender.
+        const hasDedicated = own.some(entity =>
+            this.helper.isDedicatedMilitary(entity, this.manifest)
+            && asNumber(entity.actionPoints, 0) > 0
+        );
+        if (!hasDedicated && summary.hasThreats) {
+            return this.attemptProactiveBuild(econ, {
+                category: 'military',
+                defensive: true,
+                involvedCells,
+            });
+        }
+
+        return false;
+    }
+
+    /**
+     * Distance used for the defensive engagement range and for target
+     * priority. Adaptive measures it from any own entity (nearestOwn).
+     */
+    getEngagementDistance(target, own, nearestOwn) {
+        return nearestOwn;
+    }
+
+    /** Attack the highest-priority target any candidate can engage. True if an order was spent. */
+    engageCombatTargets(targets, involvedCells) {
         for (const item of targets) {
             const target = item.entity;
             const candidates = this.selectAttackers(target, { emergency: item.isThreat });
@@ -1210,21 +1263,6 @@ export class AdaptiveManager extends BaseManager {
                 }
             }
         }
-
-        // Only workers/repairers are combat-capable but none was suitable for
-        // offensive action. If threatened, invest this action in a real defender.
-        const hasDedicated = own.some(entity =>
-            this.helper.isDedicatedMilitary(entity, this.manifest)
-            && asNumber(entity.actionPoints, 0) > 0
-        );
-        if (!hasDedicated && summary.hasThreats) {
-            return this.attemptProactiveBuild(econ, {
-                category: 'military',
-                defensive: true,
-                involvedCells,
-            });
-        }
-
         return false;
     }
 
@@ -1233,10 +1271,7 @@ export class AdaptiveManager extends BaseManager {
         const foreign = this.getVisibleForeignEntities();
         if (own.length === 0 || foreign.length === 0) return false;
 
-        const threats = foreign.filter(item => {
-            const stance = this.getStance(item.ownerId);
-            return stance !== 'friendly' && stance !== 'ally';
-        });
+        const threats = foreign.filter(item => this.isRetreatThreat(item));
         if (threats.length === 0) return false;
 
         const vulnerable = own.filter(entity =>
@@ -1253,19 +1288,7 @@ export class AdaptiveManager extends BaseManager {
             const moveAction = unit.getActions ? unit.getActions().find(action => action.name === 'Move') : null;
             if (!moveAction) continue;
 
-            let bestCell = null;
-            let bestScore = currentMin;
-            for (const cell of this.helper.getNeighbors(unit.q, unit.r)) {
-                if (this.gameState.getEntityAt(cell.q, cell.r)) continue;
-                if (!unit.canStandOn(cell)) continue;
-                const check = moveAction.canDo(cell, null);
-                if (!check || !check.possible) continue;
-                const score = Math.min(...threats.map(item => this.helper.distance(cell, item.entity)));
-                if (score > bestScore) {
-                    bestScore = score;
-                    bestCell = cell;
-                }
-            }
+            const { cell: bestCell, score: bestScore } = this.pickRetreatCell(unit, threats, currentMin, moveAction);
 
             const from = { q: unit.q, r: unit.r };
             if (bestCell && moveAction.do(bestCell, null)) {
@@ -1281,6 +1304,34 @@ export class AdaptiveManager extends BaseManager {
         }
 
         return false;
+    }
+
+    /** Foreign entities that vulnerable units retreat from: everyone but friendly/ally. */
+    isRetreatThreat(item) {
+        const stance = this.getStance(item.ownerId);
+        return stance !== 'friendly' && stance !== 'ally';
+    }
+
+    /**
+     * The free neighbouring cell that moves `unit` farthest from the nearest
+     * threat. Returns { cell, score }; cell is null when no move improves on
+     * `currentMin` (score is then currentMin).
+     */
+    pickRetreatCell(unit, threats, currentMin, moveAction) {
+        let bestCell = null;
+        let bestScore = currentMin;
+        for (const cell of this.helper.getNeighbors(unit.q, unit.r)) {
+            if (this.gameState.getEntityAt(cell.q, cell.r)) continue;
+            if (!unit.canStandOn(cell)) continue;
+            const check = moveAction.canDo(cell, null);
+            if (!check || !check.possible) continue;
+            const score = Math.min(...threats.map(item => this.helper.distance(cell, item.entity)));
+            if (score > bestScore) {
+                bestScore = score;
+                bestCell = cell;
+            }
+        }
+        return { cell: bestCell, score: bestScore };
     }
 
     // ==================== Repairs ====================
@@ -1787,8 +1838,9 @@ export class AdaptiveManager extends BaseManager {
         );
         if (!buildAction) return 0;
 
-        const { candidates } = this.helper.findBuildCandidates(this.gameState, builder, targetName);
-        if (!candidates || candidates.length === 0) return 0;
+        const { candidates: found } = this.helper.findBuildCandidates(this.gameState, builder, targetName);
+        const candidates = this.filterBuildCandidates(found || []);
+        if (candidates.length === 0) return 0;
 
         let pool = candidates;
 
@@ -1853,6 +1905,11 @@ export class AdaptiveManager extends BaseManager {
         }
 
         return ordersUsed;
+    }
+
+    /** Hook to drop build sites a subclass must not use. Adaptive keeps every site. */
+    filterBuildCandidates(candidates) {
+        return candidates;
     }
 
     // ==================== Exploration ====================
@@ -1930,23 +1987,8 @@ export class AdaptiveManager extends BaseManager {
         const dedicated = own.filter(entity => this.helper.isDedicatedMilitary(entity, this.manifest));
         const militaryExplorerCap = summary.hasThreats ? 0 : Math.max(1, Math.floor(dedicated.length / 2));
 
-        let explorers = own.filter(entity => {
-            if (!this.helper.isMobile(entity)) return false;
-            if (asNumber(entity.actionPoints, 0) <= 0) return false;
-            if (options.excludeSupport && (this.helper.isBuilder(entity) || this.helper.isRepairer(entity))) {
-                return false;
-            }
-            if (asNumber(entity.maxHealth) > 0
-                && asNumber(entity.health) <= asNumber(entity.maxHealth) * this.config.repairHealthRatio) {
-                return false;
-            }
-            if (this.helper.isDedicatedMilitary(entity, this.manifest)) {
-                if (this.turnState.militaryExplorers >= militaryExplorerCap) return false;
-            }
-            if (this.helper.isBuilder(entity) && (econ.urgent.length > 0 || summary.hasThreats)) return false;
-            if (this.helper.isRepairer(entity) && (damaged.length > 0 || summary.hasThreats)) return false;
-            return true;
-        });
+        const context = { econ, options, summary, damaged, militaryExplorerCap };
+        let explorers = own.filter(entity => this.isExplorerCandidate(entity, context));
 
         if (explorers.length === 0) return false;
 
@@ -2050,6 +2092,26 @@ export class AdaptiveManager extends BaseManager {
         }
 
         return false;
+    }
+
+    /** May `entity` be sent exploring now? context: { econ, options, summary, damaged, militaryExplorerCap }. */
+    isExplorerCandidate(entity, context) {
+        const { econ, options, summary, damaged, militaryExplorerCap } = context;
+        if (!this.helper.isMobile(entity)) return false;
+        if (asNumber(entity.actionPoints, 0) <= 0) return false;
+        if (options.excludeSupport && (this.helper.isBuilder(entity) || this.helper.isRepairer(entity))) {
+            return false;
+        }
+        if (asNumber(entity.maxHealth) > 0
+            && asNumber(entity.health) <= asNumber(entity.maxHealth) * this.config.repairHealthRatio) {
+            return false;
+        }
+        if (this.helper.isDedicatedMilitary(entity, this.manifest)) {
+            if (this.turnState.militaryExplorers >= militaryExplorerCap) return false;
+        }
+        if (this.helper.isBuilder(entity) && (econ.urgent.length > 0 || summary.hasThreats)) return false;
+        if (this.helper.isRepairer(entity) && (damaged.length > 0 || summary.hasThreats)) return false;
+        return true;
     }
 
     exploreTowardCoord(coord, explorers, involvedCells) {
