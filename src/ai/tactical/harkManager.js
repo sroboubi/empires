@@ -314,8 +314,7 @@ export class HarkManager extends AdaptiveManager {
      * around it). Everything else is the adaptive local-balance check.
      */
     hasOffensiveAdvantage(target, foreign) {
-        const owner = this.turnState?.proactiveOwner;
-        if (owner && String(target.owner?.id) === owner) {
+        if (target.owner && this.isProactiveOwner(target.owner.id)) {
             const anchors = this.getActiveEntities().filter(entity => entity.isConstruct);
             if (this.distanceToTerritory(target, anchors) > this.harkConfig.offenceLeash) return false;
         }
@@ -355,6 +354,12 @@ export class HarkManager extends AdaptiveManager {
     }
 
     // ==================== Shared predicates ====================
+
+    /** True for the opponent the proactive offence picked this turn (see updateOffence). */
+    isProactiveOwner(ownerId) {
+        const owner = this.turnState?.proactiveOwner;
+        return Boolean(owner) && String(ownerId) === owner;
+    }
 
     isBarbarianOwner(ownerId) {
         return ownerId === null || ownerId === undefined;
@@ -626,8 +631,11 @@ export class HarkManager extends AdaptiveManager {
         if (FRIENDLY_STANCES.has(stance)) return false;
         if (!this.helper.isCombatCapable(item.entity)) return false;
         const attacked = num(this.getAttackerHistory().get(item.entity.id)) > 0;
-        const hostile = this.isBarbarianOwner(item.ownerId) || HOSTILE_STANCES.has(stance);
-        return hostile || attacked;
+        if (attacked) return true;
+        // A proactive target (we chose to attack a weaker player who has not
+        // attacked us): only its dedicated military is worth fleeing from.
+        if (this.isProactiveOwner(item.ownerId)) return this.helper.isDedicatedMilitary(item.entity, this.manifest);
+        return this.isBarbarianOwner(item.ownerId) || HOSTILE_STANCES.has(stance);
     }
 
     /** Hex distance from `cell` to our nearest structure (Infinity with none). */
@@ -706,7 +714,7 @@ export class HarkManager extends AdaptiveManager {
             ? this.getVisibleForeignEntities()
                 .filter(item => !this.isBarbarianOwner(item.ownerId)
                     && item.entity.isConstruct
-                    && BUILD_BUFFER_STANCES.has(this.getStance(item.ownerId)))
+                    && (BUILD_BUFFER_STANCES.has(this.getStance(item.ownerId)) || this.isProactiveOwner(item.ownerId)))
                 .map(item => item.entity)
             : [];
         this.turnState.restrictedStructures = list;
