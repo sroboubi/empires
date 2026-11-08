@@ -12,7 +12,6 @@
 import { HexGrid, DIRECTIONS_8 } from './hexGrid.js';
 import { camelToTitle, sleep, calculateAttackMultiplier } from './utils.js';
 import { applyResourceYieldBonus } from './resources.js';
-import { reconcileEntities } from './renderer.js';
 import Entity from './entity.js';
 import { CONFIG } from './config.js';
 
@@ -79,8 +78,8 @@ export class AiHelper {
     }
 
     /** @returns {Object|null} movement cost path between two cells */
-    movementCostTo(fromCell, toCell, costFunc) {
-        return this.gameState.hexGrid.movementCostTo(fromCell, toCell, costFunc);
+    movementCostTo(fromCell, toCell, costFunc, options) {
+        return this.gameState.hexGrid.movementCostTo(fromCell, toCell, costFunc, options);
     }
 
     /** @returns {Object} sight/trajectory info between two cells */
@@ -107,11 +106,6 @@ export class AiHelper {
 
     // ==================== Engine bridge: callbacks ====================
 
-    /** Reconcile entities in the renderer. */
-    reconcileEntities(gameState) {
-        reconcileEntities(gameState);
-    }
-
     /** Sleep for the given milliseconds. */
     async sleep(ms) {
         await sleep(ms);
@@ -133,8 +127,8 @@ export class AiHelper {
     }
 
     /** Create a new entity instance. */
-    createEntity(meta, owner, gameState, cell) {
-        return new Entity(meta, owner, gameState, cell);
+    createEntity(meta, owner, gameState, cell, initialState = null) {
+        return new Entity(meta, owner, gameState, cell, initialState);
     }
 
     /** Styled AI logging. */
@@ -170,7 +164,10 @@ export class AiHelper {
                 const tScale = (tcs && nb.terrain?.name in tcs) ? tcs[nb.terrain.name] : 1;
                 if ((baseMc * tScale) > maxAP) continue;
                 const occupant = gameState.getEntityAt(nb.q, nb.r);
-                if (occupant && occupant !== unit) continue;
+                // Compare by id (see canStageFrom): through the proxy the
+                // occupant is a wrapped proxy and `unit` is raw, so `===`
+                // never matches.
+                if (occupant && occupant.id !== unit.id) continue;
                 const path = [...cur.path, nb];
                 reachable.set(key, { cell: nb, path });
                 queue.push({ q: nb.q, r: nb.r, path, dist: cur.dist + 1 });
@@ -215,7 +212,11 @@ export class AiHelper {
         const canStageFrom = (cell) => {
             if (!reachable.has(`${cell.q},${cell.r}`)) return false;
             const occupant = gameState.getEntityAt(cell.q, cell.r);
-            return !occupant || occupant === sourceEntity;
+            // Compare by id, not identity: when called through the proxy
+            // (P8), gameState is filtered so getEntityAt returns a wrapped
+            // proxy, while sourceEntity is the raw object — `===` is then
+            // always false and a builder can never stage from its own cell.
+            return !occupant || occupant.id === sourceEntity.id;
         };
 
         const isExplored = owner && typeof owner.isExplored === 'function'
@@ -248,8 +249,10 @@ export class AiHelper {
                 }
             }
 
-            if (typeof sourceEntity.canStandOn === 'function' && !sourceEntity.canStandOn(cell)) continue;
-
+            // No canStandOn check on the build cell (Shahin, 2026-11-05):
+            // only spawnConditions gates building. The builder stages from
+            // a reachable adjacent cell below — it need not stand on the
+            // build cell itself (stationary builders, future ships).
             let stage = null;
             for (const nb of this.getNeighbors(cell.q, cell.r)) {
                 if (!canStageFrom(nb)) continue;
@@ -393,36 +396,10 @@ export class AiHelper {
 
     // ==================== AI logic: pathfinding ====================
 
-    findWalkablePath(gameState, unit, targetCoord, maxNodes = 5000) {
-        if (!this.gameState?.hexGrid || !unit || !targetCoord) return null;
-        const startCell = unit.cell || this.gameState.hexGrid.getCell(unit.q, unit.r);
-        if (!startCell) return null;
-        if (unit.q === targetCoord.q && unit.r === targetCoord.r) return [];
-
-        const targetKey = `${targetCoord.q},${targetCoord.r}`;
-        const visited = new Set();
-        visited.add(`${unit.q},${unit.r}`);
-
-        const queue = [{ q: unit.q, r: unit.r, path: [] }];
-        let nodes = 0;
-
-        while (queue.length > 0 && nodes++ < maxNodes) {
-            const cur = queue.shift();
-            for (const nb of this.getNeighbors(cur.q, cur.r)) {
-                const key = `${nb.q},${nb.r}`;
-                if (visited.has(key)) continue;
-                const isTarget = (key === targetKey);
-                if (!unit.canStandOn(nb)) continue;
-                const nextPath = [...cur.path, nb];
-                if (isTarget) return nextPath;
-                visited.add(key);
-                const occupant = gameState.getEntityAt(nb.q, nb.r);
-                if (occupant && occupant !== unit) continue;
-                queue.push({ q: nb.q, r: nb.r, path: nextPath });
-            }
-        }
-        return null;
-    }
+    // (G1: findWalkablePath — the naive BFS with a 5000-node cap — is
+    // deleted. Point-to-point pathing is movementCostTo with
+    // allowDetours: true; it is A*, has no cap, and returns a
+    // best-effort path when the target is unreachable.)
 
     findPathTowardsUnexplored(explorer, gameState, player, targetedCells = new Set(), targetCells = null) {
         const grid = this.gameState?.hexGrid;
@@ -477,7 +454,10 @@ export class AiHelper {
                 const nextPath = [...cur.path, nb];
                 reachable.set(nbKey, { cell: nb, path: nextPath });
                 const occupant = gameState.getEntityAt(nb.q, nb.r);
-                if (occupant && occupant !== explorer) continue;
+                // Compare by id (see canStageFrom): through the proxy the
+                // occupant is a wrapped proxy and `explorer` is raw, so
+                // `===` never matches.
+                if (occupant && occupant.id !== explorer.id) continue;
                 queue.push({ q: nb.q, r: nb.r, path: nextPath });
             }
         }
@@ -555,7 +535,29 @@ export class AiHelper {
             if (currentAttackCheck && !currentAttackCheck.possible) {
                 lastCheckReason = currentAttackCheck.reason;
             }
-            const currentMult = isCurrentPossible ? attackMultiplier(sourceEntity.cell).total : 0;
+            // G3: the multiplier at the current cell, whether or not the attack
+            // is affordable right now. Treating "unaffordable" as 0 made any
+            // in-range cell look better, so the unit repositioned after every
+            // hit and ping-ponged instead of attacking.
+            const currentMult = attackMultiplier(sourceEntity.cell).total;
+            const costFunc = typeof sourceEntity.getMovementCost === 'function'
+                ? sourceEntity.getMovementCost.bind(sourceEntity)
+                : (terrain) => terrain.movementCost || 1;
+            // Dry-run attack cost from a candidate cell (same formula as
+            // entity.js Attack canDo, without moving there first).
+            const attackCostFrom = (cell) => {
+                const scale = sourceEntity.attackCostScale ?? 1;
+                const exh = sourceEntity.state?.battleExhaustion ?? 1;
+                if (sourceEntity.range && typeof sourceEntity.range === 'object') {
+                    return Math.ceil(scale * exh * this.distance(cell, targetCell));
+                }
+                const pathRes = this.movementCostTo(cell, targetCell, costFunc, { allowDetours: true });
+                // A best-effort path's cost is the cost to the closest
+                // reachable cell, NOT to the target — an unreachable target
+                // must look unaffordable, not cheap.
+                if (!pathRes || !pathRes.reached) return Infinity;
+                return Math.ceil(scale * exh * pathRes.cost);
+            };
 
             if (isCurrentPossible && currentMult > 1.0) {
                 const prevHealth = targetEntity.health;
@@ -579,15 +581,11 @@ export class AiHelper {
 
             let moved = false;
             if (moveAction && sourceEntity.actionPoints > 0) {
-                const costFunc = typeof sourceEntity.getMovementCost === 'function'
-                    ? sourceEntity.getMovementCost.bind(sourceEntity)
-                    : (terrain) => terrain.movementCost || 1;
-                const pathResult = this.movementCostTo(sourceEntity.cell, targetCell, costFunc);
+                const pathResult = this.movementCostTo(sourceEntity.cell, targetCell, costFunc, { allowDetours: true });
+                // Detour mode never returns null (except invalid input) and
+                // already returns a best-effort path toward the target when
+                // it is unreachable, so no BFS fallback is needed here.
                 let pathCells = pathResult ? pathResult.path : [];
-                if (pathCells.length === 0) {
-                    const altPath = this.findWalkablePath(gameState, sourceEntity, targetCell);
-                    if (altPath) pathCells = altPath;
-                }
                 const candidateCells = new Set();
                 for (const nb of this.getNeighbors(sourceEntity.q, sourceEntity.r)) candidateCells.add(nb);
                 for (const cell of pathCells) {
@@ -617,6 +615,11 @@ export class AiHelper {
                     }
 
                     if (inRange) {
+                        // G3: only reposition if the attack is still affordable
+                        // AFTER the move — otherwise the unit burns an order
+                        // moving to a cell it can't attack from.
+                        const apAfterMove = sourceEntity.actionPoints - checkMove.cost;
+                        if (apAfterMove < attackCostFrom(candCell)) continue;
                         const mult = attackMultiplier(candCell).total;
                         if (mult > bestMoveMult) {
                             bestMoveMult = mult;
@@ -649,7 +652,11 @@ export class AiHelper {
                             closestCell = candCell;
                         }
                     }
-                    if (closestCell) {
+                    // G4: only move if the candidate is actually closer than
+                    // where we stand — otherwise the unit sidesteps (or steps
+                    // away) and bounces back next iteration.
+                    const currentDist = this.distance(sourceEntity, targetCell);
+                    if (closestCell && closestDist < currentDist) {
                         const fromCoord = `(${sourceEntity.q},${sourceEntity.r})`;
                         if (moveAction.do(closestCell, null)) {
                             ordersUsed++;
@@ -957,7 +964,9 @@ export class AiHelper {
             }
             if (targets.length === 0) {
                 this.aiLog(player || 'AI', 'explore', `No unexplored cells to the ${direction}.`);
-                return 0;
+                // G7: return a result object like every other path, not 0 —
+                // callers read res.result.status.
+                return fail(`No unexplored cells to the ${direction}.`);
             }
             return doExplore(targets, `to the ${direction}`);
         }
@@ -975,6 +984,15 @@ export class AiHelper {
      * @returns {boolean} true if chat was initiated, false if initiator had no orders
      */
     async chat(initiator, receiver, initialMessage = null, maxExchanges = null) {
+        // L6: resolve the harnesses BEFORE deducting the order — the old
+        // code consumed 1 order first, then discovered the other side
+        // couldn't reply (no harness, no modal) and the order was gone.
+        const initiatorHarness = await initiator.getAiManager();
+        const receiverHarness = await receiver.getAiManager();
+        const canProceed = initiatorHarness || receiverHarness
+            || typeof this.gameState?.onOpenChatModal === 'function';
+        if (!canProceed) return false;
+
         // Initiating chat costs 1 order
         if (!initiator.consumeOrders(1)) {
             return false;
@@ -985,13 +1003,22 @@ export class AiHelper {
         // Max back-and-forth exchanges per chat, from controller config (default 6).
         const maxEx = maxExchanges ?? initiator.controller?.config?.maxChatExchanges ?? 6;
 
-        const initiatorHarness = await initiator.getAiManager();
-        const receiverHarness = await receiver.getAiManager();
+        // P5: each harness must see the other player through its OWN filtered
+        // gameState — passing the raw Player handed the opponent's resources,
+        // orders, history and (for LLM players) API key to the other AI.
+        const viewOf = (harness, player) => {
+            const gs = harness?.gameState;
+            if (gs && Array.isArray(gs.players)) {
+                return gs.players.find(p => p.id === player.id) || player;
+            }
+            return player;
+        };
+
         // Case 1: Both players are AI -> background chat loop (invisible to human)
         if (initiatorHarness && receiverHarness) {
             let firstMsg = initialMessage;
             if (!firstMsg) {
-                const opening = await initiatorHarness.generateChatReply(receiver, "Open diplomatic dialogue with an initial statement or proposal.");
+                const opening = await initiatorHarness.generateChatReply(viewOf(initiatorHarness, receiver), "Open diplomatic dialogue with an initial statement or proposal.");
                 firstMsg = opening.content;
             }
             this.gameState.addChatMessage(initiator, receiver, firstMsg);
@@ -1001,7 +1028,7 @@ export class AiHelper {
             let otherPlayer = initiator;
 
             for (let i = 0; i < maxEx; i++) {
-                const reply = await currentHarness.generateChatReply(otherPlayer);
+                const reply = await currentHarness.generateChatReply(viewOf(currentHarness, otherPlayer));
                 this.gameState.addChatMessage(currentSpeaker, otherPlayer, reply.content);
 
                 if (reply.ended) {
@@ -1017,9 +1044,9 @@ export class AiHelper {
             }
 
             // Both AI players add summary note to their history
-            await initiatorHarness.summarizeChatAndAddNote(receiver);
+            await initiatorHarness.summarizeChatAndAddNote(viewOf(initiatorHarness, receiver));
             if (receiverHarness && receiverHarness !== initiatorHarness) {
-                await receiverHarness.summarizeChatAndAddNote(initiator);
+                await receiverHarness.summarizeChatAndAddNote(viewOf(receiverHarness, initiator));
             }
             return true;
         }

@@ -42,3 +42,4 @@ export function setTimeOfDay(hour) {
   _timeOfDay = hour % 24;
   if (_timeOfDay < 0) _timeOfDay += 24;
 }
+export function cancelTimeOfDayAnimation() {}

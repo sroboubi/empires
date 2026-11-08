@@ -29,6 +29,9 @@ export class LLMClient {
         this.systemPrompt = systemPrompt;
         this.responseSchema = responseSchema;
         this.apiKey = apiKey;
+        // B17: baseUrl.trim() threw TypeError when no provider resolved
+        // (baseUrl undefined). Fail with a clear error instead.
+        if (!baseUrl) throw new Error('LLMClient requires a baseUrl (no provider resolved).');
         this.baseUrl = baseUrl.trim().replace(/\/+$/, '') + '/chat/completions';
         this.orderedModels = Array.isArray(orderedModels) ? orderedModels : [orderedModels];
         this.maxRetries = maxRetries;
@@ -151,10 +154,13 @@ export class LLMClient {
 
                         const errMsg = JSON.stringify(errData);
 
+                        // B10: a compatibility strip is not a failed attempt —
+                        // don't consume the retry budget for it.
                         if (payload.response_format && (errMsg.includes('response_format') || errMsg.includes('json_schema') || errMsg.includes('schema'))) {
                             console.warn('[LLMClient] Provider rejected response_format; falling back to prompt enforcement.');
                             delete payload.response_format;
                             this.allowSchema = false;    // one time fix for provider - if we hit this once, we won't try again.
+                            attempts--;
                             continue;
                         }
 
@@ -162,7 +168,17 @@ export class LLMClient {
                             console.warn('[LLMClient] Provider rejected reasoning parameter; stripping.');
                             delete payload.reasoning;
                             this.allowReasoning = false;    // one time fix for provider - if we hit this once, we won't try again.
+                            attempts--;
                             continue;
+                        }
+
+                        // B12: a 4xx error (except 408/409/429) is permanent
+                        // for this model — wrong model name, bad key, bad
+                        // request. Don't burn retries on it; move to the
+                        // next model.
+                        if (response.status >= 400 && response.status < 500
+                            && response.status !== 408 && response.status !== 409 && response.status !== 429) {
+                            throw new Error(`HTTP ${response.status}: ${errMsg}`);
                         }
 
                         if (response.status === 429 || response.status >= 500) {
@@ -226,6 +242,12 @@ export class LLMClient {
                     } else {
                         console.error(`[LLM Request Error - Model: ${model}]:`, error.message);
                     }
+
+                    // B12: a permanent 4xx (wrong model, bad key, bad
+                    // request) never succeeds on retry — break to the next
+                    // model immediately instead of burning the retry budget.
+                    const permanent4xx = /HTTP (400|401|402|403|404|405|406|407|410|411|412|413|414|415|416|417|418|422|423|424|425|426|428|431|451):/.test(error.message || '');
+                    if (permanent4xx) break;
 
                     if (attempts > this.maxRetries) break;
                 }

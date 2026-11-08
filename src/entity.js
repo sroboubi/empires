@@ -25,23 +25,55 @@ export default class Entity {
    * @param {Object} [initialState] - Optional state override (e.g. deserialization)
    */
   constructor(entityData, ownerPlayer, gameState, cell = null, initialState = null) {
-    this.data = entityData || {};
+    // L10: deep-clone the manifest entry — a shallow spread shared nested
+    // objects (damage, armor, movement, spawnCost, score) across every
+    // entity of the type, so mutating one would mutate all of them.
+    this.data = structuredClone(entityData || {});
     this.owner = ownerPlayer || null;
     this.gameState = gameState;
     this.cell = cell;
     this.q = cell ? cell.q : (initialState ? initialState.q : 0);
     this.r = cell ? cell.r : (initialState ? initialState.r : 0);
 
-    this.id = (initialState && initialState.id) || `${this.data.name || 'entity'}_${this.owner ? this.owner.id : 'neutral'}_${Math.random().toString(36).substr(2, 9)}`;
+    // Counter-based IDs (<name>_<owner>_<n>) so LLMs get short, readable
+    // identifiers. A supplied id (load/replay) is kept as-is and consumes
+    // nothing; a fresh entity increments its owner's counter, or the
+    // gameState unowned counter when it has no owner. No counter holder
+    // (bare test harness) falls back to the old random suffix.
+    if (initialState && initialState.id) {
+      this.id = initialState.id;
+    } else if (this.owner) {
+      this.owner.entityCounter = (this.owner.entityCounter ?? 0) + 1;
+      this.id = `${this.data.name || 'entity'}_${this.owner.id}_${this.owner.entityCounter}`;
+    } else if (this.gameState) {
+      this.gameState.unownedEntityCounter = (this.gameState.unownedEntityCounter ?? 0) + 1;
+      this.id = `${this.data.name || 'entity'}_neutral_${this.gameState.unownedEntityCounter}`;
+    } else {
+      this.id = `${this.data.name || 'entity'}_neutral_${Math.random().toString(36).substr(2, 9)}`;
+    }
     this.name = this.data.name || 'entity';
     this.age = 0; // turns
 
     // Dynamic state via JS spread notation: defaults -> entityData -> initialState
+    // Uses the cloned this.data so nested objects aren't shared with the manifest.
     this.state = {
       ...this.getDefaults(),
-      ...(entityData || {}),
+      ...this.data,
       ...(initialState || {})
     };
+
+    // JSON cannot represent Infinity: a save round-trip turns the water
+    // scales (1e1000 in the manifest, i.e. Infinity) into null, and null
+    // made getMovementCost return 0 — loaded units could walk on water.
+    // Restore Infinity here so every consumer (getMovementCost, aiHelper)
+    // sees the real value. This also heals saves already written with null.
+    // data.movement and state.movement may be the same object (fresh
+    // entity) or different ones (loaded: state comes from initialState),
+    // so normalize both.
+    for (const tcs of [this.data.movement?.terrainCostScale, this.state.movement?.terrainCostScale]) {
+      if (!tcs) continue;
+      for (const k of Object.keys(tcs)) if (tcs[k] === null) tcs[k] = Infinity;
+    }
 
     // Actions list defined on Entity instance
     this.actions = [];
@@ -254,6 +286,26 @@ export default class Entity {
   }
 
   /**
+   * Resolves a caller-supplied cell against the real grid. AIs (and the UI)
+   * pass cell objects around; the engine must not trust them — a fabricated
+   * cell could carry fake terrain, and a stale one could point off-grid.
+   * Returns the real grid cell, or null if there is none.
+   */
+  _resolveCell(cell) {
+    if (!cell || typeof cell.q !== 'number' || typeof cell.r !== 'number') return null;
+    return this.gameState?.hexGrid?.getCell(cell.q, cell.r) ?? null;
+  }
+
+  /**
+   * Validates a target entity for Attack/Repair: it must be alive and a
+   * member of the live gameState.entities list (not destroyed, not stale,
+   * not fabricated).
+   */
+  _isLiveTarget(target) {
+    return !!target && !target.destroyed && (this.gameState?.entities?.includes(target) ?? false);
+  }
+
+  /**
    * Gets the movement cost for a given cell.
    * @param {Object} target - Cell object or Terrain object
    * @returns {number}
@@ -261,7 +313,10 @@ export default class Entity {
   getMovementCost(target) {
     if (!target || this.isConstruct) return Infinity;
     const terrain = target.terrain ? target.terrain : target;
-    const scale = (this.terrainCostScale && terrain.name in this.terrainCostScale) ? this.terrainCostScale[terrain.name] : 1;
+    let scale = (this.terrainCostScale && terrain.name in this.terrainCostScale) ? this.terrainCostScale[terrain.name] : 1;
+    // A null scale is a JSON-corrupted Infinity (see constructor): fail
+    // closed — impassable, never free (null would multiply to a cost of 0).
+    if (scale === null) scale = Infinity;
     return (terrain.movementCost || 1) * scale;
   }
 
@@ -284,9 +339,36 @@ export default class Entity {
 
   /**
    * Lifecycle Hook called at turn start / game loop step.
-   * Deducts maintenance costs. Set active to false if maintenance resources not met.
+   * Split into phases so Player.step() can run them as passes: yields from
+   * all entities first (a building's yield can cover a unit's upkeep),
+   * then upkeep, then age/regen/AP. A single interleaved pass starved
+   * units that spawn before their producers (M3).
    */
   step() {
+    this.collectYield();
+    this.payUpkeep();
+    this.finishStep();
+  }
+
+  /**
+   * Whether this entity yields this turn: active and healthy enough.
+   * The 95% health threshold lives here, not as a magic number at each
+   * call site (Shahin, 2026-11-05).
+   */
+  canYield() {
+    return this.active && this.health > this.maxHealth * 0.95;
+  }
+
+  /** Yields from this entity, based on last turn's active state. */
+  collectYield() {
+    // only give yields if not damaged
+    if (this.canYield() && this.owner && this.baseYields) {
+      this.owner.addResources(this.yields);
+    }
+  }
+
+  /** Deducts maintenance costs. Sets active to false if resources not met. */
+  payUpkeep() {
     const cost = this.getCostToMaintain();
     const hasCost = Object.keys(cost).length > 0;
 
@@ -311,12 +393,10 @@ export default class Entity {
     } else {
       this.active = true;
     }
+  }
 
-    // only give yields if not damaged
-    if (this.active && this.owner && this.baseYields && this.health > this.maxHealth * 0.95) {
-      this.owner.addResources(this.yields);
-    }
-
+  /** Age, regen from unused AP, AP refill, battle-exhaustion reset. */
+  finishStep() {
     this.age++;
 
     if (this.active) {
@@ -335,7 +415,13 @@ export default class Entity {
    */
   destroy() {
     this.destroyed = true;
-    audio.playEntitySfx(this, 'destroy');
+    // M7: only play the destroy sound if a human can see the cell — the
+    // old code played combat/build/destroy SFX for fog-hidden actions,
+    // leaking that something happened out of sight. SHOW_ALL means the
+    // watcher sees everything, so sound is fine there too.
+    if (CONFIG.SHOW_ALL || this.gameState?.isVisibleToHuman(this.cell)) {
+      audio.playEntitySfx(this, 'destroy');
+    }
     this.visibleCells.clear();
     if (this.owner && this.gameState) {
       this.owner.updateVisibility(this.gameState);
@@ -399,7 +485,10 @@ export default class Entity {
     if (wasDestroyed) {
       this.destroy();
     } else if (effectiveDamage > 0) {
-      audio.playEntitySfx(this, 'damage');
+      // M7: gate on human visibility (see destroy()).
+      if (CONFIG.SHOW_ALL || this.gameState?.isVisibleToHuman(this.cell)) {
+        audio.playEntitySfx(this, 'damage');
+      }
     }
 
     const { x, z } = HexGrid.axialToPixel(this.cell.q, this.cell.r);
@@ -437,10 +526,15 @@ export default class Entity {
         canDo: (cell, entity) => {
           if (!this.active) return { possible: false, reason: "Unit is inactive (maintenance unpaid)." };
           if (!cell) return { possible: false, reason: "No target cell selected." };
-          if (entity && entity !== this) return { possible: false, reason: "Target cell is occupied." };
-          if (!this.canStandOn(cell)) return { possible: false, reason: "Cannot stand on target terrain." };
+          // Engine-side validation: resolve against the real grid and check
+          // occupancy ourselves — never trust the caller's cell/entity args.
+          const realCell = this._resolveCell(cell);
+          if (!realCell) return { possible: false, reason: "Target cell does not exist." };
+          const occupant = this.gameState?.getEntityAt?.(realCell.q, realCell.r);
+          if (occupant && occupant !== this) return { possible: false, reason: "Target cell is occupied." };
+          if (!this.canStandOn(realCell)) return { possible: false, reason: "Cannot stand on target terrain." };
 
-          const pathRes = this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.movementCostTo(this.cell, cell, this.getMovementCost.bind(this)) : null;
+          const pathRes = this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.movementCostTo(this.cell, realCell, this.getMovementCost.bind(this)) : null;
           if (!pathRes) return { possible: false, reason: "No valid path to target cell." };
 
           const cost = pathRes.cost;
@@ -451,7 +545,7 @@ export default class Entity {
 
           return {
             possible: true,
-            reason: `Move to (${cell.q}, ${cell.r}) for ${displayNum(cost)} AP and 1 order.`,
+            reason: `Move to (${realCell.q}, ${realCell.r}) for ${displayNum(cost)} AP and 1 order.`,
             cost: cost,
             ordersRequired: affordability.ordersRequired,
             path: pathRes.path
@@ -461,6 +555,9 @@ export default class Entity {
           const actionObj = this.actions.find(a => a.name === "Move");
           const check = actionObj.canDo(cell, entity);
           if (!check.possible) return false;
+          // Use the real grid cell, not the caller's object.
+          cell = this._resolveCell(cell);
+          if (!cell) return false;
 
           const oldCell = this.cell;
           const oldQ = this.q;
@@ -515,7 +612,9 @@ export default class Entity {
         canDo: (cell, entity) => {
           if (!this.active) return { possible: false, reason: "Unit is inactive." };
           if (!cell) return { possible: false, reason: "No target cell selected." };
-          const cost = Math.ceil(this.getMovementCost(this.cell) / 2);
+          // L2: half the movement cost, as the spec says — no ceil. AP is
+          // fractional elsewhere (logs show 0.7 AP), so 0.5 is fine.
+          const cost = this.getMovementCost(this.cell) / 2;
           const affordability = this.checkActionAffordability(cost);
           if (!affordability.possible) {
             return affordability;
@@ -569,11 +668,15 @@ export default class Entity {
         canDo: (cell, entity) => {
           if (!this.active) return { possible: false, reason: "Unit is inactive (maintenance unpaid)." };
           if (!entity) return { possible: false, reason: "No target entity specified." };
+          if (!this._isLiveTarget(entity)) return { possible: false, reason: "Target is destroyed or no longer in the game." };
           if (!CONFIG.FRIENDLY_FIRE && entity.owner && this.owner && entity.owner.id === this.owner.id) {
             return { possible: false, reason: "Cannot attack friendly entities." };
           }
 
-          const dist = HexGrid.distance(this, cell || entity);
+          // Range is measured from the target's actual cell, never from a
+          // caller-supplied cell — a passed cell could be anywhere.
+          const targetCell = entity.cell;
+          const dist = HexGrid.distance(this, targetCell);
           let cost = 0;
 
           // Ranged vs Melee evaluation
@@ -585,7 +688,7 @@ export default class Entity {
             }
 
             if (this.gameState && this.gameState.hexGrid) {
-              const sight = this.gameState.hexGrid.getSightAndTrajectory(this, cell || entity);
+              const sight = this.gameState.hexGrid.getSightAndTrajectory(this, targetCell);
               const isTrajectoryValid = sight.visible || (sight.maxObstructionDelta < (this.range.arcHeight || 0));
               if (!isTrajectoryValid) {
                 return { possible: false, reason: "Ranged trajectory blocked by terrain height." };
@@ -594,7 +697,7 @@ export default class Entity {
             cost = Math.ceil(this.attackCostScale * this.state.battleExhaustion * dist);
           } else {
             // Melee attack
-            const pathRes = this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.movementCostTo(this.cell, cell || entity, this.getMovementCost.bind(this)) : null;
+            const pathRes = this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.movementCostTo(this.cell, targetCell, this.getMovementCost.bind(this)) : null;
             if (!pathRes) {
               return { possible: false, reason: "No valid path to target for melee attack." };
             } else if (pathRes.path.length > 2) {
@@ -627,9 +730,9 @@ export default class Entity {
           const check = actionObj.canDo(cell, entity);
           if (!check.possible) return false;
 
-          // Update attacker facing towards target
+          // Update attacker facing towards target (target's real cell)
           if (this.gameState && this.gameState.hexGrid) {
-            const dirToTarget = this.gameState.hexGrid.directionTo(this, cell || entity);
+            const dirToTarget = this.gameState.hexGrid.directionTo(this, entity.cell);
             this.facing = dirToTarget.fromSource;
           }
 
@@ -673,11 +776,16 @@ export default class Entity {
         description: "Repair an adjacent entity, consuming all AP to restore HP.",
         canDo: (cell, target) => {
           if (!target) return { possible: false, reason: "No target to repair." };
+          if (!this._isLiveTarget(target)) return { possible: false, reason: "Target is destroyed or no longer in the game." };
+          // Repair anything (own, ally, even enemy) — intentional design,
+          // not a bug. Hark flagged it as L1; Shahin confirmed 2026-11-05
+          // the unrestricted repair is intended.
           if (!this.active) return { possible: false, reason: "Entity is inactive." };
           if (this.actionPoints <= 0) return { possible: false, reason: "Entity has no Action Points left." };
           if (!this.state.repairables.some(r => r.toLowerCase() === target.name.toLowerCase())) return { possible: false, reason: "Target is not repairable by this entity." };
           if (target.health >= target.maxHealth) return { possible: false, reason: "Target is already at full health." };
-          const dist = HexGrid.distance(this, cell || target);
+          // Distance from the target's actual cell, never a caller-supplied cell.
+          const dist = HexGrid.distance(this, target.cell);
           if (dist !== 1) return { possible: false, reason: "Target must be adjacent (1 cell away)." };
           const cost = this.actionPoints;
           const affordability = this.checkActionAffordability(cost);
@@ -733,16 +841,23 @@ export default class Entity {
         canDo: (cell, entity) => {
           if (!this.active) return { possible: false, reason: "Worker is inactive." };
           if (!cell) return { possible: false, reason: "No target cell selected." };
-          if (entity && entity !== this) return { possible: false, reason: "Target cell is occupied." };
+          // Engine-side validation: resolve against the real grid and check
+          // occupancy ourselves — never trust the caller's cell/entity args.
+          const realCell = this._resolveCell(cell);
+          if (!realCell) return { possible: false, reason: "Target cell does not exist." };
+          const occupant = this.gameState?.getEntityAt?.(realCell.q, realCell.r);
+          if (occupant && occupant !== this) return { possible: false, reason: "Target cell is occupied." };
 
-          if (!this.canStandOn(cell)) return { possible: false, reason: "Cannot build construct on target terrain." };
-
+          // Only spawnConditions gates where an entity can be built (Shahin,
+          // 2026-11-05): canStandOn is about moving onto a cell, not building
+          // on it — a stationary village must be able to spawn units on
+          // terrain it can't be built on, and a worker must be able to build
+          // a ship on water it can't stand on. No builder check either.
           const spawnConditions = meta ? meta.spawnConditions : null;
 
-          // The construct being built must allow the target terrain, in
-          // addition to the builder being able to stand on it.
+          // The construct being built must allow the target terrain.
           if (Array.isArray(spawnConditions?.terrain) && spawnConditions.terrain.length > 0) {
-            const terrainName = cell.terrain ? cell.terrain.name : '';
+            const terrainName = realCell.terrain ? realCell.terrain.name : '';
             const allowed = spawnConditions.terrain.some(t => t.toLowerCase() === terrainName.toLowerCase());
             if (!allowed) {
               return { possible: false, reason: `Cannot build ${targetName} on ${terrainName} terrain (requires ${spawnConditions.terrain.join(', ')}).` };
@@ -762,7 +877,7 @@ export default class Entity {
               if (typeof existingMinSep === 'number') {
                 const requiredSep = Math.max(newMinSep, existingMinSep);
                 if (requiredSep > 0) {
-                  const dist = HexGrid.distance(cell, e);
+                  const dist = HexGrid.distance(realCell, e);
                   if (dist < requiredSep) {
                     return {
                       possible: false,
@@ -774,10 +889,14 @@ export default class Entity {
             }
           }
 
-          const dist = HexGrid.distance(this, cell);
+          const dist = HexGrid.distance(this, realCell);
           if (dist !== 1) return { possible: false, reason: "Target must be adjacent (1 cell away)." };
 
-          const apCost = this.state.actionPoints !== undefined ? 1 : 0;
+          // Build always costs 1 AP (Shahin, 2026-11-05). An entity with no
+          // AP system can't build even with a buildables list — a misconfig
+          // then shows up immediately because the entity can't build
+          // anything, instead of silently building for free.
+          const apCost = 1;
           const affordability = this.checkActionAffordability(apCost);
           if (!affordability.possible) return affordability;
 
@@ -789,7 +908,7 @@ export default class Entity {
           const apStr = apCost > 0 ? ', 1 AP' : '';
           return {
             possible: true,
-            reason: `Build ${targetName} on (${cell.q}, ${cell.r}) costing ${costStr}${apStr} and 1 order.`,
+            reason: `Build ${targetName} on (${realCell.q}, ${realCell.r}) costing ${costStr}${apStr} and 1 order.`,
             cost: cost,
             apCost: apCost,
             ordersRequired: affordability.ordersRequired
@@ -799,11 +918,20 @@ export default class Entity {
           const actionObj = this.actions.find(a => a.name === actionName);
           const check = actionObj.canDo(cell, entity);
           if (!check.possible) return false;
+          // Use the real grid cell, not the caller's object.
+          cell = this._resolveCell(cell);
+          if (!cell) return false;
           if (this.owner) {
             this.owner.consumeResources(check.cost);
           }
           this.spendActionCost(check.apCost, check.ordersRequired);
           if (this.gameState) {
+            // L6: a treasure under the build site pays its reward instead of
+            // vanishing silently. (checkTreasurePickup takes the collecting
+            // unit; the build site is the cell that matters.)
+            if (cell.resource?.kind === 'treasure') {
+              checkTreasurePickup({ gameState: this.gameState, cell, owner: this.owner, name: this.name });
+            }
             // If building a construct on a resource cell, destroy the resources
             // before spawning so they don't interfere. The renderer's
             // reconcileCellResources() will clean up the 3D models.
@@ -812,7 +940,10 @@ export default class Entity {
             }
             const newEntity = this.gameState.spawnEntity(buildable, cell, this.owner);
             if (newEntity) {
-              audio.playEntitySfx(newEntity, 'build');
+              // M7: gate on human visibility (see destroy()).
+              if (CONFIG.SHOW_ALL || this.gameState?.isVisibleToHuman(cell)) {
+                audio.playEntitySfx(newEntity, 'build');
+              }
             }
             const { x, z } = HexGrid.axialToPixel(cell.q, cell.r);
             spawnParticleBurst(x, cell.terrain.height, z, 0xcca055);
@@ -901,6 +1032,10 @@ export default class Entity {
       // Instance age (not part of state): drives barbarian maxAge deaths,
       // so saves must carry it or a loaded game resets every age to 0.
       age: this.age,
+      // Q4: the entity's full manifest entry, so the save is self-contained
+      // — a loaded game is an exact snapshot and no longer depends on the
+      // live manifest (old saves without it fall back to the manifest).
+      data: this.data,
       state: this.state
     };
   }
