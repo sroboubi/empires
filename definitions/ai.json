@@ -30,13 +30,7 @@
                 "builderLastResortRatio": 0.5,
                 "territoryRadius": 3,
                 "stanceOffensiveRatio": 1.5,
-                "stanceCautionRatio": 2.0,
-                "offenceEnterRatio": 2.0,
-                "offenceExitRatio": 1.3,
-                "offenceMemoryRounds": 10,
-                "offenceHomeGarrison": 1,
-                "offenceMaxDistance": 12,
-                "offenceLeash": 99
+                "stanceCautionRatio": 2.0
             }
         },
         "llm-json-gemma-4": {

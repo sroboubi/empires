@@ -64,18 +64,10 @@ const HARK_CONFIG_KEYS = [
     'territoryRadius',
     'stanceOffensiveRatio',
     'stanceCautionRatio',
-    'offenceEnterRatio',
-    'offenceExitRatio',
-    'offenceMemoryRounds',
-    'offenceHomeGarrison',
-    'offenceMaxDistance',
-    'offenceLeash',
 ];
 
 /** Keys the dynamic stance needs; if any is missing it stays off (all neutral). */
 const DYNAMIC_STANCE_KEYS = ['territoryRadius', 'stanceOffensiveRatio', 'stanceCautionRatio'];
-/** Keys the proactive offence (part of the dynamic stance) needs; if any is missing it stays off. */
-const OFFENCE_KEYS = ['offenceEnterRatio', 'offenceExitRatio', 'offenceMemoryRounds', 'offenceHomeGarrison', 'offenceMaxDistance', 'offenceLeash'];
 
 /** Stances under which an opponent's combat units are retreat threats (B6). */
 const HOSTILE_STANCES = new Set(['offensive', 'defensive', 'caution']);
@@ -153,16 +145,18 @@ export class HarkManager extends AdaptiveManager {
      * - else their military units are inside our territory (within
      *   `territoryRadius` hexes of one of our structures): defensive;
      * - else their power is at least `stanceCautionRatio` x ours: caution;
-     * - else neutral (the default). Hark never turns offensive on a player
-     *   that has not attacked it: a tested pre-emptive rule (offensive when
-     *   3x stronger) lost more games than it won against adaptive.
+     * - else neutral (the default). Hark does not turn offensive on a player
+     *   that has not attacked it. Proactive offence was tested (round 3,
+     *   paired seeds: strike force vs the opponent's recently seen army,
+     *   hysteresis, home garrison, leash to our territory, no emergency
+     *   strikes on the target's units) and did not beat this version: in
+     *   these games opponents meet rarely and armies are one or two units,
+     *   so it changed few games and won none more (see the PR notes).
      * Returns null (feature off) when one of DYNAMIC_STANCE_KEYS is missing.
      */
     chooseDynamicStances() {
         if (DYNAMIC_STANCE_KEYS.some(key => typeof this.harkConfig[key] !== 'number')) return null;
         const { territoryRadius, stanceOffensiveRatio, stanceCautionRatio } = this.harkConfig;
-        const offenceOn = OFFENCE_KEYS.every(key => typeof this.harkConfig[key] === 'number');
-        const round = num(this.gameState?.currentRound, 1);
 
         const own = this.getActiveEntities();
         const anchors = own.filter(entity => entity.isConstruct);
@@ -174,11 +168,10 @@ export class HarkManager extends AdaptiveManager {
         for (const item of this.getVisibleForeignEntities()) {
             if (this.isBarbarianOwner(item.ownerId)) continue;
             if (!byOwner.has(item.ownerId)) {
-                byOwner.set(item.ownerId, { power: 0, attacked: false, intruding: false, entities: [] });
+                byOwner.set(item.ownerId, { power: 0, attacked: false, intruding: false });
             }
             const record = byOwner.get(item.ownerId);
             const entity = item.entity;
-            record.entities.push(entity);
             if (num(history.get(entity.id)) > 0) record.attacked = true;
             if (!isArmy(entity)) continue;
             record.power += this.combatPower(entity);
@@ -187,8 +180,6 @@ export class HarkManager extends AdaptiveManager {
                 record.intruding = true;
             }
         }
-
-        const offence = offenceOn ? this.updateOffence(byOwner, own, anchors, round) : null;
 
         const stance = {};
         const notes = [];
@@ -201,9 +192,6 @@ export class HarkManager extends AdaptiveManager {
             } else if (record.intruding) {
                 choice = 'defensive';
                 why = 'military units in our territory';
-            } else if (offence && String(offence.ownerId) === String(ownerId)) {
-                choice = 'offensive';
-                why = `proactive: strike force ${Math.round(offence.strike)} vs known army ${Math.round(offence.known)}`;
             } else if (record.power > 0 && record.power >= ourPower * stanceCautionRatio) {
                 choice = 'caution';
                 why = 'much stronger';
@@ -212,154 +200,13 @@ export class HarkManager extends AdaptiveManager {
             stance[ownerId] = choice;
             notes.push(`${ownerId}:${choice} (${why}; power ours ${Math.round(ourPower)} / theirs ${Math.round(record.power)})`);
         }
-        this.turnState.proactiveOwner = offence && stance[offence.ownerId] === 'offensive'
-            && !byOwner.get(offence.ownerId)?.attacked ? String(offence.ownerId) : null;
         if (notes.length > 0) {
             this.helper.aiLog(this.player, 'turn', `Dynamic stance (no directive set) | ${notes.join(', ')}`);
         }
         return stance;
     }
 
-    // ==================== Proactive offence (dynamic stance, no directive only) ====================
-
-    /**
-     * Dedicated military units kept home: the `offenceHomeGarrison` closest
-     * to our structures. They never join a proactive attack.
-     */
-    getHomeGarrison(own, anchors) {
-        const count = this.harkConfig.offenceHomeGarrison;
-        if (!(count > 0) || anchors.length === 0) return new Set();
-        const dedicated = own.filter(entity => !entity.isConstruct
-            && this.helper.isDedicatedMilitary(entity, this.manifest));
-        const sorted = [...dedicated].sort((a, b) =>
-            this.distanceToTerritory(a, anchors) - this.distanceToTerritory(b, anchors));
-        return new Set(sorted.slice(0, count).map(entity => entity.id));
-    }
-
-    /**
-     * Picks at most one opponent to attack without having been attacked.
-     * Their army is what we have SEEN in the last `offenceMemoryRounds`
-     * rounds (not just what is visible now). Our strike force is our
-     * dedicated military minus the home garrison. Enter when strike >=
-     * `offenceEnterRatio` x known army and one of their entities is within
-     * `offenceMaxDistance` of our strike force; stay while strike >=
-     * `offenceExitRatio` x known army (hysteresis).
-     */
-    updateOffence(byOwner, own, anchors, round) {
-        const { offenceEnterRatio, offenceExitRatio, offenceMemoryRounds, offenceMaxDistance } = this.harkConfig;
-        if (!this.enemyArmyMemory) this.enemyArmyMemory = new Map();
-        const memory = this.enemyArmyMemory;
-        for (const [ownerId, record] of byOwner) {
-            if (!memory.has(ownerId)) memory.set(ownerId, new Map());
-            const seen = memory.get(ownerId);
-            for (const entity of record.entities) {
-                // Their fighting force: dedicated military and armed structures
-                // (towers). Workers and settlers do not defend against a raid.
-                const armed = entity.isConstruct
-                    ? this.helper.isCombatCapable(entity) && this.combatPower(entity) > 0
-                    : this.helper.isDedicatedMilitary(entity, this.manifest);
-                if (!armed) continue;
-                seen.set(entity.id, { entity, power: this.combatPower(entity), round });
-            }
-        }
-        const known = new Map();
-        for (const [ownerId, seen] of memory) {
-            let power = 0;
-            for (const [id, info] of seen) {
-                if (info.entity.destroyed || num(info.entity.health) <= 0 || round - info.round > offenceMemoryRounds) {
-                    seen.delete(id);
-                    continue;
-                }
-                power += info.power;
-            }
-            known.set(ownerId, power);
-        }
-
-        const garrison = this.getHomeGarrison(own, anchors);
-        const strikers = own.filter(entity => !entity.isConstruct
-            && this.helper.isDedicatedMilitary(entity, this.manifest) && !garrison.has(entity.id));
-        const strike = strikers.reduce((sum, entity) => sum + this.combatPower(entity), 0);
-        this.turnState.homeGarrison = garrison;
-
-        const previous = this.offence?.ownerId;
-        let best = null;
-        for (const [ownerId, record] of byOwner) {
-            const theirs = known.get(ownerId) || 0;
-            this.helper.aiLog(this.player, 'detail', `Offence check | owner ${ownerId} | strike ${Math.round(strike)} (${strikers.length} units, garrison ${garrison.size}) | known army ${Math.round(theirs)} | attacked ${record.attacked} | intruding ${record.intruding}`);
-            if (record.attacked || record.intruding || strike <= 0) continue;
-            const ratio = theirs > 0 ? strike / theirs : Infinity;
-            const needed = String(ownerId) === String(previous) ? offenceExitRatio : offenceEnterRatio;
-            if (ratio < needed) continue;
-            const reach = strikers.length && record.entities.length
-                ? Math.min(...record.entities.map(target =>
-                    Math.min(...strikers.map(unit => this.helper.distance(unit, target)))))
-                : Infinity;
-            if (reach > offenceMaxDistance) continue;
-            const candidate = { ownerId, ratio, reach, strike, known: theirs };
-            // One target at a time: keep the current one, else the weakest, then the nearest.
-            if (!best
-                || (String(ownerId) === String(previous)) && String(best.ownerId) !== String(previous)
-                || (String(best.ownerId) !== String(previous) && (ratio > best.ratio || (ratio === best.ratio && reach < best.reach)))) {
-                best = candidate;
-            }
-        }
-        this.offence = best;
-        return best;
-    }
-
-    /**
-     * Leash: a proactive (not provoked) attack only goes after targets
-     * within `offenceLeash` hexes of one of our structures, so the strike
-     * force does not march into the opponent's base (and the barbarians
-     * around it). Everything else is the adaptive local-balance check.
-     */
-    hasOffensiveAdvantage(target, foreign) {
-        if (target.owner && this.isProactiveOwner(target.owner.id)) {
-            const anchors = this.getActiveEntities().filter(entity => entity.isConstruct);
-            if (this.distanceToTerritory(target, anchors) > this.harkConfig.offenceLeash) return false;
-        }
-        return super.hasOffensiveAdvantage(target, foreign);
-    }
-
-    /**
-     * Adaptive makes every unit of an offensive-stance owner that can reach
-     * us an immediate threat, struck by the emergency pool with no force
-     * check. For a proactive target that has not attacked us, the attack
-     * goes through attemptCombat instead (local balance + leash).
-     */
-    getImmediateThreats(own, foreign) {
-        const immediate = super.getImmediateThreats(own, foreign);
-        const owner = this.turnState?.proactiveOwner;
-        if (!owner) return immediate;
-        return immediate.filter(item => !(String(item.ownerId) === owner
-            && num(item.attackerDamage) === 0 && !item.alliedThreat));
-    }
-
-    /**
-     * A proactive target's units far from us are not threats: adaptive
-     * counts every unit of an offensive-stance owner as a threat, which
-     * stops military exploration and skews building while we are the
-     * attacker. They count again once they attack us or come within
-     * threatRadius.
-     */
-    getThreatSummary() {
-        const summary = super.getThreatSummary();
-        const owner = this.turnState?.proactiveOwner;
-        if (!owner) return summary;
-        const threats = summary.threats.filter(item => !(String(item.ownerId) === owner
-            && num(item.attackerDamage) === 0 && item.nearestOwn > this.config.threatRadius));
-        if (threats.length === summary.threats.length) return summary;
-        const power = threats.reduce((sum, item) => sum + this.combatPower(item.entity), 0);
-        return { threats, power, hasThreats: threats.length > 0 };
-    }
-
     // ==================== Shared predicates ====================
-
-    /** True for the opponent the proactive offence picked this turn (see updateOffence). */
-    isProactiveOwner(ownerId) {
-        const owner = this.turnState?.proactiveOwner;
-        return Boolean(owner) && String(ownerId) === owner;
-    }
 
     isBarbarianOwner(ownerId) {
         return ownerId === null || ownerId === undefined;
@@ -507,13 +354,7 @@ export class HarkManager extends AdaptiveManager {
      * otherwise:         the adaptive AI's opportunistic pool, unchanged.
      */
     selectAttackers(target, options = {}) {
-        if (!options.emergency && !options.advance) {
-            const pool = super.selectAttackers(target, options);
-            const garrison = this.turnState.homeGarrison;
-            const proactive = this.turnState.proactiveOwner;
-            if (!garrison || garrison.size === 0 || !proactive || String(target.owner?.id) !== proactive) return pool;
-            return pool.filter(unit => !garrison.has(unit.id));
-        }
+        if (!options.emergency && !options.advance) return super.selectAttackers(target, options);
         const failed = this.turnState.failedAttacks;
         const pool = this.getDefencePool(target)
             .filter(unit => !failed.has(this.failKey(unit, target)));
@@ -631,11 +472,8 @@ export class HarkManager extends AdaptiveManager {
         if (FRIENDLY_STANCES.has(stance)) return false;
         if (!this.helper.isCombatCapable(item.entity)) return false;
         const attacked = num(this.getAttackerHistory().get(item.entity.id)) > 0;
-        if (attacked) return true;
-        // A proactive target (we chose to attack a weaker player who has not
-        // attacked us): only its dedicated military is worth fleeing from.
-        if (this.isProactiveOwner(item.ownerId)) return this.helper.isDedicatedMilitary(item.entity, this.manifest);
-        return this.isBarbarianOwner(item.ownerId) || HOSTILE_STANCES.has(stance);
+        const hostile = this.isBarbarianOwner(item.ownerId) || HOSTILE_STANCES.has(stance);
+        return hostile || attacked;
     }
 
     /** Hex distance from `cell` to our nearest structure (Infinity with none). */
@@ -714,7 +552,7 @@ export class HarkManager extends AdaptiveManager {
             ? this.getVisibleForeignEntities()
                 .filter(item => !this.isBarbarianOwner(item.ownerId)
                     && item.entity.isConstruct
-                    && (BUILD_BUFFER_STANCES.has(this.getStance(item.ownerId)) || this.isProactiveOwner(item.ownerId)))
+                    && BUILD_BUFFER_STANCES.has(this.getStance(item.ownerId)))
                 .map(item => item.entity)
             : [];
         this.turnState.restrictedStructures = list;
