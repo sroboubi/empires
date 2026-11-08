@@ -21,6 +21,9 @@ npm test -- 20
 # Custom game setup via config file
 npm test -- --config config.example.json
 npm test -- 20 --config mygame.json
+
+# Reproducible map: the same seed gives the same map
+npm test -- 20 --seed 42
 ```
 
 ## Game setup
@@ -31,6 +34,7 @@ Game configuration comes from an optional JSON config file (see `config.example.
 |-------|-------------|
 | `turns` | Number of turns to simulate |
 | `mapSize` | Hex map size (default 12; Small is 32) |
+| `seed` | Map seed (number or string). The same seed and `mapSize` give the same map; `--seed N` on the command line overrides it. Omitted = random map. Only map generation is seeded; gameplay randomness (barbarians, treasure rewards) is not. |
 | `players` | Array of `{id, name, color, controller}` — `controller` is `'ai'` (SmartManager) or `'llm'` (LLM harness) |
 | `barbarians` | Barbarian settings object, or null to disable |
 | `llm` | `{apiKey, baseUrl, orderedModels}` — required for `'llm'` players |

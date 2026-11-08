@@ -31,18 +31,18 @@
 
 // --- random helpers ---------------------------------------------------------
 
-function randRange(min, max) {
-  return min + Math.random() * (max - min);
+function randRange(min, max, random = Math.random) {
+  return min + random() * (max - min);
 }
 
-function pickRandom(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
+function pickRandom(arr, random = Math.random) {
+  return arr[Math.floor(random() * arr.length)];
 }
 
-function shuffled(arr) {
+function shuffled(arr, random = Math.random) {
   const a = arr.slice();
   for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(random() * (i + 1));
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
@@ -53,11 +53,11 @@ function shuffled(arr) {
  * current count, otherwise increment and roll again (capped at max). So for
  * min=1,max=4: P(1)=50%, P(2)=25%, P(3)=12.5%, P(4)=12.5%.
  */
-export function rollQuantity(min, max) {
+export function rollQuantity(min, max, random = Math.random) {
   min = Math.max(1, Math.floor(min ?? 1));
   max = Math.max(min, Math.floor(max ?? 1));
   let q = min;
-  while (q < max && Math.random() < 0.5) q++;
+  while (q < max && random() < 0.5) q++;
   return q;
 }
 
@@ -99,23 +99,23 @@ export function findSpawnDef(manifestData, kind, name) {
  * sit on top of each other. Each item's scale is randomized by
  * `group.sizeVariance` (fraction, e.g. 0.1 = ±10% around the group's size).
  */
-export function scatterItems(group, quantity, hexSize = 1) {
+export function scatterItems(group, quantity, hexSize = 1, random = Math.random) {
   const items = [];
   const urls = group.modelUrls || [];
   if (!urls.length || quantity <= 0) return items;
   const inner = hexSize * 0.2;
   const outer = hexSize * 0.6;
   const variance = typeof group.sizeVariance === 'number' ? group.sizeVariance : 0.1;
-  const baseAngle = randRange(0, Math.PI * 2);
+  const baseAngle = randRange(0, Math.PI * 2, random);
   for (let i = 0; i < quantity; i++) {
     const angle = baseAngle + (i / quantity) * Math.PI * 2;
-    const dist = randRange(inner, outer);
+    const dist = randRange(inner, outer, random);
     items.push({
-      modelUrl: pickRandom(urls),
+      modelUrl: pickRandom(urls, random),
       dx: Math.cos(angle) * dist,
       dz: Math.sin(angle) * dist,
-      rotY: randRange(0, Math.PI * 2),
-      scale: randRange(1 - variance, 1 + variance),
+      rotY: randRange(0, Math.PI * 2, random),
+      scale: randRange(1 - variance, 1 + variance, random),
     });
   }
   return items;
@@ -134,11 +134,12 @@ function hasAdjacentSameResource(hexGrid, cell, resourceName) {
  * For each cell whose terrain matches a definition, the roll uses the
  * adjacent probability when a neighbor already holds the same resource,
  * otherwise the base probability. One resource OR treasure per cell.
+ * `random` defaults to Math.random; pass a seeded one for a reproducible map.
  */
-export function spawnCellResources(hexGrid, manifestData, hexSize = 1) {
+export function spawnCellResources(hexGrid, manifestData, hexSize = 1, random = Math.random) {
   const defs = getSpawnDefs(manifestData);
   if (!defs.length || !hexGrid) return;
-  for (const cell of shuffled(hexGrid.getCellsArray())) {
+  for (const cell of shuffled(hexGrid.getCellsArray(), random)) {
     if (cell.resource) continue; // one resource/treasure per cell — no stacking
     const terrainName = cell.terrain ? cell.terrain.name : null;
     for (const { kind, def } of defs) {
@@ -148,14 +149,14 @@ export function spawnCellResources(hexGrid, manifestData, hexSize = 1) {
       const p = hasAdjacentSameResource(hexGrid, cell, def.name)
         ? (prob.adjacent || 0)
         : (prob.base || 0);
-      if (p > 0 && Math.random() < p) {
+      if (p > 0 && random() < p) {
         const q = group.quantity || {};
-        const quantity = rollQuantity(q.min ?? 1, q.max ?? 1);
+        const quantity = rollQuantity(q.min ?? 1, q.max ?? 1, random);
         cell.resource = {
           kind,
           name: def.name,
           quantity,
-          items: scatterItems(group, quantity, hexSize),
+          items: scatterItems(group, quantity, hexSize, random),
         };
         break;
       }

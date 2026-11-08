@@ -4,6 +4,7 @@ import { manageBarbarians } from './barbarians/manager.js';
 import { AiHelper } from './aiHelper.js';
 import { spawnCellResources, checkTreasurePickup } from './resources.js';
 import { CONFIG } from './config.js';
+import { createSeededRandom } from './random.js';
 import Entity from './entity.js';
 
 /**
@@ -116,12 +117,16 @@ export class GameState {
    * @param {number} radius - Grid radius (number of hex rings from the center)
    * @param {Array|Object} [terrainConfig=null] - Optional terrain definitions
    * @param {Object} [manifestData=null] - Optional manifest (spawns natural resources & treasures)
+   * @param {number|string|null} [seed=null] - Map seed. The same seed, radius and
+   *   manifest give the same terrain and resources. Without one the map is random
+   *   (Math.random), as before. Only map generation is seeded.
    */
-  generateMap(radius, terrainConfig = null, manifestData = null) {
+  generateMap(radius, terrainConfig = null, manifestData = null, seed = null) {
     const config = terrainConfig || this.manifestData?.terrains || null;
-    this.hexGrid = new HexGrid(radius, config);
+    const random = seed === null || seed === undefined ? Math.random : createSeededRandom(seed);
+    this.hexGrid = new HexGrid(radius, config, random);
     if (manifestData) {
-      spawnCellResources(this.hexGrid, manifestData, CONFIG.HEX_SIZE);
+      spawnCellResources(this.hexGrid, manifestData, CONFIG.HEX_SIZE, random);
     }
     this.entities = [];
     this.activePlayerIndex = 0;
