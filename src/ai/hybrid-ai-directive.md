@@ -101,7 +101,7 @@ When no directive is set:
 
 The AI expands economically, defends its territory, explores opportunistically, and treats all opponents as neutral (doesn't seek fights, doesn't avoid them either).
 
-**Internal stance/focus.** Only when no directive is provided, a tactical AI may choose its own per-opponent stances and focus each turn from the game state (e.g. relative strength, who attacked it, proximity). When a directive is provided, the tactical AI must obey it and never substitute its own stances or focus.
+**Internal stance/focus.** Only when no directive is provided, a tactical AI may choose its own per-opponent stances and focus each turn from the game state (e.g. relative strength, who attacked it, proximity), in order to win. This is not only a reaction to being attacked: it may proactively take an offensive stance toward an opponent it clearly out-powers. When a directive is provided, the tactical AI must obey it and never substitute its own stances or focus.
 
 ## Implementation Notes
 

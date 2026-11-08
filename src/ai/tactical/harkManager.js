@@ -69,12 +69,13 @@ const HARK_CONFIG_KEYS = [
     'offenceMemoryRounds',
     'offenceHomeGarrison',
     'offenceMaxDistance',
+    'offenceLeash',
 ];
 
 /** Keys the dynamic stance needs; if any is missing it stays off (all neutral). */
 const DYNAMIC_STANCE_KEYS = ['territoryRadius', 'stanceOffensiveRatio', 'stanceCautionRatio'];
 /** Keys the proactive offence (part of the dynamic stance) needs; if any is missing it stays off. */
-const OFFENCE_KEYS = ['offenceEnterRatio', 'offenceExitRatio', 'offenceMemoryRounds', 'offenceHomeGarrison', 'offenceMaxDistance'];
+const OFFENCE_KEYS = ['offenceEnterRatio', 'offenceExitRatio', 'offenceMemoryRounds', 'offenceHomeGarrison', 'offenceMaxDistance', 'offenceLeash'];
 
 /** Stances under which an opponent's combat units are retreat threats (B6). */
 const HOSTILE_STANCES = new Set(['offensive', 'defensive', 'caution']);
@@ -304,6 +305,35 @@ export class HarkManager extends AdaptiveManager {
         }
         this.offence = best;
         return best;
+    }
+
+    /**
+     * Leash: a proactive (not provoked) attack only goes after targets
+     * within `offenceLeash` hexes of one of our structures, so the strike
+     * force does not march into the opponent's base (and the barbarians
+     * around it). Everything else is the adaptive local-balance check.
+     */
+    hasOffensiveAdvantage(target, foreign) {
+        const owner = this.turnState?.proactiveOwner;
+        if (owner && String(target.owner?.id) === owner) {
+            const anchors = this.getActiveEntities().filter(entity => entity.isConstruct);
+            if (this.distanceToTerritory(target, anchors) > this.harkConfig.offenceLeash) return false;
+        }
+        return super.hasOffensiveAdvantage(target, foreign);
+    }
+
+    /**
+     * Adaptive makes every unit of an offensive-stance owner that can reach
+     * us an immediate threat, struck by the emergency pool with no force
+     * check. For a proactive target that has not attacked us, the attack
+     * goes through attemptCombat instead (local balance + leash).
+     */
+    getImmediateThreats(own, foreign) {
+        const immediate = super.getImmediateThreats(own, foreign);
+        const owner = this.turnState?.proactiveOwner;
+        if (!owner) return immediate;
+        return immediate.filter(item => !(String(item.ownerId) === owner
+            && num(item.attackerDamage) === 0 && !item.alliedThreat));
     }
 
     /**

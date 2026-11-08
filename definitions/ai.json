@@ -35,7 +35,8 @@
                 "offenceExitRatio": 1.3,
                 "offenceMemoryRounds": 10,
                 "offenceHomeGarrison": 1,
-                "offenceMaxDistance": 12
+                "offenceMaxDistance": 12,
+                "offenceLeash": 99
             }
         },
         "llm-json-gemma-4": {
