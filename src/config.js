@@ -36,6 +36,10 @@ export var CONFIG = {
   AUDIO_URL: './definitions/audio.json',
   RESOURCES_URL: './definitions/resources.json',
   DEFAULT_SETTINGS_URL: './definitions/defaultSettings.json',
+  // L8: ai.json/leaders.json were hardcoded in loadAiDefinitions — now
+  // configurable like every other definition file.
+  AI_URL: './definitions/ai.json',
+  LEADERS_URL: './definitions/leaders.json',
 };
 
 // Parse the current URL parameters

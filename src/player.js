@@ -1,4 +1,4 @@
-import { animateToTimeOfDay } from "./renderer.js";
+import { animateToTimeOfDay, cancelTimeOfDayAnimation, setTimeOfDay } from "./renderer.js";
 import { AiHelper } from './aiHelper.js';
 import { createAiManager } from './aiInterfaceProxy.js';
 
@@ -23,6 +23,9 @@ export class Player {
   constructor(id, name, gameState, color, startingResources = {}, description = '', controller = null, ordersConfig = null, isReplay = false) {
     this.id = id;
     this.name = name;
+    // Counter for entity IDs: each fresh entity this player owns takes the
+    // next number (<name>_<playerId>_<n>). Saved/loaded with the player.
+    this.entityCounter = 0;
     this.color = color;
     this.gameState = gameState;
     this.description = description || '';
@@ -37,7 +40,10 @@ export class Player {
     };
 
     this.ordersConfig = ordersConfig || {};
-    this.orders = ordersConfig?.initial ?? ordersConfig?.max ?? 0;
+    // L4: start at max - perTurn when no explicit initial is set. Starting
+    // at max meant the first step()'s refill overflowed the whole perTurn
+    // amount into free resources (+15 on turn 1 with the defaults).
+    this.orders = ordersConfig?.initial ?? Math.max(0, (ordersConfig?.max ?? 0) - (ordersConfig?.perTurn ?? 0));
     this.maxOrders = ordersConfig?.max ?? 0;
     this.ordersPerTurn = ordersConfig?.perTurn ?? 0;
 
@@ -95,9 +101,12 @@ export class Player {
 
     const historyEntry = {
       timestamp,
+      round,
       category: entry.category,
-      entityName: entry.entityName || null,
-      entityId: entry.entityId || null,
+      // L3: callers put entityName/entityId under extra, not top-level —
+      // fall back to extra so the fields are actually populated.
+      entityName: entry.entityName || entry.extra?.entityName || null,
+      entityId: entry.entityId || entry.extra?.entityId || null,
       details: entry.details,
       extra: entry.extra || {}
     };
@@ -179,9 +188,12 @@ export class Player {
   async step(onTurnEnd) {
     this.refillOrders();
     const ownedEntities = this.getEntities();
-    for (const entity of ownedEntities) {
-      entity.step();
-    }
+    // M3: yields first across all entities, then upkeep, then the rest.
+    // A single interleaved pass starved units that spawn before the
+    // buildings whose yields would cover their upkeep.
+    for (const entity of ownedEntities) entity.collectYield();
+    for (const entity of ownedEntities) entity.payUpkeep();
+    for (const entity of ownedEntities) entity.finishStep();
 
     this.updateVisibility();
     this.recalculateScore();
@@ -212,6 +224,7 @@ export class Player {
   getResourceProfile() {
     const totalUpkeep = {};
     const totalYields = {};
+    const maxTotalYields = {};
     const netIncome = {};
     const turnsRemaining = {};
     const stock = this.resources;
@@ -225,8 +238,22 @@ export class Player {
         totalUpkeep[res] = (totalUpkeep[res] || 0) + amt;
       }
 
-      if (entity.active) {
-        for (const [res, amt] of Object.entries(entity.yields)) {
+      // maxTotalYields: capacity — what every entity would yield at full
+      // health and active (Shahin, 2026-11-05). Lets the AI tell "I need
+      // more farms" apart from "I need to repair/reactivate my farms".
+      for (const [res, amt] of Object.entries(entity.yields || {})) {
+        resourceKeys.add(res);
+        maxTotalYields[res] = (maxTotalYields[res] || 0) + amt;
+      }
+
+      // totalYields: actual expected income — only entities that canYield()
+      // (active and above 95% HP). Upkeep stays total demand on purpose:
+      // the profile shows what everything wants to consume if it could pay.
+      const yields = typeof entity.canYield === 'function'
+        ? entity.canYield()
+        : (entity.active && entity.health > entity.maxHealth * 0.95);
+      if (yields) {
+        for (const [res, amt] of Object.entries(entity.yields || {})) {
           resourceKeys.add(res);
           totalYields[res] = (totalYields[res] || 0) + amt;
         }
@@ -237,6 +264,7 @@ export class Player {
     for (const resKey of resourceKeys) {
       if (totalUpkeep[resKey] == undefined) totalUpkeep[resKey] = 0;
       if (totalYields[resKey] == undefined) totalYields[resKey] = 0;
+      if (maxTotalYields[resKey] == undefined) maxTotalYields[resKey] = 0;
       netIncome[resKey] = totalYields[resKey] - totalUpkeep[resKey];
       turnsRemaining[resKey] = netIncome[resKey] < 0 ? Math.floor((stock[resKey] || 0) / -netIncome[resKey]) : Infinity;
       if (turnsRemaining[resKey] < Infinity) {
@@ -250,6 +278,7 @@ export class Player {
       stock,
       totalUpkeep,
       totalYields,
+      maxTotalYields,
       netIncome,
       turnsRemaining,
       criticalResource
@@ -451,6 +480,21 @@ export class Player {
   }
 
   /**
+   * Sets the time of day from the number of orders remaining, instantly
+   * (no animation). For game load: the sun is renderer-local and is not
+   * saved with the game state, so a load must re-derive it from the active
+   * player's orders — animating it would sweep through the night (the
+   * refill already animates 5pm -> 7am), and a mid-turn manual load never
+   * refills at all, so the sun would just stay wherever it was.
+   */
+  resetTimeOfDay() {
+    const orderFraction = this.orders / this.maxOrders;
+    const timeOfDay = turnHours.end - (turnHours.end - turnHours.start) * orderFraction;
+    cancelTimeOfDayAnimation();
+    setTimeOfDay(timeOfDay);
+  }
+
+  /**
    * Serializes player state.
    */
   toJSON() {
@@ -470,6 +514,7 @@ export class Player {
       ordersConfig: this.ordersConfig,
       startCoord: this.startCoord,
       score: this.score,
+      entityCounter: this.entityCounter,
       exploredCells: Array.from(this.exploredCells),
       visibleCells: Array.from(this.visibleCells),
       history: historyArray
@@ -483,10 +528,17 @@ export class Player {
    * @param {boolean} [isReplay=false] - If true, skip AI manager creation
    */
   static fromJSON(data, gameState, isReplay = false) {
+    // H1: strip any apiKey from a pre-fix save's controller config — the
+    // key is resolved from sessionStorage at client construction now, and
+    // must never be re-persisted into a new save.
+    if (data.controller?.config?.apiKey) {
+      delete data.controller.config.apiKey;
+    }
     const player = new Player(data.id, data.name, gameState, data.color, data.resources, data.description, data.controller, data.ordersConfig, isReplay);
     player.maxOrders = data.maxOrders ?? 0;
     player.ordersPerTurn = data.ordersPerTurn ?? 0;
     player.orders = data.orders ?? 0;
+    player.entityCounter = data.entityCounter ?? 0;
     if (data.startCoord) {
       player.startCoord = { ...data.startCoord };
     }

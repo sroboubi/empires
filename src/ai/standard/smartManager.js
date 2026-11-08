@@ -113,9 +113,13 @@ function resolveProductionPath(player, gameState, targetName, manifest, helper, 
         }
     }
 
-    // 1. Direct match: Check if we currently own an active builder of one of these types
+    // 1. Direct match: Check if we currently own an active builder of one of these types.
+    // Prefer one with AP left (G6) — the first builder found may have spent
+    // its AP already this turn.
     for (const bName of potentialBuilderNames) {
-        const owned = myActiveEntities.find(e => e.name.toLowerCase() === bName.toLowerCase() && helper.isBuilder(e));
+        const owned = myActiveEntities
+            .filter(e => e.name.toLowerCase() === bName.toLowerCase() && helper.isBuilder(e))
+            .sort((a, b) => (b.actionPoints ?? 0) - (a.actionPoints ?? 0))[0];
         if (owned) {
             return {
                 builderEntity: owned,
@@ -236,7 +240,10 @@ async function handleCombatAndThreats(player, gameState, manifest, myEntities, i
     const previousRound = currentRound - 1;
 
     // Get history entries from previous round for damage received
-    const historyEntries = player.getHistoryRange(previousRound, previousRound);
+    // G8: include the current round too — damage dealt this round by players
+    // who act before this AI is logged under currentRound, so it was ignored
+    // until next turn, by which time the attacker may have moved out of sight.
+    const historyEntries = player.getHistoryRange(previousRound, currentRound);
     for (const entry of historyEntries) {
         if (entry.category === 'damaged' || entry.category === 'destroy') {
             // Use structured extra fields instead of parsing details string
@@ -419,16 +426,22 @@ async function handleCombatAndThreats(player, gameState, manifest, myEntities, i
  * Repairs heavily damaged friendly structures/units (<50% HP).
  */
 async function handleHeavyRepairs(player, gameState, myEntities, involvedCells, helper) {
-    const heavilyDamaged = myEntities.filter(e => e.active && e.health < (e.maxHealth * 0.5));
+    let heavilyDamaged = myEntities.filter(e => e.active && e.health < (e.maxHealth * 0.5));
     if (heavilyDamaged.length === 0) return false;
 
     const repairers = myEntities.filter(e => e.active && helper.isRepairer(e) && (e.actionPoints === undefined || e.actionPoints > 0));
     if (repairers.length === 0) return false;
 
-    heavilyDamaged.sort((a, b) => (a.health / a.maxHealth) - (b.health / b.maxHealth));
+    // Proxied arrays sort a copy — capture the return value (see ai-interface-spec.md).
+    heavilyDamaged = heavilyDamaged.sort((a, b) => (a.health / a.maxHealth) - (b.health / b.maxHealth));
 
     for (const repairer of repairers) {
-        for (const target of heavilyDamaged) {
+        // G5: only pair a repairer with targets it can actually repair —
+        // a worker (repairables: constructs) sent to a damaged scout wastes
+        // an order moving adjacent and repairs nothing.
+        const repairables = (repairer.state?.repairables || []).map(r => r.toLowerCase());
+        const myTargets = heavilyDamaged.filter(t => repairables.includes(t.name.toLowerCase()));
+        for (const target of myTargets) {
             const startingCell = { q: repairer.q, r: repairer.r };
             helper.aiLog(player, 'build', `Repairing critical damage: ${repairer.name} at (${repairer.q},${repairer.r}) restoring ${target.name} at (${target.q},${target.r}) (HP: ${Math.round(target.health)}/${target.maxHealth})`);
             const { ordersUsed } = helper.support(gameState, repairer, target, "Repair", player.orders);
@@ -454,6 +467,9 @@ async function handleProactiveGrowth(player, gameState, manifest, myEntities, ev
     const buildCandidates = [];
     for (const builder of myEntities) {
         if (!builder.active || !helper.isBuilder(builder)) continue;
+        // G6: skip builders with no AP left — the top-ROI builder may have
+        // spent its AP already, and trying it every iteration stalls growth.
+        if ((builder.maxActionPoints || 0) > 0 && (builder.actionPoints ?? 0) < 1) continue;
         const buildables = builder.state?.buildables || builder.data?.buildables || [];
         for (const targetName of buildables) {
             buildCandidates.push({ builder, targetName });
@@ -462,8 +478,7 @@ async function handleProactiveGrowth(player, gameState, manifest, myEntities, ev
 
     if (buildCandidates.length === 0) return false;
 
-    let bestCandidate = null;
-    let bestScore = -1;
+    const scored = [];
 
     for (const cand of buildCandidates) {
         const meta = manifest.entities[cand.targetName];
@@ -528,14 +543,14 @@ async function handleProactiveGrowth(player, gameState, manifest, myEntities, ev
         if (yieldsOrders) totalWeight += 40;
 
         const roi = totalWeight / costSum;
-        if (roi > bestScore) {
-            bestScore = roi;
-            bestCandidate = { ...cand, meta, roi };
-        }
+        scored.push({ ...cand, meta, roi });
     }
 
-    if (bestCandidate) {
-        const { builder, targetName, roi } = bestCandidate;
+    // G6: try candidates in ROI order until one succeeds — a single
+    // best-candidate that fails (no site, no AP) used to end growth for
+    // the whole turn.
+    scored.sort((a, b) => b.roi - a.roi);
+    for (const { builder, targetName, roi } of scored) {
         const startingCell = { q: builder.q, r: builder.r };
         helper.aiLog(player, 'build', `Proactive Expansion: ${builder.name} at (${builder.q},${builder.r}) building ${helper.camelToTitle(targetName)} (ROI: ${roi.toFixed(2)}).`);
         const { ordersUsed } = helper.build(gameState, builder, targetName);
@@ -555,7 +570,7 @@ async function handleProactiveGrowth(player, gameState, manifest, myEntities, ev
  */
 async function handleExploration(player, gameState, manifest, myEntities, targetedCells, involvedCells, helper) {
     // Strictly filter out builder units, constructs, inactive units, or units with 0 AP
-    const explorers = myEntities.filter(e => {
+    let explorers = myEntities.filter(e => {
         if (!e.active || !helper.isMobile(e)) return false;
         if (helper.isBuilder(e)) return false;
         if (e.actionPoints !== undefined && e.actionPoints <= 0) return false;
@@ -565,7 +580,8 @@ async function handleExploration(player, gameState, manifest, myEntities, target
     if (explorers.length === 0) return false;
 
     // Prioritize units with high action points and sight range
-    explorers.sort((a, b) => {
+    // Proxied arrays sort a copy — capture the return value (see ai-interface-spec.md).
+    explorers = explorers.sort((a, b) => {
         const scoreA = (a.actionPoints || 0) * 10 + (a.sightRange || 2) * 5;
         const scoreB = (b.actionPoints || 0) * 10 + (b.sightRange || 2) * 5;
         return scoreB - scoreA;

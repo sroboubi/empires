@@ -52,3 +52,12 @@ AIs MAY use `aiHelper` for convenience (filtered info, multi-step actions), but 
 - The proxy uses a shared identity cache: the **same underlying object always maps to the same proxy instance** within an AI's turn. This means `===` / `!==` work as expected — e.g. `unit.owner === this.player` is true when they wrap the same player.
 - However, **prefer comparing IDs** (`unit.owner?.id === player.id`) over object identity. It's more robust and clearer about intent. ID comparison always works regardless of proxy internals.
 - Never store a proxy reference and expect it to `===` a proxy obtained from a different AI's turn — each `createAiManager` call gets a fresh cache.
+
+## Array methods on proxied arrays (for AI implementors)
+
+Arrays you get from the proxy (e.g. `player.getEntities().filter(...)`) are views over engine state, not the engine arrays themselves. Read-only methods work exactly as in plain JS. Mutating methods do **not** work in place:
+
+- `sort`, `reverse`, `fill`, `copyWithin` run on a copy and return the modified copy — the array you hold is unchanged. You **MUST** capture the return value: `arr = arr.sort(cmp)`. A bare `arr.sort(cmp)` statement is a silent no-op.
+- `push`, `pop`, `shift`, `unshift`, `splice` likewise run on a copy, but they return something else (a length, the removed element), so they are effectively unusable in place on a proxied array. Do not use them to mutate; build a new array instead (e.g. `[...arr, x]`).
+- `filter`, `map`, `slice`, `find`, `forEach`, `reduce`, etc. return new values and work normally.
+- `includes`, `indexOf`, `lastIndexOf` compare by proxy identity (the same entity is always the same proxy within your turn), so they **do** match wrapped elements — `arr.includes(arr[0])` is true.

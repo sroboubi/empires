@@ -138,7 +138,10 @@ export class MenuHarness extends LlmBaseManager {
                     continue;
                 }
                 console.log(`[Harness] ${this.player.name} initiating diplomatic chat with ${targetPlayer.name}`);
-                const chatRes = await this.chat(this.player, targetPlayer, thoughtProcess || null);
+                // B2: never pass the private thoughtProcess as the opening
+                // line — the opponent would read the AI's reasoning. Pass
+                // null so the chat generates its opening from the prompt.
+                const chatRes = await this.chat(this.player, targetPlayer, null);
                 if (chatRes === false) {
                     lastResponseError = 'Failed to initiate chat.';
                     lastFailedLabel = label;

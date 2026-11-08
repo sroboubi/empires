@@ -21,7 +21,7 @@
     }
   ],
   "winCondition": {
-    "absoluteScore": 1000,
+    "absoluteScore": 500,
     "relativeScore": 2
   },
   "initialization": {

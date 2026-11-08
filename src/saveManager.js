@@ -39,7 +39,11 @@ function openDB() {
 
 /**
  * Saves a game record to IndexedDB (put = insert or overwrite).
- * @param {{ name: string, turnNumber: number, auto: boolean, data: string }} record
+ * @param {{ name: string, turnNumber: number, auto: boolean, cleanBoundary?: boolean, data: string }} record
+ * cleanBoundary is true when the save was taken at the clean turn boundary
+ * (round-end done, next player's turn-start bookkeeping not yet run) —
+ * only autosaves are, so a load of one must start the active player's
+ * turn (Q1). Absent/false for manual (mid-turn) saves and pre-flag saves.
  * @returns {Promise<void>}
  */
 export async function saveGame(record) {
@@ -52,6 +56,7 @@ export async function saveGame(record) {
       timestamp: Date.now(),
       turnNumber: record.turnNumber,
       auto: record.auto,
+      cleanBoundary: record.cleanBoundary === true,
       data: record.data
     });
     tx.oncomplete = () => resolve();

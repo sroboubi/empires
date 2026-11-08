@@ -1,106 +1,246 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "EntitiesDefinition",
-  "type": "array",
   "description": "Game pieces (Terrain, Units, Constructs) that can occupy the hex grid.",
   "items": {
-    "type": "object",
-    "required": [
-      "name",
-      "modelUrl"
-    ],
     "properties": {
-      "name": {
-        "type": "string",
-        "description": "Unique name (e.g., 'swordsman', 'mine')"
-      },
-      "modelUrl": {
-        "type": "string",
-        "format": "uri",
-        "description": "Path to the 3D .glb file"
-      },
-      "controllerUrl": {
-        "type": "string",
-        "format": "uri",
-        "description": "Path to the JS module defining the controller class"
-      },
-      "rotationOffset": {
-        "type": "number",
-        "description": "Y-axis rotation offset in degrees to orient GLB model correctly"
-      },
-      "sightRange": {
-        "type": "integer",
+      "actionPoints": {
+        "description": "Starting action points",
         "minimum": 0,
-        "description": "Vision sight range in hex cell radius"
+        "type": "number"
       },
-      "spawnConditions": {
-        "type": "object",
-        "description": "Conditions required to spawn or build the entity on a hex cell.",
-        "properties": {
-          "terrain": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "List of allowed terrain type names the entity can be spawned on."
-          },
-          "minSeparation": {
-            "type": "integer",
-            "minimum": 0,
-            "description": "Minimum cell distance from any other construct entity."
-          }
-        }
+      "armor": {
+        "additionalProperties": {
+          "type": "number"
+        },
+        "description": "Damage-type divisors (higher = more resistant).",
+        "type": "object"
+      },
+      "attackCostScale": {
+        "description": "Multiplier on the AP cost of attacks",
+        "type": "number"
+      },
+      "buildCharges": {
+        "description": "How many times this entity can build before it is consumed (e.g. settler: 1)",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "buildables": {
+        "description": "Entity names this entity can build (units for villages, buildings for workers).",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
       },
       "damage": {
-        "type": "object",
         "properties": {
-          "value": {
+          "elevationAdjustment": {
+            "description": "Multiplier/divisor applied based on relative elevation between attacker and target.",
             "type": "number"
           },
           "type": {
             "type": "string"
           },
-          "elevationAdjustment": {
-            "type": "number",
-            "description": "Multiplier/divisor applied based on relative elevation between attacker and target."
+          "value": {
+            "type": "number"
           }
-        }
+        },
+        "type": "object"
+      },
+      "description": {
+        "description": "Human-readable description shown in the UI",
+        "type": "string"
+      },
+      "health": {
+        "description": "Starting health",
+        "minimum": 0,
+        "type": "number"
+      },
+      "healthRegenScale": {
+        "description": "HP regenerated per unused AP at turn start",
+        "type": "number"
+      },
+      "maintenance": {
+        "additionalProperties": {
+          "type": "number"
+        },
+        "description": "Resources consumed per turn to keep the entity active.",
+        "type": "object"
+      },
+      "maxActionPoints": {
+        "description": "Maximum action points (0 = no AP system; build then costs 0 AP)",
+        "minimum": 0,
+        "type": "number"
+      },
+      "maxHealth": {
+        "description": "Maximum health",
+        "minimum": 0,
+        "type": "number"
+      },
+      "modelUrl": {
+        "description": "Path to the 3D .glb file",
+        "format": "uri",
+        "type": "string"
+      },
+      "movement": {
+        "additionalProperties": true,
+        "description": "Presence of this object means the entity can move (units); absent = construct.",
+        "properties": {
+          "terrainCostScale": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "Per-terrain movement cost multipliers (Infinity = impassable).",
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "name": {
+        "description": "Unique name (e.g., 'swordsman', 'mine')",
+        "type": "string"
+      },
+      "ordersPerTurn": {
+        "description": "Bonus orders per turn granted by owning this entity",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "range": {
+        "anyOf": [
+          {
+            "type": "null"
+          },
+          {
+            "description": "Ranged attack range in cells (null = melee).",
+            "properties": {
+              "arcHeight": {
+                "type": "number"
+              },
+              "maxCells": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "minCells": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          }
+        ]
+      },
+      "repairAmountPerAp": {
+        "description": "HP restored per AP spent on Repair",
+        "type": "number"
+      },
+      "repairables": {
+        "description": "Entity names this entity can repair.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "rotationOffset": {
+        "description": "Y-axis rotation offset in degrees to orient GLB model correctly",
+        "type": "number"
+      },
+      "score": {
+        "description": "Score contribution per pillar (all pillars should be present; missing ones default to 0).",
+        "properties": {
+          "economic": {
+            "type": "number"
+          },
+          "exploration": {
+            "type": "number"
+          },
+          "military": {
+            "type": "number"
+          }
+        },
+        "type": "object"
       },
       "sfx": {
-        "type": "object",
+        "additionalProperties": false,
         "description": "Sound effect file names for entity events, relative to sfx.basePath. 'action' may be a file name or an object keyed by action name.",
         "properties": {
-          "select": {
-            "type": "string",
-            "description": "Played when the entity is selected"
-          },
           "action": {
             "anyOf": [
               {
                 "type": "string"
               },
               {
-                "type": "object",
-                "description": "Maps lowercased action names (e.g. move, attack) to file names; 'default' is the fallback."
+                "description": "Maps lowercased action names (e.g. move, attack) to file names; 'default' is the fallback.",
+                "type": "object"
               }
             ],
             "description": "Played when the entity performs an action"
           },
           "build": {
-            "type": "string",
-            "description": "Played when this construct finishes building"
+            "description": "Played when this construct finishes building",
+            "type": "string"
           },
           "damage": {
-            "type": "string",
-            "description": "Played when the entity takes damage"
+            "description": "Played when the entity takes damage",
+            "type": "string"
           },
           "destroy": {
-            "type": "string",
-            "description": "Played when the entity is destroyed"
+            "description": "Played when the entity is destroyed",
+            "type": "string"
+          },
+          "select": {
+            "description": "Played when the entity is selected",
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "type": "object"
+      },
+      "sightRange": {
+        "description": "Vision sight range in hex cell radius",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "size": {
+        "description": "Model scale factor",
+        "type": "number"
+      },
+      "spawnConditions": {
+        "description": "Conditions required to spawn or build the entity on a hex cell.",
+        "properties": {
+          "minSeparation": {
+            "description": "Minimum cell distance from any other construct entity.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "terrain": {
+            "description": "List of allowed terrain type names the entity can be spawned on.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "spawnCost": {
+        "additionalProperties": {
+          "type": "number"
+        },
+        "description": "Resources required to build/spawn the entity.",
+        "type": "object"
+      },
+      "yields": {
+        "additionalProperties": {
+          "type": "number"
+        },
+        "description": "Resources produced per turn (only when active and HP > 95%).",
+        "type": "object"
       }
-    }
-  }
+    },
+    "required": [
+      "name",
+      "modelUrl"
+    ],
+    "type": "object"
+  },
+  "title": "EntitiesDefinition",
+  "type": "array"
 }

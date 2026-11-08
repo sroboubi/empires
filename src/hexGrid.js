@@ -52,9 +52,13 @@ export class HexGrid {
   /**
    * Generates a hexagonal grid of the given radius using TerrainProvider.
    * @param {number} radius - Grid radius (number of hex rings from center)
-   * @param {Array|Object} [terrainConfig=null] - Optional terrain definitions
+   * @param {Array|Object} terrainConfig - Terrain definitions (mandatory — a
+   *   missing config used to silently fill every cell with "Default" terrain)
    */
   constructor(radius, terrainConfig = null) {
+    if (!terrainConfig) {
+      throw new Error('HexGrid requires a terrain config — refusing to generate a map of "Default" terrain.');
+    }
     this.radius = radius;
     this.cells = new Map();
 
@@ -359,26 +363,38 @@ export class HexGrid {
   }
 
   // ---------------------------------------------------------------------------
-  // movementCostTo — minimum cost path, only through cells closer to target
+  // movementCostTo — minimum cost path; A* with detours when requested
   // ---------------------------------------------------------------------------
 
   /**
-   * Calculates the minimum movement cost path from source to target,
-   * only considering cells that are progressively closer to the target
-   * (never moving away). Uses Dijkstra's algorithm restricted to
-   * neighbors whose distance to target is strictly less than the
-   * current cell's distance to target.
+   * Calculates the minimum movement cost path from source to target.
    *
-   * Returns the total cost (sum of terrain.movementCost along the path,
-   * multiplied by any entity-specific terrain cost scale) and the ordered
-   * list of cells along the best path (including source and target).
+   * Default mode (allowDetours: false — byte-identical to the historical
+   * behavior): only considers cells that are progressively closer to the
+   * target (never moving away), so a player command to move north never
+   * walks south around a blockage. Uses Dijkstra over that restricted
+   * graph. Returns { cost, path } (path includes source and target), or
+   * null when no such path exists.
+   *
+   * Detour mode (allowDetours: true): full A* — the closer restriction
+   * is dropped, the heap is ordered by g + h where h is the hex distance
+   * to the target scaled by the cheapest finite per-terrain edge cost
+   * (sampled from the costFunc over the map's distinct terrains, so the
+   * heuristic never overestimates). Never returns null except for invalid
+   * input: when the target is unreachable it returns a best-effort path
+   * to the closest reachable cell (smallest hex distance to target,
+   * cheapest on ties) with reached: false. The returned cost is the cost
+   * to the path's last cell — NOT the cost to the target — when
+   * reached is false, so callers doing cost queries must check it.
    *
    * @param {{q: number, r: number}} source - Source cell coordinates
    * @param {{q: number, r: number}} target - Target cell coordinates
    * @param {function} costFunc - per-terrain cost function: takes terrain as argument and returns cost
-   * @returns {{cost: number, path: Array<Object>}|null} Null if no path exists
+   * @param {{allowDetours?: boolean}} [options] - allowDetours opts into A* detours + best-effort return
+   * @returns {{cost: number, path: Array<Object>, reached?: boolean}|null}
    */
-  movementCostTo(source, target, costFunc) {
+  movementCostTo(source, target, costFunc, options = {}) {
+    const allowDetours = options.allowDetours === true;
     const sourceCell = this.getCell(source.q, source.r);
     const targetCell = this.getCell(target.q, target.r);
     if (!sourceCell || !targetCell) return null;
@@ -387,11 +403,43 @@ export class HexGrid {
     const targetKey = `${target.q},${target.r}`;
 
     if (sourceKey === targetKey) {
-      return { cost: 0, path: [sourceCell] };
+      return allowDetours
+        ? { cost: 0, path: [sourceCell], reached: true }
+        : { cost: 0, path: [sourceCell] };
     }
 
-    // Dijkstra with the constraint: only move to neighbors that are
-    // strictly closer to the target than the current cell.
+    // Detour mode: scale the hex-distance heuristic by the cheapest finite
+    // per-terrain edge cost, so it never overestimates (plain hex distance
+    // would: a 0.8 terrain scale makes 10 tundra steps cost 8.8, less than
+    // 9 grassland steps at 9.0). Sampled over the map's distinct terrains
+    // (keyed by name + movementCost — terrain objects are per-cell copies,
+    // so identity is useless), cached per grid. Cost functions depend only
+    // on the terrain type, so one representative per distinct terrain is exact.
+    let minEdge = 0;
+    if (allowDetours) {
+      if (!this._distinctTerrains) {
+        const byKind = new Map();
+        for (const cell of this.cells.values()) {
+          const t = cell.terrain;
+          if (!t) continue;
+          const kind = `${t.name}:${t.movementCost}`;
+          if (!byKind.has(kind)) byKind.set(kind, t);
+        }
+        this._distinctTerrains = [...byKind.values()];
+      }
+      minEdge = Infinity;
+      for (const t of this._distinctTerrains) {
+        const c = costFunc(t);
+        if (Number.isFinite(c) && c < minEdge) minEdge = c;
+      }
+      if (!Number.isFinite(minEdge)) {
+        // Nothing is enterable at all: the best-effort path is staying put.
+        return { cost: 0, path: [sourceCell], reached: false };
+      }
+    }
+
+    // Dijkstra (default) / A* (detour): the heap orders by f = g + h;
+    // h is 0 in default mode, so the order is exactly the old one.
     const dist = {};        // best cost to reach each cell
     const prev = {};        // previous cell key in best path
     dist[sourceKey] = 0;
@@ -399,12 +447,12 @@ export class HexGrid {
     // Binary min-heap priority queue (a sorted-array queue degenerates to
     // O(V^2 log V) on long paths and can block the main thread for seconds)
     const heap = [];
-    const heapPush = (cost, key) => {
-      heap.push({ cost, key });
+    const heapPush = (f, g, key) => {
+      heap.push({ f, g, key });
       let i = heap.length - 1;
       while (i > 0) {
         const p = (i - 1) >> 1;
-        if (heap[p].cost <= heap[i].cost) break;
+        if (heap[p].f <= heap[i].f) break;
         [heap[p], heap[i]] = [heap[i], heap[p]];
         i = p;
       }
@@ -418,8 +466,8 @@ export class HexGrid {
         for (; ;) {
           const l = 2 * i + 1, r = l + 1;
           let m = i;
-          if (l < heap.length && heap[l].cost < heap[m].cost) m = l;
-          if (r < heap.length && heap[r].cost < heap[m].cost) m = r;
+          if (l < heap.length && heap[l].f < heap[m].f) m = l;
+          if (r < heap.length && heap[r].f < heap[m].f) m = r;
           if (m === i) break;
           [heap[m], heap[i]] = [heap[i], heap[m]];
           i = m;
@@ -428,27 +476,47 @@ export class HexGrid {
       return top;
     };
 
-    heapPush(0, sourceKey);
+    const reconstruct = (key) => {
+      const path = [];
+      let k = key;
+      while (k !== undefined) {
+        path.unshift(this.cells.get(k));
+        k = prev[k];
+      }
+      return path;
+    };
+
+    // Best-effort fallback (detour mode): the reachable cell closest to
+    // the target, cheapest on ties. Tracked over settled nodes.
+    let bestKey = sourceKey;
+    let bestH = HexGrid.distance(sourceCell, target);
+    let bestG = 0;
+
+    heapPush(0, 0, sourceKey);
 
     while (heap.length > 0) {
-      // Extract min-cost entry
-      const { key: currentKey, cost: currentCost } = heapPop();
+      // Extract min-f entry
+      const { key: currentKey, g: currentCost } = heapPop();
 
       if (currentKey === targetKey) {
-        // Reconstruct path
-        const path = [];
-        let k = targetKey;
-        while (k !== undefined) {
-          path.unshift(this.cells.get(k));
-          k = prev[k];
-        }
-        return { cost: currentCost, path };
+        const path = reconstruct(targetKey);
+        return allowDetours
+          ? { cost: currentCost, path, reached: true }
+          : { cost: currentCost, path };
       }
 
       // Skip if we already found a better route to this node
       if (currentCost > (dist[currentKey] ?? Infinity)) continue;
 
       const current = this.cells.get(currentKey);
+
+      if (allowDetours) {
+        const h = HexGrid.distance(current, target);
+        if (h < bestH || (h === bestH && currentCost < bestG)) {
+          bestKey = currentKey; bestH = h; bestG = currentCost;
+        }
+      }
+
       const currentDistToTarget = HexGrid.distance(current, target);
 
       const neighbors = this.getNeighbors(current.q, current.r);
@@ -456,8 +524,9 @@ export class HexGrid {
       for (const nb of neighbors) {
         const nbDistToTarget = HexGrid.distance(nb, target);
 
-        // Only allow moves that get strictly closer to the target
-        if (nbDistToTarget >= currentDistToTarget) continue;
+        // Default mode only: only allow moves that get strictly closer to
+        // the target — the player-command restriction. Detour mode drops it.
+        if (!allowDetours && nbDistToTarget >= currentDistToTarget) continue;
 
         const nbKey = `${nb.q},${nb.r}`;
         const edgeCost = costFunc(nb.terrain);
@@ -466,12 +535,14 @@ export class HexGrid {
         if (newCost < (dist[nbKey] ?? Infinity)) {
           dist[nbKey] = newCost;
           prev[nbKey] = currentKey;
-          heapPush(newCost, nbKey);
+          heapPush(newCost + (allowDetours ? nbDistToTarget * minEdge : 0), newCost, nbKey);
         }
       }
     }
 
-    return null; // No path found
+    // Heap exhausted: the target is unreachable.
+    if (!allowDetours) return null;
+    return { cost: dist[bestKey], path: reconstruct(bestKey), reached: false };
   }
 
   // ---------------------------------------------------------------------------

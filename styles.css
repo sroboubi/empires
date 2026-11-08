@@ -573,7 +573,9 @@
       flex-direction: column-reverse;
       align-items: center;
       gap: 8px;
-      z-index: 9999;
+      /* L5: toasts sit above modals (10000) so messages aren't hidden
+         behind them. */
+      z-index: 10001;
       pointer-events: none;
     }
 
