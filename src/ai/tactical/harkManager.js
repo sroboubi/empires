@@ -422,6 +422,22 @@ export class HarkManager extends AdaptiveManager {
 
     // ==================== General combat (B2 advance, B9) ====================
 
+    // TODO(hark): threat-scaled defence and towers. Round 4: mobile military
+    // averages 0.7-1.6 units under barbarians, hits zero in 61-89% of games, and
+    // no AI ever builds a tower; standard zeroes Hark's military in 55% of
+    // no-barbarian games. Adaptive's 2.5x defence boost only applies at zero
+    // military, so one surviving swordsman turns it off. Rationale: a human will
+    // exploit a token army. Proposal: scale military demand with hostile power
+    // seen near our structures, and build towers or a home garrison when
+    // barbarians are near the village.
+    //
+    // TODO(hark): advance gating. Logs show the starting swordsman (dies in ~90%
+    // of barbarian games) advancing alone onto a chief or princess (250-400 HP,
+    // regenerating) it cannot finish. Proposal: don't send a lone unit at a
+    // target far above its power unless it is defending a structure; a variant
+    // (advancePowerRatio 0.5) was tested in round 1 and scored 15-11/28, so
+    // re-test it against the full robustness matrix.
+
     /**
      * B9: threat DETECTION stays on the distance to any own entity (adaptive's
      * nearestOwn); the defensive engagement range and target priority use the
@@ -537,6 +553,13 @@ export class HarkManager extends AdaptiveManager {
 
     // ==================== B3: builders never explore ====================
 
+    // TODO(hark): spend idle orders. Round 4 robustness (1200 games, see PR #47):
+    // with barbarians off, Hark leaves 2.3-3.9 of ~7 orders/turn unused and
+    // loses decided games to adaptive 6-18, because B3 stops builders exploring
+    // and adaptive explores with idle workers. Rationale: B3 only pays off when
+    // raiders are around. Proposal: when no hostile unit is within a few hexes of
+    // home, let idle builders explore near our territory, or spend leftover
+    // orders on scouts or military.
     isExplorerCandidate(entity, context) {
         // B3: a builder sent exploring is a village or farm lost to the first raider.
         if (this.helper.isBuilder(entity)) return false;
