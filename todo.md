@@ -8,10 +8,6 @@
 
 ## Game ##
 
-- LLM director harness (called once per turn and handles general empire direction and diplomacy)
-
-- test frontier models as players (just as a benchmark)
-- prevent movement through enemy entities, and implement zone of control
 - Quest & event deck (manifest-driven). Random narrative events with 2–3 choices ("a plague strikes your farms: quarantine / pray / ignore"), authored as JSON frames in the manifest with LLM-generated prose on top.
 - Hero units. Let champions (knight, assassin, barbarianChief are natural seeds) gain XP and pick from 2–3 traits.
 
@@ -27,5 +23,7 @@
 
 ## AI ##
 
-## BUGS ##
+- LLM director harness (called once per turn and handles general empire direction and diplomacy)
+- test frontier models as players (just as a benchmark)
 
+## BUGS ##

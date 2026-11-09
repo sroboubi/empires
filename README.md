@@ -275,7 +275,7 @@ Implement the game configuration loading system using the provided JSON architec
 4. on hover over of the leader, show the description/focus.
 5. For AI players, combine the leader info to the selected controller to set player.controller.
 
-## Task: Phase 24 - Prevent movement through enemy entities, and implement zone of control ##
+## Task: Phase 24 (TODO) - Prevent movement through enemy entities, and implement zone of control ##
 
 Fix entity.canStandOn()
 
@@ -293,7 +293,7 @@ Zone of control:
 5. Show zone of control highlight in render when non-own entity is highlighted, similar to entity.minSeparation but only for non-own entities.
 6. Verify all AIs use move.canDo to determine possible moves. Audit 2026-11-08: they all do — adaptive and entity check canDo directly, smart moves via helper.explore → moveAlongPath (which checks canDo), menu.js via moveAlongPath, barbarians directly; llmBase's movementCostTo is only a reachability summary, not a move order. AI can "plan" routes without ZoC consideration, but move.canDo should always be used to determine what movement orders are actually possible. Note: planning ignores ZoC, so an AI may plan through a controlled cell and have canDo reject it — moveAlongPath falls back to the furthest reachable cell that passes canDo, so it advances as far as it can rather than failing; it will not detour around ZoC (follow-up, not this phase).
 
-## Task: Phase 25 - Enhance AI leaders and interactions ##
+## Task: Phase 25 (TODO) - Enhance AI leaders and interactions ##
 
 1. add trade to chat screen (or as slide out panel):
    - one time offer: build a resource bundle offering (a set of resource amounts: e.g. {iron: 50, gold: 10}) and ask for a bundle in return. Allow other player to adjust bundle and offer it back to you. This can be done until one player rejects the process, or both players accept the exchange bundles.
