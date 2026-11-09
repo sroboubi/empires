@@ -8,6 +8,7 @@
  *   npm test -- 20                     # 20 turns, default config
  *   npm test -- --config mygame.json   # custom game setup
  *   npm test -- 20 --config mygame.json
+ *   npm test -- 20 --seed 42          # reproducible game (same seed = same map and same game)
  *
  * Checkpoint / resume (long LLM games outlive single runtime sessions):
  *   npm test -- --config mygame.json --checkpoint-dir /path/to/run-dir
@@ -20,6 +21,10 @@
  * Config file (JSON) supports everything in the game settings:
  *   turns            - number of turns to simulate
  *   mapSize          - hex map radius (default 12)
+ *   seed             - game seed (number or string); --seed overrides it.
+ *                      Seeds the map and the in-game randomness (barbarians,
+ *                      treasure rewards), so a game with AI players replays
+ *                      exactly. Omitted = random, as before.
  *   players          - array of {id, name, color, controller, description}
  *                      controller: 'ai' = SmartManager, 'llm' = LLM harness,
  *                      null = human (no AI)
@@ -42,11 +47,12 @@ import { saveCheckpoint, loadCheckpoint, resolveCheckpointPath, CHECKPOINT_FILE 
 
 function parseArgs() {
   const args = process.argv.slice(2);
-  const opts = { turns: 5, config: null, checkpointDir: null, resume: null };
+  const opts = { turns: 5, config: null, checkpointDir: null, resume: null, seed: null };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--config' && args[i + 1]) opts.config = args[++i];
     else if (args[i] === '--checkpoint-dir' && args[i + 1]) opts.checkpointDir = args[++i];
     else if (args[i] === '--resume' && args[i + 1]) opts.resume = args[++i];
+    else if (args[i] === '--seed' && args[i + 1]) opts.seed = args[++i];
     else if (!isNaN(parseInt(args[i]))) opts.turns = parseInt(args[i]);
   }
   return opts;
@@ -186,7 +192,9 @@ async function main() {
     // Build full game settings: config file overrides defaultSettings.json
     gameState = new GameState();
     const mapSize = cfg.mapSize || ds.mapSize || 12;
-    gameState.generateMap(mapSize, manifest.terrains, manifest);
+    const seed = opts.seed ?? cfg.seed ?? null;
+    gameState.generateMap(mapSize, manifest.terrains, manifest, seed);
+    if (seed !== null) console.log(`[headless] Game seed: ${seed}`);
     const settings = {
       players,
       initialization: cfg.initialization || ds.initialization || {},

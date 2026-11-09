@@ -54,15 +54,16 @@ export class HexGrid {
    * @param {number} radius - Grid radius (number of hex rings from center)
    * @param {Array|Object} terrainConfig - Terrain definitions (mandatory — a
    *   missing config used to silently fill every cell with "Default" terrain)
+   * @param {Function} [random=Math.random] - Random source for terrain noise
    */
-  constructor(radius, terrainConfig = null) {
+  constructor(radius, terrainConfig = null, random = Math.random) {
     if (!terrainConfig) {
       throw new Error('HexGrid requires a terrain config — refusing to generate a map of "Default" terrain.');
     }
     this.radius = radius;
     this.cells = new Map();
 
-    const terrainProvider = new TerrainProvider(radius, terrainConfig);
+    const terrainProvider = new TerrainProvider(radius, terrainConfig, random);
 
     for (let q = -radius; q <= radius; q++) {
       const rMin = Math.max(-radius, -q - radius);

@@ -4,6 +4,7 @@ import { manageBarbarians } from './barbarians/manager.js';
 import { AiHelper } from './aiHelper.js';
 import { spawnCellResources, checkTreasurePickup } from './resources.js';
 import { CONFIG } from './config.js';
+import { createSeededRandom } from './random.js';
 import Entity from './entity.js';
 
 /**
@@ -24,6 +25,10 @@ export class GameState {
     // Counter for ownerless entity IDs (barbarians etc.):
     // <name>_neutral_<n>. Saved/loaded with the game.
     this.unownedEntityCounter = 0;
+    // In-game randomness (barbarian hordes, treasure rewards, the overflow
+    // resource pick). Math.random unless generateMap() got a seed, in which
+    // case the whole game replays from that one seed.
+    this.random = () => Math.random();
     this.hexGrid = null;  // HexGrid instance
     this.entities = [];   // List of active BaseEntity instances
     this.manifestData = null;
@@ -116,12 +121,20 @@ export class GameState {
    * @param {number} radius - Grid radius (number of hex rings from the center)
    * @param {Array|Object} [terrainConfig=null] - Optional terrain definitions
    * @param {Object} [manifestData=null] - Optional manifest (spawns natural resources & treasures)
+   * @param {number|string|null} [seed=null] - Map seed. The same seed, radius and
+   *   manifest give the same terrain and resources. Without one the map is random
+   *   (Math.random), as before. With a seed, the in-game randomness
+   *   (this.random) is also seeded, from `${seed}:game`, so a headless game
+   *   replays exactly; without one it stays Math.random.
    */
-  generateMap(radius, terrainConfig = null, manifestData = null) {
+  generateMap(radius, terrainConfig = null, manifestData = null, seed = null) {
     const config = terrainConfig || this.manifestData?.terrains || null;
-    this.hexGrid = new HexGrid(radius, config);
+    const seeded = seed !== null && seed !== undefined;
+    const random = seeded ? createSeededRandom(seed) : Math.random;
+    this.random = seeded ? createSeededRandom(`${seed}:game`) : () => Math.random();
+    this.hexGrid = new HexGrid(radius, config, random);
     if (manifestData) {
-      spawnCellResources(this.hexGrid, manifestData, CONFIG.HEX_SIZE);
+      spawnCellResources(this.hexGrid, manifestData, CONFIG.HEX_SIZE, random);
     }
     this.entities = [];
     this.activePlayerIndex = 0;
@@ -336,35 +349,29 @@ export class GameState {
 
     const winCondition = this.settings.winCondition;
 
-    for (const player of this.players) {
-      const reasons = [];
+    // Only the leader can win. Take the two highest totals: if they are
+    // equal nobody has won (even above absoluteScore). Otherwise the leader
+    // wins on absoluteScore or on relativeScore x second-highest. A
+    // second-highest of 0 is fine: 0 x multiplier = 0, so a leader with
+    // any score beats a zeroed opponent (cube-root totals drop to 0 when
+    // any one pillar hits 0).
+    const ranked = [...this.players].sort((a, b) => b.score.total - a.score.total);
+    const leader = ranked[0];
+    if (!leader) return null;
+    const secondHighest = ranked.length > 1 ? ranked[1].score.total : null;
+    if (secondHighest !== null && leader.score.total === secondHighest) return null;
 
-      // Check absolute score
-      if (winCondition.absoluteScore && player.score.total >= winCondition.absoluteScore) {
-        reasons.push(`Absolute Score: ${player.score.total} >= ${winCondition.absoluteScore}`);
-      }
-
-      // Check relative score
-      if (winCondition.relativeScore) {
-        // Find the next highest score among other players
-        let nextHighest = 0;
-        for (const other of this.players) {
-          if (other.id !== player.id && other.score.total > nextHighest) {
-            nextHighest = other.score.total;
-          }
-        }
-        const threshold = winCondition.relativeScore * nextHighest;
-        if (nextHighest > 0 && player.score.total >= threshold) {
-          reasons.push(`Relative Score: ${player.score.total} >= ${winCondition.relativeScore} × ${nextHighest} (next highest)`);
-        }
-      }
-
-      if (reasons.length > 0) {
-        return { winner: player, reasons };
-      }
+    const reasons = [];
+    if (winCondition.absoluteScore && leader.score.total >= winCondition.absoluteScore) {
+      reasons.push(`Absolute Score: ${leader.score.total} >= ${winCondition.absoluteScore}`);
+    }
+    // Relative needs an opponent: a one-player game wins on absolute only.
+    if (winCondition.relativeScore && secondHighest !== null
+        && leader.score.total >= winCondition.relativeScore * secondHighest) {
+      reasons.push(`Relative Score: ${leader.score.total} >= ${winCondition.relativeScore} × ${secondHighest} (second highest)`);
     }
 
-    return null;
+    return reasons.length > 0 ? { winner: leader, reasons } : null;
   }
 
   /**

@@ -25,11 +25,12 @@ export class TerrainProvider {
     /**
      * @param {number} radius - Radius of the hex grid
      * @param {Array|Object} [terrainConfig=null] - Optional terrain definitions loaded from manifest
+     * @param {Function} [random=Math.random] - Random source for the noise; a seeded one gives a reproducible map
      */
-    constructor(radius, terrainConfig = null) {
-        this.elevationNoise = createNoise2D();
-        this.temperatureNoise = createNoise2D();
-        this.humidityNoise = createNoise2D();
+    constructor(radius, terrainConfig = null, random = Math.random) {
+        this.elevationNoise = createNoise2D(random);
+        this.temperatureNoise = createNoise2D(random);
+        this.humidityNoise = createNoise2D(random);
         this.radius = radius;
         this.terrains = terrainConfig
             ? (Array.isArray(terrainConfig) ? terrainConfig : Object.values(terrainConfig))

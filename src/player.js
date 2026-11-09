@@ -445,7 +445,7 @@ export class Player {
       let pickedResource = resourceProfile.criticalResource;
       if (!pickedResource) {  // if nothing is critical, pick a random resource to convert overflow into
         const resourceNames = Object.keys(this.resources);
-        pickedResource = resourceNames[Math.floor(Math.random() * resourceNames.length)];
+        pickedResource = resourceNames[Math.floor((this.gameState?.random ?? Math.random)() * resourceNames.length)];
       }
       if (pickedResource) {
         const amount = overflow * orderToResourceConversionRate;
