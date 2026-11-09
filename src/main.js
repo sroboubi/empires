@@ -959,7 +959,9 @@ function handleStartGameClicked() {
         // Rule 3: empty/invalid input falls back to the config value
         // (the old || 8 / || 6 had already drifted from it).
         max: parseInt(document.getElementById('setup-orders-max').value, 10) || defaultSettings.initialization.orders.max,
-        initial: parseInt(document.getElementById('setup-orders-max').value, 10) || defaultSettings.initialization.orders.max,
+        // No `initial` here — Player defaults to max - perTurn (L4), so
+        // turn 1 doesn't overflow free resources. Setting it to max (as
+        // before) defeated the L4 fix (issue #48).
         perTurn: parseInt(document.getElementById('setup-orders-perturn').value, 10) || defaultSettings.initialization.orders.perTurn
       },
       startingResources: startingResources,
@@ -1455,14 +1457,19 @@ export async function nextTurn() {
   // this updates the gameState.activePlayer and increments the round if needed.
   // The browser drives turn advancement: nextTurn is the continuation
   // that runs when an AI player's turn settles (see Player.step).
-  await gs.endTurn(continuation);
-  turnAdvanceInProgress = false;
+  // Issue #48: try/finally — if endTurn throws, the flag and the buttons
+  // must still recover, or Next Turn is permanently dead.
+  try {
+    await gs.endTurn(continuation);
+  } finally {
+    turnAdvanceInProgress = false;
 
-  // Re-enable the turn buttons if the next player is human (setTurnButtons
-  // reads the new active player; an AI turn keeps them disabled).
-  setTurnButtons();
+    // Re-enable the turn buttons if the next player is human (setTurnButtons
+    // reads the new active player; an AI turn keeps them disabled).
+    setTurnButtons();
 
-  updateHexFog(gs);
+    updateHexFog(gs);
+  }
   reconcileEntities(gs);
   reconcileCellResources(gs);
   updatePlayersUI(gs, { onContextMenu: showPlayerContextMenu });
