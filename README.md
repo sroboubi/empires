@@ -275,7 +275,27 @@ Implement the game configuration loading system using the provided JSON architec
 4. on hover over of the leader, show the description/focus.
 5. For AI players, combine the leader info to the selected controller to set player.controller.
 
-## Task: Phase 24 - Enhance AI leaders and interactions ##
+## Task: Phase 24 - Prevent movement through enemy entities, and implement zone of control ##
+
+Fix entity.canStandOn()
+
+1. rename canStandOn to canSpawnOn (update aiInterface and all other callers)
+2. check usages - it should only be used to determine if an entity can be spawned on a cell NOT for movement. Movement should only use movement cost.
+
+Zone of control:
+
+1. add zoneOfControlRadius per entity definition (default to zero if not set)
+2. add a controlledBy array to each cell in gameState.hexGrid - starts empty. This will contain the ID of any entity that has military control of the cell.
+3. add a occupiedBy array to each cell in gameState.hexGrid - starts empty. This will contain the ID of any entity that occupies the cell. Only one entity can occupy the cell, but will leave as array for consistency.
+4. when an entity spawns or moves or dies, update gameState.hexGrid to remove existing references to the entity ID in cell.controlledBy and cell.occupied by and add new ones based the current position and entity.zoneOfControlRadius.
+5. gameState.hexGrid.movementCostTo should pass cell, not terrain, to costFunc where possible.
+6. update entity.getMovementCost so that if cell is available we look at cell.occupiedBy. If it is not empty, find the entities by ID and if any are not owned by the same owner as the entity (or both entities have no owner - barbarian through barbarian), then cost is infinity (can't move into or through occupied cell). Do NOT consider controlledBy here.
+7. move.canDo: examine pathRes.path and for each cell
+   - If cell.occupiedBy is not empty, find the entities by ID and if any are not owned by the same owner as the entity (or both entities have no owner - barbarian through barbarian), then path cost is infinity (can't move into or through occupied cell)
+   - If cell is NOT the last cell in path AND cell.controlledBy is not empty, find the entities by ID and if any are not owned by the same owner as the entity (or both entities have no owner - barbarian through barbarian), then path cost is infinity (can't move through controlled cell, BUT can move into them)
+8. Show zone of control highlight in render, similar to entity.minSeparation but only for non-own entities.
+
+## Task: Phase 25 - Enhance AI leaders and interactions ##
 
 1. add trade to chat screen (or as slide out panel):
    - one time offer: build a resource bundle offering (a set of resource amounts: e.g. {iron: 50, gold: 10}) and ask for a bundle in return. Allow other player to adjust bundle and offer it back to you. This can be done until one player rejects the process, or both players accept the exchange bundles.
