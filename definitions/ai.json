@@ -33,6 +33,45 @@
                 "stanceCautionRatio": 2.0
             }
         },
+        "entity": {
+            "url": "./ai/tactical/entityCentricAi.js",
+            "config": {
+                "fleeImportance": 9,
+                "attackImmediate": 8,
+                "attackEasy": 7,
+                "attackFavorable": 6,
+                "attackRisky": 4,
+                "retaliationBoost": 1,
+                "guardImportance": 8,
+                "exploreImportance": 6,
+                "exploreFallbackImportance": 2,
+                "buildEconomy": 6,
+                "buildMilitary": 5,
+                "buildWorker": 6,
+                "buildWorkerScarce": 14,
+                "buildSettlement": 8,
+                "buildEnabler": 7,
+                "deficitBoost": 2,
+                "deficitPenalty": 3,
+                "duplicatePenalty": 0.35,
+                "duplicatePenaltyMilitary": 0.6,
+                "neutralPowerRatio": 1.5,
+                "easyPowerRatio": 2.0,
+                "targetBuilderCount": 2,
+                "attackReachTurns": 2,
+                "fleeThreatTurns": 2,
+                "criticalRunwayTurns": 3,
+                "militaryNeedFloor": 0.5,
+                "militaryNeedThreatFloor": 0.8,
+                "militaryNeedMin": 0,
+                "militaryNeedMinSurplus": 0.2,
+                "neutralStandingNeed": 0.1,
+                "surplusStockMultiple": 3,
+                "reachStepMargin": 2,
+                "maxIterationsPerOrder": 4,
+                "minimumIterations": 40
+            }
+        },
         "llm-json-gemma-4": {
             "url": "./ai/llm/json/harness.js",
             "config": {
