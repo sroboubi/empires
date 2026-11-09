@@ -167,6 +167,14 @@ function isPlayerObject(obj) {
  * Wrap an entity's actions with the ownership guard: calling .do() on an
  * action of a foreign-owned entity throws. Shared by the getActions() and
  * .actions property interceptions.
+ *
+ * canDo is also replaced on foreign actions (S1): the real canDo runs
+ * checkActionAffordability, which reads the owner's private orders and
+ * puts the count in its reason string ("Insufficient Orders (0/1
+ * required)") — an AI calling enemy Move.canDo would learn the
+ * opponent's order count. The replacement returns {possible:false} with
+ * NO reason, so nothing leaks. It does not throw: canDo is a query, and
+ * a foreign action is simply not usable. (Own actions are untouched.)
  */
 function wrapActionsWithOwnership(actions, entityTarget, entityName, aiName, seen, ownPlayer) {
   const isOwned = !ownPlayer || (entityTarget.ownerId ?? entityTarget.owner?.id) === ownPlayer.id;
@@ -181,6 +189,9 @@ function wrapActionsWithOwnership(actions, entityTarget, entityName, aiName, see
                 `[AI Interface] Illegal action: AI '${aiName}' attempted to execute action '${action.name}' on entity '${entityName}' owned by another player.`
               );
             };
+          }
+          if (actProp === 'canDo') {
+            return () => ({ possible: false });
           }
           return Reflect.get(actTarget, actProp);
         }
