@@ -1918,6 +1918,10 @@ function positionResourceTooltip(x, y) {
 }
 
 function renderResourceProfileHTML(player, gameState, isCompact = false) {
+  // Visibility: an AI player's resource info (stocks, yields, upkeep,
+  // owned entities) and history are hidden from the human unless SHOW_ALL
+  // is on. Scores stay public — they are already in the player list.
+  const hidePrivate = player.isAI && !CONFIG.SHOW_ALL;
   const { totalUpkeep, totalYields, netIncome } = player.getResourceProfile(gameState);
   const myEntities = player.getEntities(gameState);
 
@@ -1957,7 +1961,7 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
   };
 
   let chartsHTML = '';
-  resourceKeys.forEach(res => {
+  if (!hidePrivate) resourceKeys.forEach(res => {
     const stock = player.resources[res] || 0;
     const yields = totalYields[res] || 0;
     const upkeep = totalUpkeep[res] || 0;
@@ -2030,7 +2034,7 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
 
   // Entity breakdown section for full modal view
   let entityBreakdownHTML = '';
-  if (!isCompact && myEntities.length > 0) {
+  if (!isCompact && !hidePrivate && myEntities.length > 0) {
     const entityCounts = {};
     myEntities.forEach(e => {
       entityCounts[e.name] = (entityCounts[e.name] || 0) + 1;
@@ -2051,7 +2055,7 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
 
   // History panel section for full modal view
   let historyHTML = '';
-  if (!isCompact) {
+  if (!isCompact && !hidePrivate) {
     // Get all rounds that have history (newest first)
     const allRounds = Array.from(player.history.keys()).sort((a, b) => b - a);
 
@@ -2145,10 +2149,12 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
   return `
     ${titleHeader}
     ${summaryHTML}
-    <div class="section-title section-title-spaced">Resource Flow & Balance</div>
+    ${hidePrivate
+      ? `<div class="text-muted-small" style="margin-top: 8px;">Resource info and history are hidden for AI players unless SHOW_ALL is enabled.</div>`
+      : `<div class="section-title section-title-spaced">Resource Flow & Balance</div>
     ${chartsHTML}
     ${entityBreakdownHTML}
-    ${historyHTML}
+    ${historyHTML}`}
   `;
 }
 

@@ -15,6 +15,8 @@ import { CONFIG } from './config.js';
  * - Attack action: added if positive damage is defined
  * - Repair action: added if repairables is defined
  * - Build actions: added for each entry in buildables
+ * - Self Destruct action: added for every player-owned entity, so the
+ *   owner can stop paying its maintenance (0 AP, 1 order)
  */
 export default class Entity {
   /**
@@ -513,6 +515,7 @@ export default class Entity {
    * - Attack action if positive damage value is defined
    * - Repair action if repairables array is present
    * - Build actions if buildables array is present
+   * - Self Destruct action for every player-owned entity
    */
   setupActions() {
     const hasMovement = !!(this.state.movement || this.data.movement);
@@ -977,6 +980,52 @@ export default class Entity {
         }
       });
     }
+
+    // 6. Self Destruct — available for every player-owned entity, so the
+    // owner can stop paying its maintenance. Costs 0 AP and 1 order.
+    // Deliberately NOT gated on active: an inactive entity (maintenance
+    // unpaid) can still be removed to stop the upkeep retry.
+    this.actions.push({
+      name: "Self Destruct",
+      description: "Destroy this entity to stop paying its maintenance. Costs 0 AP and 1 order.",
+      canDo: (cell, entity) => {
+        if (this.destroyed) return { possible: false, reason: "Entity is already destroyed." };
+        if (!this.owner) return { possible: false, reason: "Only a player-owned entity can self-destruct." };
+        const affordability = this.checkActionAffordability(0);
+        if (!affordability.possible) return affordability;
+        return {
+          possible: true,
+          reason: `Self-destruct ${this.name} for 0 AP and 1 order (stops its maintenance).`,
+          cost: 0,
+          ordersRequired: affordability.ordersRequired
+        };
+      },
+      do: (cell, entity) => {
+        const actionObj = this.actions.find(a => a.name === "Self Destruct");
+        const check = actionObj.canDo(cell, entity);
+        if (!check.possible) return false;
+        this.spendActionCost(check.cost, check.ordersRequired);
+
+        // Add history entry before destroying (destroy() adds its own
+        // 'destroy' entry via removeEntity).
+        if (this.owner && this.gameState) {
+          this.owner.addHistoryEntry(this.gameState.currentRound, {
+            category: 'action',
+            details: `${this.name} at (${this.q}, ${this.r}) self-destructed`,
+            extra: {
+              entityName: this.name,
+              entityId: this.id,
+              actionName: 'Self Destruct',
+              apCost: check.cost,
+              ordersCost: check.ordersRequired
+            }
+          });
+        }
+
+        this.destroy();
+        return true;
+      }
+    });
   }
 
   /**
