@@ -284,16 +284,14 @@ Fix entity.canStandOn()
 
 Zone of control:
 
-1. add zoneOfControlRadius per entity definition (default to zero if not set)
-2. add a controlledBy array to each cell in gameState.hexGrid - starts empty. This will contain the ID of any entity that has military control of the cell.
-3. add a occupiedBy array to each cell in gameState.hexGrid - starts empty. This will contain the ID of any entity that occupies the cell. Only one entity can occupy the cell, but will leave as array for consistency.
-4. when an entity spawns or moves or dies, update gameState.hexGrid to remove existing references to the entity ID in cell.controlledBy and cell.occupied by and add new ones based the current position and entity.zoneOfControlRadius.
-5. gameState.hexGrid.movementCostTo should pass cell, not terrain, to costFunc where possible.
-6. update entity.getMovementCost so that if cell is available we look at cell.occupiedBy. If it is not empty, find the entities by ID and if any are not owned by the same owner as the entity (or both entities have no owner - barbarian through barbarian), then cost is infinity (can't move into or through occupied cell). Do NOT consider controlledBy here.
-7. move.canDo: examine pathRes.path and for each cell
-   - If cell.occupiedBy is not empty, find the entities by ID and if any are not owned by the same owner as the entity (or both entities have no owner - barbarian through barbarian), then path cost is infinity (can't move into or through occupied cell)
-   - If cell is NOT the last cell in path AND cell.controlledBy is not empty, find the entities by ID and if any are not owned by the same owner as the entity (or both entities have no owner - barbarian through barbarian), then path cost is infinity (can't move through controlled cell, BUT can move into them)
-8. Show zone of control highlight in render, similar to entity.minSeparation but only for non-own entities.
+1. add zoneOfControlRadius per entity definition (default to zero if not set, for now set swordsman and knight to have radius of 1)
+2. in gamestate add map from cellKey to {controlledBy, occupiedBy}, each an array of entity IDs (this map does not need to be saved/loaded as recreating the entities on load will populate it)
+3. when an entity spawns or moves or dies, update gameState.hexGrid to remove existing references to the entity ID in cell.controlledBy and cell.occupied by and add new ones based the current position and entity.zoneOfControlRadius.
+4. move.canDo: examine pathRes.path and for each cell AFTER the first (skip source cell)
+   - If cell.occupiedBy is not empty, find the entities by ID and if any are not owned by the same owner as the entity, then path cost is infinity (can't move into or through occupied cell)
+   - If cell is NOT the last cell in path AND cell.controlledBy is not empty, find the entities by ID and if any are not owned by the same owner as the entity then path cost is infinity (can't move through controlled cell, BUT can move into them)
+5. Show zone of control highlight in render when non-own entity is highlighted, similar to entity.minSeparation but only for non-own entities.
+6. Update any AI that don't already use move.canDo to determine possible moves. AI can "plan" routes without ZoC consideration, but move.canDo should always be used to determine what movement orders are actually possible.
 
 ## Task: Phase 25 - Enhance AI leaders and interactions ##
 
