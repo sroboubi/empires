@@ -367,7 +367,10 @@ export class HarkManager extends AdaptiveManager {
     /** helper.attack with B2 failure bookkeeping. Returns orders used. */
     engage(attacker, target, label, ownerName, involvedCells) {
         const from = { q: attacker.q, r: attacker.r };
-        const result = this.helper.attack(this.gameState, attacker, target, 1);
+        // Strike pool (canStrikeThisTurn) includes move-then-attack units,
+        // which need 2 orders; with maxOrders=1 they spent the order moving
+        // and never struck. helper.attack caps by the player's actual orders.
+        const result = this.helper.attack(this.gameState, attacker, target, Math.min(2, num(this.player.orders)));
         const used = ordersUsedFrom(result);
         if (used > 0) {
             involvedCells.push(from, attacker.cell);
