@@ -368,7 +368,7 @@ export class EntityCentricAI extends BaseManager {
       const dist = this.helper.distance(cell, targetCell);
       if (dist < range.min || dist > range.max) continue;
       if (this.gameState.getEntityAt(cell.q, cell.r)) continue;
-      if (!unit.canStandOn(cell)) continue;
+      if (!Number.isFinite(unit.getMovementCost(cell))) continue;
       const move = moveAction.canDo(cell, null);
       if (!move?.possible) continue;
 

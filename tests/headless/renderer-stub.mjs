@@ -15,6 +15,8 @@ export function highlightPathCells() {}
 export function clearPathHighlight() {}
 export function showExclusionZone() {}
 export function clearExclusionZone() {}
+export function showZoneOfControl() {}
+export function clearZoneOfControl() {}
 export function pickHexCell() {}
 export function focusCameraOnEntities() {}
 export function setEntitySelectionHighlight() {}

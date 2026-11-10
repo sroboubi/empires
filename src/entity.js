@@ -103,6 +103,7 @@ export default class Entity {
       actionPoints: 0,
       facing: 'E',
       sightRange: 2,
+      zoneOfControlRadius: 0,
       rotationOffset: 0,
       armor: {},
       maintenance: {},
@@ -157,6 +158,13 @@ export default class Entity {
 
   get sightRange() {
     return this.state.sightRange !== undefined ? this.state.sightRange : 2;
+  }
+
+  // Zone of Control radius (Phase 24): cells within this distance of the
+  // entity are controlled by it. Defaults to 0 (no ZoC); set per entity
+  // definition (e.g. swordsman and knight have radius 1).
+  get zoneOfControlRadius() {
+    return this.state.zoneOfControlRadius ?? this.data.zoneOfControlRadius ?? 0;
   }
 
   get armor() {
@@ -268,28 +276,19 @@ export default class Entity {
   }
 
   /**
-   * Determines if entity can stand on a given terrain or cell.
-   * Constructs: allowed when the terrain is listed in spawnConditions.terrain
-   * (or anywhere when no terrain conditions are defined).
-   * Units: allowed when the movement cost for the terrain is finite.
+   * Whether this entity can be SPAWNED on a given terrain or cell.
+   * Spawn-only (Phase 24) — movement must use movement cost
+   * (getMovementCost), not this. 
    * @param {Object} target - Cell object or Terrain object
    * @returns {boolean}
    */
-  canStandOn(target) {
+  canSpawnOn(target) {
     if (!target) return false;
     const terrain = target.terrain ? target.terrain : target;
     if (!terrain) return false;
-    if (this.isConstruct) {
-      // if no conditions defined, can be placed anywhere
-      if (!this.state.spawnConditions?.terrain) return true;
-      return this.state.spawnConditions.terrain.some(t => t.toLowerCase() === terrain.name?.toLowerCase());
-    }
-    // Standability is a property of the terrain, not of visibility: pass
-    // the terrain (no q/r) so getMovementCost's fog check is skipped.
-    // Otherwise canStandOn would return false for any unexplored cell —
-    // including at setup, when nothing is explored yet and starting units
-    // could never spawn.
-    return Number.isFinite(this.getMovementCost(terrain));
+    // if no conditions defined, can be placed anywhere
+    if (!this.state.spawnConditions?.terrain) return true;
+    return this.state.spawnConditions.terrain.some(t => t.toLowerCase() === terrain.name?.toLowerCase());
   }
 
   /**
@@ -319,13 +318,16 @@ export default class Entity {
    */
   getMovementCost(target) {
     if (!target || this.isConstruct) return Infinity;
-    // Fog (Shahin, 2026-11-09): a cell the owner hasn't explored is
-    // impassable. Only cells carry coordinates — a terrain argument (e.g.
-    // the minEdge sampling in movementCostTo) skips the check and just
-    // returns its cost. Ownerless entities (barbarians) pass vacuously.
+    // Visibility (Shahin, 2026-11-09): a cell the owner cannot currently
+    // see is impassable — you can't move where you can't see. Visible
+    // implies explored, and unexplored implies invisible, so this subsumes
+    // the old fog (unexplored) check. Only cells carry coordinates — a
+    // terrain argument (e.g. the minEdge sampling in movementCostTo, or
+    // canSpawnOn) skips the check and just returns its cost. Ownerless
+    // entities (barbarians) pass vacuously.
     if (typeof target.q === 'number' && typeof target.r === 'number') {
       const owner = this.owner;
-      if (owner && typeof owner.isExplored === 'function' && !owner.isExplored(target.q, target.r)) return Infinity;
+      if (owner && typeof owner.isVisible === 'function' && !owner.isVisible(target.q, target.r)) return Infinity;
     }
     const terrain = target.terrain ? target.terrain : target;
     let scale = (this.terrainCostScale && terrain.name in this.terrainCostScale) ? this.terrainCostScale[terrain.name] : 1;
@@ -546,25 +548,67 @@ export default class Entity {
           // occupancy ourselves — never trust the caller's cell/entity args.
           const realCell = this._resolveCell(cell);
           if (!realCell) return { possible: false, reason: "Target cell does not exist." };
-          // Fog enforcement (Shahin, 2026-11-09): the target must be explored
-          // by the unit's owner. Checked first, before occupancy / terrain /
-          // path / cost, so a canDo probe on an unexplored cell reveals
-          // nothing about it — not even its movement cost (each terrain has
-          // a distinct cost, so a finite cost would leak the terrain type).
-          // Ownerless entities (barbarians) pass vacuously: "unexplored" is
+          // Visibility enforcement (Shahin, 2026-11-09): the target must be
+          // visible to the unit's owner — you can't move where you can't
+          // see. Checked first, before occupancy / terrain / path / cost,
+          // so a canDo probe on an invisible cell reveals nothing about
+          // it — not even whether an enemy is there (an invisible cell is
+          // blocked by invisibility regardless of enemy presence, which
+          // closes the ZoC/occupancy reason leak). Visible implies
+          // explored, so this subsumes the old unexplored check.
+          // Ownerless entities (barbarians) pass vacuously: "visible" is
           // meaningless without an owner.
           const owner = this.owner;
-          const isExploredByOwner = (c) => !owner || typeof owner.isExplored !== 'function' || owner.isExplored(c.q, c.r);
-          if (!isExploredByOwner(realCell)) return { possible: false, reason: "Target cell is unexplored." };
+          const isVisibleToOwner = (c) => !owner || typeof owner.isVisible !== 'function' || owner.isVisible(c.q, c.r);
+          if (!isVisibleToOwner(realCell)) return { possible: false, reason: "Target cell is not visible." };
           const occupant = this.gameState?.getEntityAt?.(realCell.q, realCell.r);
           if (occupant && occupant !== this) return { possible: false, reason: "Target cell is occupied." };
-          if (!this.canStandOn(realCell)) return { possible: false, reason: "Cannot stand on target terrain." };
 
-          // The pathfinder routes around fog: getMovementCost returns
-          // Infinity for unexplored cells, so this finds the cheapest
-          // explored path, or null if none exists.
+          // The pathfinder routes around invisible cells: getMovementCost
+          // returns Infinity for cells the owner cannot see, so this finds
+          // the cheapest visible path, or null if none exists.
           const pathRes = this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.movementCostTo(this.cell, realCell, this.getMovementCost.bind(this)) : null;
           if (!pathRes) return { possible: false, reason: "No valid path to target cell." };
+
+          // Zone of Control (Phase 24): a move cannot pass through or into
+          // a cell occupied by an enemy, and cannot pass THROUGH (but can
+          // move INTO) a cell controlled by an enemy. Same owner — including
+          // two ownerless entities (null === null) — does not block.
+          // Checked after the path is computed and before revealing a cost,
+          // so a blocked move returns possible:false with no cost.
+          const zocMap = this.gameState?.zoneControlMap;
+          if (zocMap) {
+            const myOwnerId = this.ownerId ?? this.owner?.id ?? null;
+            const isSameOwner = (other) => {
+              if (!other) return true;
+              const otherOwnerId = other.ownerId ?? other.owner?.id ?? null;
+              return myOwnerId === otherOwnerId;
+            };
+            const path = pathRes.path;
+            for (let i = 1; i < path.length; i++) {
+              const pathCell = path[i];
+              const isLast = (i === path.length - 1);
+              const entry = zocMap.get(`${pathCell.q},${pathCell.r}`);
+              if (!entry) continue;
+              // Occupied: block if any occupier is an enemy. Applies to
+              // every path cell including the last — cannot move into an
+              // occupied cell.
+              if (entry.occupiedBy && entry.occupiedBy.length > 0) {
+                for (const id of entry.occupiedBy) {
+                  const e = this.gameState.getEntityById(id);
+                  if (e && !isSameOwner(e)) return { possible: false, reason: "Path is blocked by an enemy unit." };
+                }
+              }
+              // Controlled (not the last cell): block if any controller is
+              // an enemy. Moving INTO a controlled cell is allowed.
+              if (!isLast && entry.controlledBy && entry.controlledBy.length > 0) {
+                for (const id of entry.controlledBy) {
+                  const e = this.gameState.getEntityById(id);
+                  if (e && !isSameOwner(e)) return { possible: false, reason: "Path crosses an enemy zone of control." };
+                }
+              }
+            }
+          }
 
           const cost = pathRes.cost;
           const affordability = this.checkActionAffordability(cost);
@@ -601,6 +645,10 @@ export default class Entity {
           this.cell = cell;
           this.q = cell.q;
           this.r = cell.r;
+
+          // Zone of Control (Phase 24): refresh the occupancy/control map
+          // for the new position.
+          if (this.gameState) this.gameState.updateZoneControl(this);
 
           // Update entity vision & player visibility on move
           this.updateVisibility();
@@ -878,10 +926,11 @@ export default class Entity {
           if (occupant && occupant !== this) return { possible: false, reason: "Target cell is occupied." };
 
           // Only spawnConditions gates where an entity can be built (Shahin,
-          // 2026-11-05): canStandOn is about moving onto a cell, not building
-          // on it — a stationary village must be able to spawn units on
-          // terrain it can't be built on, and a worker must be able to build
-          // a ship on water it can't stand on. No builder check either.
+          // 2026-11-05): movement cost governs moving onto a cell, not
+          // building on it — a stationary village must be able to spawn
+          // units on terrain it can't be built on, and a worker must be
+          // able to build a ship on water it can't stand on. No builder
+          // check either.
           const spawnConditions = meta ? meta.spawnConditions : null;
 
           // The construct being built must allow the target terrain.

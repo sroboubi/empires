@@ -262,7 +262,7 @@ export class HarkManager extends AdaptiveManager {
             const dist = this.helper.distance(cell, targetCell);
             if (dist < minD || dist > maxD) continue;
             if (this.gameState.getEntityAt(cell.q, cell.r)) continue;
-            if (!unit.canStandOn(cell)) continue;
+            if (!Number.isFinite(unit.getMovementCost(cell))) continue;
             const move = moveAction.canDo(cell, null);
             if (!move?.possible) continue;
 

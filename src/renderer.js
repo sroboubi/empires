@@ -35,6 +35,8 @@ let entitySelectionMesh = null; // Selection ring around active entity
 let groundBaseMesh = null;
 let exclusionZoneGroup = null; // Group of meshes showing entity minSeparation exclusion zone
 let exclusionZoneGeometry = null;
+let zoneOfControlGroup = null; // Group of meshes showing an entity's zone of control (Phase 24)
+let zoneOfControlGeometry = null;
 
 // Module-level reference to track the running time-of-day animation
 let activeTimeEffect = null;
@@ -249,6 +251,11 @@ export function initRenderer(canvas) {
   exclusionZoneGroup = new THREE.Group();
   scene.add(exclusionZoneGroup);
   exclusionZoneGeometry = new THREE.CylinderGeometry(CONFIG.HEX_SIZE * cellSizeScale.normal * 0.96, CONFIG.HEX_SIZE * cellSizeScale.normal * 0.96, 0.05, 6);
+
+  // Zone of Control Mesh Group (Phase 24)
+  zoneOfControlGroup = new THREE.Group();
+  scene.add(zoneOfControlGroup);
+  zoneOfControlGeometry = new THREE.CylinderGeometry(CONFIG.HEX_SIZE * cellSizeScale.normal * 0.96, CONFIG.HEX_SIZE * cellSizeScale.normal * 0.96, 0.05, 6);
 
   // 8. Setup Loaders
   const dracoLoader = new DRACOLoader();
@@ -1196,6 +1203,51 @@ export function clearExclusionZone() {
     const child = exclusionZoneGroup.children[0];
     if (child.material) child.material.dispose();
     exclusionZoneGroup.remove(child);
+  }
+}
+
+/**
+ * Highlights the zone of control around an entity (Phase 24).
+ * Renders semi-transparent hexes in the owning player's color over every
+ * cell within the entity's zoneOfControlRadius (including its own cell).
+ * @param {number} q - Center axial q
+ * @param {number} r - Center axial r
+ * @param {number} radius - Zone of control radius (cells at distance <= radius)
+ * @param {string} color - Player hex color
+ * @param {GameState} [gameState] - Game state for terrain heights
+ */
+export function showZoneOfControl(q, r, radius, color = '#e74c3c', gameState = null) {
+  clearZoneOfControl();
+  if (q === null || r === null || !radius || radius <= 0 || !zoneOfControlGroup) return;
+
+  const hexColor = new THREE.Color(color);
+  const mat = new THREE.MeshBasicMaterial({
+    color: hexColor,
+    transparent: true,
+    opacity: 0.35,
+    side: THREE.DoubleSide
+  });
+
+  for (let dq = -radius; dq <= radius; dq++) {
+    for (let dr = Math.max(-radius, -dq - radius); dr <= Math.min(radius, -dq + radius); dr++) {
+      const targetQ = q + dq;
+      const targetR = r + dr;
+      const { x, z } = HexGrid.axialToPixel(targetQ, targetR);
+      const cell = gameState?.hexGrid ? gameState.hexGrid.cells.get(`${targetQ},${targetR}`) : null;
+      const height = cell?.terrain ? cell.terrain.height : 1.0;
+      const mesh = new THREE.Mesh(zoneOfControlGeometry, mat);
+      mesh.position.set(x, height + CONFIG.HEX_SIZE / 30, z);
+      zoneOfControlGroup.add(mesh);
+    }
+  }
+}
+
+export function clearZoneOfControl() {
+  if (!zoneOfControlGroup) return;
+  while (zoneOfControlGroup.children.length > 0) {
+    const child = zoneOfControlGroup.children[0];
+    if (child.material) child.material.dispose();
+    zoneOfControlGroup.remove(child);
   }
 }
 

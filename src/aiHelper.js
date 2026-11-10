@@ -158,7 +158,7 @@ export class AiHelper {
             for (const nb of this.getNeighbors(cur.q, cur.r)) {
                 const key = `${nb.q},${nb.r}`;
                 if (reachable.has(key)) continue;
-                if (typeof unit.canStandOn === 'function' && !unit.canStandOn(nb)) continue;
+                if (!Number.isFinite(unit.getMovementCost(nb))) continue;
                 const baseMc = nb.terrain?.movementCost ?? 1;
                 const tcs = unit.terrainCostScale;
                 const tScale = (tcs && nb.terrain?.name in tcs) ? tcs[nb.terrain.name] : 1;
@@ -249,7 +249,7 @@ export class AiHelper {
                 }
             }
 
-            // No canStandOn check on the build cell (Shahin, 2026-11-05):
+            // No movement-cost check on the build cell (Shahin, 2026-11-05):
             // only spawnConditions gates building. The builder stages from
             // a reachable adjacent cell below — it need not stand on the
             // build cell itself (stationary builders, future ships).
@@ -442,7 +442,7 @@ export class AiHelper {
             for (const nb of this.getNeighbors(cur.q, cur.r)) {
                 const nbKey = `${nb.q},${nb.r}`;
                 if (poolKeys.has(nbKey)) {
-                    if (explorer.canStandOn(nb) && !reachable.has(nbKey)) {
+                    if (Number.isFinite(explorer.getMovementCost(nb)) && !reachable.has(nbKey)) {
                         const pathToNb = [...cur.path, nb];
                         directTargets.push({ targetCell: nb, path: pathToNb, dist: pathToNb.length });
                     } else if (!targetCells) {
@@ -450,7 +450,7 @@ export class AiHelper {
                     }
                 }
                 if (reachable.has(nbKey)) continue;
-                if (!explorer.canStandOn(nb)) continue;
+                if (!Number.isFinite(explorer.getMovementCost(nb))) continue;
                 const nextPath = [...cur.path, nb];
                 reachable.set(nbKey, { cell: nb, path: nextPath });
                 const occupant = gameState.getEntityAt(nb.q, nb.r);
