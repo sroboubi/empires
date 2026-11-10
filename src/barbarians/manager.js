@@ -15,11 +15,11 @@ export function getBorderCells(helper) {
 
 /**
  * Finds a target border cell on the opposite side of the map by mirroring coordinates through center (0, 0).
- * Uses only entity.canStandOn() to evaluate traversability.
+ * Uses only entity.getMovementCost() to evaluate traversability.
  *
  * @param {Object} fromCell - Source cell or coordinate {q, r}
  * @param {Object} helper - AiHelper instance
- * @param {BaseEntity} [entity] - Entity used for canStandOn checks
+ * @param {BaseEntity} [entity] - Entity used for movement-cost checks
  * @returns {Object|null}
  */
 export function findOppositeBorderCell(fromCell, helper, entity = null) {
@@ -31,7 +31,7 @@ export function findOppositeBorderCell(fromCell, helper, entity = null) {
 
   const borderCells = getBorderCells(helper);
   const passableBorders = borderCells.filter(c => {
-    return entity && typeof entity.canStandOn === 'function' ? entity.canStandOn(c) : false;
+    return entity && typeof entity.getMovementCost === 'function' ? Number.isFinite(entity.getMovementCost(c)) : false;
   });
 
   if (passableBorders.length > 0) {
@@ -41,7 +41,7 @@ export function findOppositeBorderCell(fromCell, helper, entity = null) {
 
   // Fallback to any passable cell in the grid closest to opposite coordinate
   const allPassable = helper.getCellsArray().filter(c => {
-    return entity && typeof entity.canStandOn === 'function' ? entity.canStandOn(c) : false;
+    return entity && typeof entity.getMovementCost === 'function' ? Number.isFinite(entity.getMovementCost(c)) : false;
   });
 
   if (allPassable.length > 0) {
@@ -116,8 +116,8 @@ export async function manageBarbarians(config, helper) {
           const dummy = helper.createEntity(meta, null, gameState, null, { id: '__probe__' });
 
           const spawnCellIndex = candidateBorderCells.findIndex(cell => {
-            if (!dummy || typeof dummy.canStandOn !== 'function') return false;
-            return dummy.canStandOn(cell) && !gameState.getEntityAt(cell.q, cell.r);
+            if (!dummy || typeof dummy.canSpawnOn !== 'function') return false;
+            return dummy.canSpawnOn(cell) && !gameState.getEntityAt(cell.q, cell.r);
           });
 
           if (spawnCellIndex !== -1) {

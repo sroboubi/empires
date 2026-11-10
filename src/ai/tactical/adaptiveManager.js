@@ -1322,7 +1322,7 @@ export class AdaptiveManager extends BaseManager {
         let bestScore = currentMin;
         for (const cell of this.helper.getNeighbors(unit.q, unit.r)) {
             if (this.gameState.getEntityAt(cell.q, cell.r)) continue;
-            if (!unit.canStandOn(cell)) continue;
+            if (!Number.isFinite(unit.getMovementCost(cell))) continue;
             const check = moveAction.canDo(cell, null);
             if (!check || !check.possible) continue;
             const score = Math.min(...threats.map(item => this.helper.distance(cell, item.entity)));
@@ -1626,7 +1626,7 @@ export class AdaptiveManager extends BaseManager {
             const adjacent = this.helper.getNeighbors(coord.q, coord.r)
                 .filter(cell =>
                     !this.gameState.getEntityAt(cell.q, cell.r)
-                    && unit.canStandOn(cell)
+                    && Number.isFinite(unit.getMovementCost(cell))
                 )
                 .sort((a, b) => this.helper.distance(unit, a) - this.helper.distance(unit, b));
             if (adjacent.length === 0) return 0;

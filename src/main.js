@@ -11,6 +11,8 @@ import {
   clearPathHighlight,
   showExclusionZone,
   clearExclusionZone,
+  showZoneOfControl,
+  clearZoneOfControl,
   pickHexCell,
   setEntitySelectionHighlight,
   clearEntitySelectionHighlight,
@@ -2560,6 +2562,15 @@ function onMouseMove(event) {
       clearExclusionZone();
     }
 
+    // 1b. Zone of Control Preview on non-own Entity Hover (Phase 24)
+    const isNonOwnEntity = entity && showEntityInInspect && entity.owner && activePlayer && entity.owner.id !== activePlayer.id;
+    const zocRadius = entity ? (entity.zoneOfControlRadius ?? 0) : 0;
+    if (isNonOwnEntity && zocRadius > 0) {
+      showZoneOfControl(entity.q, entity.r, zocRadius, entity.owner.color || '#e74c3c', gameState);
+    } else {
+      clearZoneOfControl();
+    }
+
     // 2. Movement Path and Cost Preview when a unit with "Move" is selected (only when movement is possible)
     const moveRow = document.getElementById('inspect-movement-row');
     const moveValue = document.getElementById('inspect-movement');
@@ -2626,6 +2637,7 @@ function onMouseMove(event) {
   } else {
     highlightCell(null, null);
     clearExclusionZone();
+    clearZoneOfControl();
     const moveRow = document.getElementById('inspect-movement-row');
     if (moveRow) moveRow.style.display = 'none';
     const resourceRow = document.getElementById('inspect-resource-row');

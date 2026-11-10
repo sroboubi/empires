@@ -358,6 +358,7 @@
     },
     "rotationOffset": 90,
     "sightRange": 4,
+    "zoneOfControlRadius": 1,
     "score": {
       "military": 10,
       "economic": 0
@@ -416,6 +417,7 @@
     },
     "rotationOffset": 90,
     "sightRange": 3,
+    "zoneOfControlRadius": 1,
     "score": {
       "military": 20,
       "economic": 0

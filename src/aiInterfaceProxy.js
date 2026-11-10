@@ -99,7 +99,7 @@ const GAMESTATE_METHODS = new Set([
   'getEntityAt', 'getEntityById', 'getChatHistory', 'getChatKey',
 ]);
 const ENTITY_METHODS = new Set([
-  'getActions', 'canStandOn', 'getMovementCost', 'getCostToMaintain',
+  'getActions', 'canSpawnOn', 'getMovementCost', 'getCostToMaintain',
   'getCostToSpawn', 'getOrdersRequired', 'info', 'canYield',
 ]);
 const MAP_READ_METHODS = new Set(['get', 'has', 'keys', 'values', 'entries', 'forEach', Symbol.iterator]);
@@ -531,6 +531,13 @@ export function createGameStateProxy(gameState, ownPlayer, aiName, seen = new We
     get(target, prop, receiver) {
       if (prop === UNWRAP) return target;
 
+      // Zone of Control map (Phase 24): never expose it to AIs. It maps
+      // every cell to the entities controlling/occupying it, so a readable
+      // map would hand an AI every enemy position. Enforcement is
+      // unaffected: action methods are bound to the real entity, so
+      // move.canDo reads the real gameState regardless.
+      if (prop === 'zoneControlMap') return undefined;
+
       if (prop === 'hexGrid') {
         return createHexGridProxy(target.hexGrid, ownPlayer, aiName, seen);
       }
@@ -631,10 +638,11 @@ export function createGameStateProxy(gameState, ownPlayer, aiName, seen = new We
       );
     },
     ownKeys(target) {
-      return Reflect.ownKeys(target).filter(k => k !== UNWRAP);
+      return Reflect.ownKeys(target).filter(k => k !== UNWRAP && k !== 'zoneControlMap');
     },
     has(target, prop) {
       if (prop === UNWRAP) return true;
+      if (prop === 'zoneControlMap') return false;
       return Reflect.has(target, prop);
     },
   }, () => proxy, aiName, 'gameState');

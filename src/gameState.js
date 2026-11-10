@@ -31,6 +31,11 @@ export class GameState {
     this.random = () => Math.random();
     this.hexGrid = null;  // HexGrid instance
     this.entities = [];   // List of active BaseEntity instances
+    // Zone of Control map (Phase 24): cellKey "q,r" -> { controlledBy: [entityId], occupiedBy: [entityId] }.
+    // NOT saved/loaded — recreating entities on load (via spawnEntity)
+    // repopulates it. NOT exposed to AIs — the AI interface proxy blocks
+    // this property (a readable map would hand an AI every enemy position).
+    this.zoneControlMap = new Map();
     this.manifestData = null;
     this.settings = null;
     this.gameOver = false;
@@ -208,18 +213,18 @@ export class GameState {
         const pz = targetRadius * Math.sqrt(3) * CONFIG.HEX_SIZE * Math.sin(angle);
         const { q: targetQ, r: targetR } = HexGrid.pixelToAxial(px, pz);
 
-        const getUnitCanStandOnFn = (unitName) => {
+        const getUnitCanSpawnOnFn = (unitName) => {
           const uMeta = manifestData.entities[unitName];
           const dummy = new Entity(uMeta, player, this, null, { id: '__probe__' });
-          return dummy.canStandOn.bind(dummy);
+          return dummy.canSpawnOn.bind(dummy);
         };
 
         const firstUnitName = startingUnitNames[0];
-        const firstUnitCanStandOn = getUnitCanStandOnFn(firstUnitName);
+        const firstUnitCanSpawnOn = getUnitCanSpawnOnFn(firstUnitName);
 
         // Find the starting cell for this player using BFS
         const startCell = this.hexGrid.findStartingCell(targetQ, targetR, (terrain) => {
-          return firstUnitCanStandOn(terrain);
+          return firstUnitCanSpawnOn(terrain);
         });
 
         if (!startCell) {
@@ -230,7 +235,7 @@ export class GameState {
         player.startCoord = { q: startCell.q, r: startCell.r };
 
         // Helper to find next nearest available cell searching outwards from startCoord
-        const findNextAvailableCell = (canStandOnFn) => {
+        const findNextAvailableCell = (canSpawnOnFn) => {
           const visited = new Set();
           const queue = [{ q: startCell.q, r: startCell.r }];
           visited.add(`${startCell.q},${startCell.r}`);
@@ -240,7 +245,7 @@ export class GameState {
             const key = `${current.q},${current.r}`;
             const cell = this.hexGrid.getCell(current.q, current.r);
 
-            if (cell && !occupiedCoords.has(key) && canStandOnFn(cell)) {
+            if (cell && !occupiedCoords.has(key) && canSpawnOnFn(cell)) {
               return cell;
             }
 
@@ -257,9 +262,9 @@ export class GameState {
         };
 
         for (const [unitName, quantity] of Object.entries(startingUnits)) {
-          const unitCanStandOn = getUnitCanStandOnFn(unitName);
+          const unitCanSpawnOn = getUnitCanSpawnOnFn(unitName);
           for (let i = 0; i < quantity; i++) {
-            const cell = findNextAvailableCell(unitCanStandOn);
+            const cell = findNextAvailableCell(unitCanSpawnOn);
             if (cell) {
               const key = `${cell.q},${cell.r}`;
               occupiedCoords.add(key);
@@ -396,6 +401,87 @@ export class GameState {
    *   manifest changed or dropped the type; otherwise the manifest is used)
    * @returns {BaseEntity|null} Spawned entity instance
    */
+  /**
+   * Zone of Control (Phase 24) helpers.
+   * The map is keyed by "q,r"; each entry is { controlledBy: [entityId], occupiedBy: [entityId] }.
+   * controlledBy: entities whose zoneOfControlRadius covers the cell.
+   * occupiedBy: the entity (if any) standing on the cell.
+   */
+  _zoneCellKey(q, r) {
+    return `${q},${r}`;
+  }
+
+  // All cells within hex distance `radius` of (q, r), including the center
+  // cell itself. Radius 0 returns just the center cell.
+  _cellsWithinRadius(q, r, radius) {
+    const out = [{ q, r }];
+    if (!radius || radius <= 0) return out;
+    const seen = new Set([`${q},${r}`]);
+    let frontier = [{ q, r }];
+    for (let d = 1; d <= radius; d++) {
+      const next = [];
+      for (const c of frontier) {
+        for (const nb of HexGrid.getNeighborCoords(c.q, c.r)) {
+          const key = `${nb.q},${nb.r}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          // Only include cells that exist on the grid.
+          if (!this.hexGrid || !this.hexGrid.getCell(nb.q, nb.r)) continue;
+          out.push({ q: nb.q, r: nb.r });
+          next.push({ q: nb.q, r: nb.r });
+        }
+      }
+      frontier = next;
+    }
+    return out;
+  }
+
+  // Remove an entity's ID from every map entry (both lists). Drops entries
+  // left empty.
+  _removeEntityFromZoneControl(entityId) {
+    for (const [key, entry] of this.zoneControlMap) {
+      entry.controlledBy = entry.controlledBy.filter(id => id !== entityId);
+      entry.occupiedBy = entry.occupiedBy.filter(id => id !== entityId);
+      if (entry.controlledBy.length === 0 && entry.occupiedBy.length === 0) {
+        this.zoneControlMap.delete(key);
+      }
+    }
+  }
+
+  // Recompute one entity's contribution to the map: remove its old entries,
+  // then add it to its current cell (occupiedBy) and every cell within its
+  // zoneOfControlRadius (controlledBy). Call after spawn and after any move.
+  updateZoneControl(entity) {
+    if (!entity || !entity.id) return;
+    this._removeEntityFromZoneControl(entity.id);
+    const radius = entity.zoneOfControlRadius ?? 0;
+    const cells = this._cellsWithinRadius(entity.q, entity.r, radius);
+    for (const c of cells) {
+      const key = this._zoneCellKey(c.q, c.r);
+      let entry = this.zoneControlMap.get(key);
+      if (!entry) {
+        entry = { controlledBy: [], occupiedBy: [] };
+        this.zoneControlMap.set(key, entry);
+      }
+      if (!entry.controlledBy.includes(entity.id)) entry.controlledBy.push(entity.id);
+    }
+    // The entity occupies its own cell.
+    const ownKey = this._zoneCellKey(entity.q, entity.r);
+    let ownEntry = this.zoneControlMap.get(ownKey);
+    if (!ownEntry) {
+      ownEntry = { controlledBy: [], occupiedBy: [] };
+      this.zoneControlMap.set(ownKey, ownEntry);
+    }
+    if (!ownEntry.occupiedBy.includes(entity.id)) ownEntry.occupiedBy.push(entity.id);
+  }
+
+  // Drop an entity from the map entirely (destroy). Call before removing it
+  // from this.entities.
+  removeFromZoneControl(entityId) {
+    if (!entityId) return;
+    this._removeEntityFromZoneControl(entityId);
+  }
+
   spawnEntity(entityName, cell, owner = null, initialState = null, entityData = null) {
     const meta = entityData || this.manifestData?.entities[entityName];
     if (!meta) {
@@ -405,6 +491,10 @@ export class GameState {
 
     const entity = new Entity(meta, owner, this, cell, initialState);
     this.entities.push(entity);
+    // Zone of Control (Phase 24): populate the occupancy/control map.
+    // Load recreates entities through spawnEntity, so this is what
+    // repopulates the map on load (the map itself is not saved).
+    this.updateZoneControl(entity);
 
     // Add history entry for entity creation — but not on rehydration:
     // deserialize() re-spawns every existing entity, and recording those
@@ -441,6 +531,8 @@ export class GameState {
         }
       });
     }
+    // Zone of Control (Phase 24): drop the entity from the map.
+    this.removeFromZoneControl(entityId);
     this.entities = this.entities.filter(e => e.id !== entityId);
   }
 

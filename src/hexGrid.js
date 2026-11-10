@@ -247,17 +247,17 @@ export class HexGrid {
 
   /**
    * BFS outward from target coordinate until a cell passes the given predicate.
-   * The predicate is a function (terrain) => boolean — typically entity.canStandOn.
+   * The predicate is a function (terrain) => boolean — typically entity.canSpawnOn.
    *
    * @param {number} qTarget - Starting q coordinate for search
    * @param {number} rTarget - Starting r coordinate for search
-   * @param {function} canStandOnFn - Function that takes a terrain object and returns boolean
+   * @param {function} canSpawnOnFn - Function that takes a terrain object and returns boolean
    * @returns {Object|null} The first cell that passes the predicate, or null
    */
-  findStartingCell(qTarget, rTarget, canStandOnFn) {
+  findStartingCell(qTarget, rTarget, canSpawnOnFn) {
     // Check the target cell itself first
     const targetCell = this.getCell(qTarget, rTarget);
-    if (targetCell && canStandOnFn(targetCell.terrain)) {
+    if (targetCell && canSpawnOnFn(targetCell.terrain)) {
       return targetCell;
     }
 
@@ -282,7 +282,7 @@ export class HexGrid {
         const cell = this.getCell(nb.q, nb.r);
         if (!cell) continue;
 
-        if (canStandOnFn(cell.terrain)) {
+        if (canSpawnOnFn(cell.terrain)) {
           return cell;
         }
 
