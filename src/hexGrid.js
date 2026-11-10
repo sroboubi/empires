@@ -391,11 +391,14 @@ export class HexGrid {
    * @param {{q: number, r: number}} source - Source cell coordinates
    * @param {{q: number, r: number}} target - Target cell coordinates
    * @param {function} costFunc - per-terrain cost function: takes terrain as argument and returns cost
-   * @param {{allowDetours?: boolean}} [options] - allowDetours opts into A* detours + best-effort return
+   * @param {{allowDetours?: boolean, isPassable?: function}} [options] - allowDetours opts into A* detours + best-effort return;
+   *   isPassable (optional) takes a cell and returns false for cells that must not be entered
+   *   (e.g. fog: unexplored cells are impassable). When omitted, all cells are passable.
    * @returns {{cost: number, path: Array<Object>, reached?: boolean}|null}
    */
   movementCostTo(source, target, costFunc, options = {}) {
     const allowDetours = options.allowDetours === true;
+    const isPassable = typeof options.isPassable === 'function' ? options.isPassable : null;
     const sourceCell = this.getCell(source.q, source.r);
     const targetCell = this.getCell(target.q, target.r);
     if (!sourceCell || !targetCell) return null;
@@ -528,6 +531,11 @@ export class HexGrid {
         // Default mode only: only allow moves that get strictly closer to
         // the target — the player-command restriction. Detour mode drops it.
         if (!allowDetours && nbDistToTarget >= currentDistToTarget) continue;
+
+        // Optional passability predicate (e.g. fog: unexplored cells are
+        // impassable). Skipped cells are never entered, so no returned path
+        // ever goes through them.
+        if (isPassable && !isPassable(nb)) continue;
 
         const nbKey = `${nb.q},${nb.r}`;
         const edgeCost = costFunc(nb.terrain);

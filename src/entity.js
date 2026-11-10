@@ -533,12 +533,30 @@ export default class Entity {
           // occupancy ourselves — never trust the caller's cell/entity args.
           const realCell = this._resolveCell(cell);
           if (!realCell) return { possible: false, reason: "Target cell does not exist." };
+          // Fog enforcement (Shahin, 2026-11-09): the target must be explored
+          // by the unit's owner. Checked first, before occupancy / terrain /
+          // path / cost, so a canDo probe on an unexplored cell reveals
+          // nothing about it — not even its movement cost (each terrain has
+          // a distinct cost, so a finite cost would leak the terrain type).
+          // Ownerless entities (barbarians) pass vacuously: "unexplored" is
+          // meaningless without an owner.
+          const owner = this.owner;
+          const isExploredByOwner = (c) => !owner || typeof owner.isExplored !== 'function' || owner.isExplored(c.q, c.r);
+          if (!isExploredByOwner(realCell)) return { possible: false, reason: "Target cell is unexplored." };
           const occupant = this.gameState?.getEntityAt?.(realCell.q, realCell.r);
           if (occupant && occupant !== this) return { possible: false, reason: "Target cell is occupied." };
           if (!this.canStandOn(realCell)) return { possible: false, reason: "Cannot stand on target terrain." };
 
-          const pathRes = this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.movementCostTo(this.cell, realCell, this.getMovementCost.bind(this)) : null;
+          // The pathfinder routes around fog (isPassable), so this finds the
+          // cheapest explored path, or null if none exists.
+          const pathRes = this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.movementCostTo(this.cell, realCell, this.getMovementCost.bind(this), { isPassable: isExploredByOwner }) : null;
           if (!pathRes) return { possible: false, reason: "No valid path to target cell." };
+
+          // Defense-in-depth: the pathfinder only returns explored paths, but
+          // verify every cell on the path is explored before revealing a cost.
+          for (const pathCell of pathRes.path) {
+            if (!isExploredByOwner(pathCell)) return { possible: false, reason: "Path crosses unexplored cells." };
+          }
 
           const cost = pathRes.cost;
           const affordability = this.checkActionAffordability(cost);
