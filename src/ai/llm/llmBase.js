@@ -408,9 +408,7 @@ export class LlmBaseManager extends BaseManager {
                         const ap = entity.actionPoints ?? 0;
                         let minCost = null;
                         for (const nb of helper.getNeighbors(e.q, e.r)) {
-                            const costFunc = typeof entity.getMovementCost === 'function'
-                                ? entity.getMovementCost.bind(entity)
-                                : (terrain) => terrain.movementCost || 1;
+                            const costFunc = entity.getMovementCost.bind(entity);
                             const res = helper.movementCostTo(entity.cell, nb, costFunc);
                             if (res && (minCost === null || res.cost < minCost)) minCost = res.cost;
                         }

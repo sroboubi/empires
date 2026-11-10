@@ -547,9 +547,17 @@ export default class Entity {
           if (occupant && occupant !== this) return { possible: false, reason: "Target cell is occupied." };
           if (!this.canStandOn(realCell)) return { possible: false, reason: "Cannot stand on target terrain." };
 
-          // The pathfinder routes around fog (isPassable), so this finds the
-          // cheapest explored path, or null if none exists.
-          const pathRes = this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.movementCostTo(this.cell, realCell, this.getMovementCost.bind(this), { isPassable: isExploredByOwner }) : null;
+          // The pathfinder routes around fog: the cost function returns
+          // Infinity for unexplored cells, so this finds the cheapest
+          // explored path, or null if none exists. It must handle both a
+          // cell and a terrain: movementCostTo calls it with a cell in the
+          // neighbor loop, and with a representative terrain in the minEdge
+          // heuristic sampling (no q/r there, so no exploration check).
+          const costFunc = (target) => {
+            if (target && typeof target.q === 'number' && typeof target.r === 'number' && owner && typeof owner.isExplored === 'function' && !owner.isExplored(target.q, target.r)) return Infinity;
+            return this.getMovementCost(target);
+          };
+          const pathRes = this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.movementCostTo(this.cell, realCell, costFunc) : null;
           if (!pathRes) return { possible: false, reason: "No valid path to target cell." };
 
           // Defense-in-depth: the pathfinder only returns explored paths, but
