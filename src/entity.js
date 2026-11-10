@@ -278,10 +278,7 @@ export default class Entity {
   /**
    * Whether this entity can be SPAWNED on a given terrain or cell.
    * Spawn-only (Phase 24) — movement must use movement cost
-   * (getMovementCost), not this. Constructs: allowed when the terrain is
-   * listed in spawnConditions.terrain (or anywhere when no terrain
-   * conditions are defined). Units: allowed when the movement cost for
-   * the terrain is finite.
+   * (getMovementCost), not this. 
    * @param {Object} target - Cell object or Terrain object
    * @returns {boolean}
    */
@@ -289,17 +286,9 @@ export default class Entity {
     if (!target) return false;
     const terrain = target.terrain ? target.terrain : target;
     if (!terrain) return false;
-    if (this.isConstruct) {
-      // if no conditions defined, can be placed anywhere
-      if (!this.state.spawnConditions?.terrain) return true;
-      return this.state.spawnConditions.terrain.some(t => t.toLowerCase() === terrain.name?.toLowerCase());
-    }
-    // Standability is a property of the terrain, not of visibility: pass
-    // the terrain (no q/r) so getMovementCost's visibility check is skipped.
-    // Otherwise canSpawnOn would return false for any invisible cell —
-    // including at setup, when nothing is visible yet and starting units
-    // could never spawn.
-    return Number.isFinite(this.getMovementCost(terrain));
+    // if no conditions defined, can be placed anywhere
+    if (!this.state.spawnConditions?.terrain) return true;
+    return this.state.spawnConditions.terrain.some(t => t.toLowerCase() === terrain.name?.toLowerCase());
   }
 
   /**
