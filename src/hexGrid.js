@@ -394,29 +394,12 @@ export class HexGrid {
    *   (getMovementCost accepts a cell or a terrain). The minEdge heuristic
    *   sampling still passes a representative terrain, so a costFunc must
    *   handle both a cell and a terrain.
-   * @param {{allowDetours?: boolean, owner?: Object}} [options] - allowDetours opts into A* detours + best-effort return;
-   *   owner opts into fog enforcement: when an owner is passed, the cost
-   *   function is wrapped so unexplored cells cost Infinity, and the
-   *   pathfinder routes around fog (or returns no path). Ownerless entities
-   *   (barbarians) pass no owner, so "unexplored" is meaningless for them.
+   * @param {{allowDetours?: boolean}} [options] - allowDetours opts into A* detours + best-effort return
    * @returns {{cost: number, path: Array<Object>, reached?: boolean}|null}
    */
   movementCostTo(source, target, costFunc, options = {}) {
     const allowDetours = options.allowDetours === true;
 
-    // Fog enforcement (Shahin, 2026-11-09): when an owner is passed, wrap
-    // the cost function so unexplored cells cost Infinity. The wrapper must
-    // handle both a cell and a terrain: the neighbor loop passes a cell,
-    // the minEdge sampling passes a representative terrain (no q/r there,
-    // so no exploration check — a terrain just returns its cost).
-    const owner = options.owner;
-    let effectiveCostFunc = costFunc;
-    if (owner && typeof owner.isExplored === 'function') {
-      effectiveCostFunc = (target) => {
-        if (target && typeof target.q === 'number' && typeof target.r === 'number' && !owner.isExplored(target.q, target.r)) return Infinity;
-        return costFunc(target);
-      };
-    }
     const sourceCell = this.getCell(source.q, source.r);
     const targetCell = this.getCell(target.q, target.r);
     if (!sourceCell || !targetCell) return null;
@@ -451,7 +434,7 @@ export class HexGrid {
       }
       minEdge = Infinity;
       for (const t of this._distinctTerrains) {
-        const c = effectiveCostFunc(t);
+        const c = costFunc(t);
         if (Number.isFinite(c) && c < minEdge) minEdge = c;
       }
       if (!Number.isFinite(minEdge)) {
@@ -551,7 +534,7 @@ export class HexGrid {
         if (!allowDetours && nbDistToTarget >= currentDistToTarget) continue;
 
         const nbKey = `${nb.q},${nb.r}`;
-        const edgeCost = effectiveCostFunc(nb);
+        const edgeCost = costFunc(nb);
         const newCost = currentCost + edgeCost;
 
         if (newCost < (dist[nbKey] ?? Infinity)) {
