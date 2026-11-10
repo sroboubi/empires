@@ -275,7 +275,7 @@ Implement the game configuration loading system using the provided JSON architec
 4. on hover over of the leader, show the description/focus.
 5. For AI players, combine the leader info to the selected controller to set player.controller.
 
-## Task: Phase 24 (TODO) - Prevent movement through enemy entities, and implement zone of control ##
+## Task: Phase 24 - Prevent movement through enemy entities, and implement zone of control ##
 
 Fix entity.canStandOn()
 
