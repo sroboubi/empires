@@ -142,6 +142,7 @@ export class GameState {
       spawnCellResources(this.hexGrid, manifestData, CONFIG.HEX_SIZE, random);
     }
     this.entities = [];
+    this.zoneControlMap.clear();
     this.activePlayerIndex = 0;
     this.currentRound = 1;
     this.chatHistory = {};
@@ -197,6 +198,7 @@ export class GameState {
 
     // 4. Spawn starting units for each player
     this.entities = [];
+    this.zoneControlMap.clear();
     const startingUnits = init.startingUnits || {};
     const startingUnitNames = Object.keys(startingUnits);
 
@@ -640,6 +642,7 @@ export class GameState {
 
       // Re-hydrate Entities
       this.entities = [];
+      this.zoneControlMap.clear();
       if (data.entities && Array.isArray(data.entities)) {
         data.entities.forEach(eData => {
           const cell = this.hexGrid ? this.hexGrid.getCell(eData.q, eData.r) : null;
