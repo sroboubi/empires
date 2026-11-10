@@ -390,12 +390,16 @@ export class HexGrid {
    *
    * @param {{q: number, r: number}} source - Source cell coordinates
    * @param {{q: number, r: number}} target - Target cell coordinates
-   * @param {function} costFunc - per-terrain cost function: takes terrain as argument and returns cost
+   * @param {function} costFunc - cost function: takes a terrain or a cell as argument and returns cost
+   *   (getMovementCost accepts a cell or a terrain). The minEdge heuristic
+   *   sampling still passes a representative terrain, so a costFunc must
+   *   handle both a cell and a terrain.
    * @param {{allowDetours?: boolean}} [options] - allowDetours opts into A* detours + best-effort return
    * @returns {{cost: number, path: Array<Object>, reached?: boolean}|null}
    */
   movementCostTo(source, target, costFunc, options = {}) {
     const allowDetours = options.allowDetours === true;
+
     const sourceCell = this.getCell(source.q, source.r);
     const targetCell = this.getCell(target.q, target.r);
     if (!sourceCell || !targetCell) return null;
@@ -530,7 +534,7 @@ export class HexGrid {
         if (!allowDetours && nbDistToTarget >= currentDistToTarget) continue;
 
         const nbKey = `${nb.q},${nb.r}`;
-        const edgeCost = costFunc(nb.terrain);
+        const edgeCost = costFunc(nb);
         const newCost = currentCost + edgeCost;
 
         if (newCost < (dist[nbKey] ?? Infinity)) {

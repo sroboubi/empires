@@ -540,9 +540,7 @@ export class AiHelper {
             // in-range cell look better, so the unit repositioned after every
             // hit and ping-ponged instead of attacking.
             const currentMult = attackMultiplier(sourceEntity.cell).total;
-            const costFunc = typeof sourceEntity.getMovementCost === 'function'
-                ? sourceEntity.getMovementCost.bind(sourceEntity)
-                : (terrain) => terrain.movementCost || 1;
+            const costFunc = sourceEntity.getMovementCost.bind(sourceEntity);
             // Dry-run attack cost from a candidate cell (same formula as
             // entity.js Attack canDo, without moving there first).
             const attackCostFrom = (cell) => {

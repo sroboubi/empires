@@ -284,7 +284,12 @@ export default class Entity {
       if (!this.state.spawnConditions?.terrain) return true;
       return this.state.spawnConditions.terrain.some(t => t.toLowerCase() === terrain.name?.toLowerCase());
     }
-    return Number.isFinite(this.getMovementCost(target));
+    // Standability is a property of the terrain, not of visibility: pass
+    // the terrain (no q/r) so getMovementCost's fog check is skipped.
+    // Otherwise canStandOn would return false for any unexplored cell —
+    // including at setup, when nothing is explored yet and starting units
+    // could never spawn.
+    return Number.isFinite(this.getMovementCost(terrain));
   }
 
   /**
@@ -314,6 +319,14 @@ export default class Entity {
    */
   getMovementCost(target) {
     if (!target || this.isConstruct) return Infinity;
+    // Fog (Shahin, 2026-11-09): a cell the owner hasn't explored is
+    // impassable. Only cells carry coordinates — a terrain argument (e.g.
+    // the minEdge sampling in movementCostTo) skips the check and just
+    // returns its cost. Ownerless entities (barbarians) pass vacuously.
+    if (typeof target.q === 'number' && typeof target.r === 'number') {
+      const owner = this.owner;
+      if (owner && typeof owner.isExplored === 'function' && !owner.isExplored(target.q, target.r)) return Infinity;
+    }
     const terrain = target.terrain ? target.terrain : target;
     let scale = (this.terrainCostScale && terrain.name in this.terrainCostScale) ? this.terrainCostScale[terrain.name] : 1;
     // A null scale is a JSON-corrupted Infinity (see constructor): fail
@@ -533,10 +546,23 @@ export default class Entity {
           // occupancy ourselves — never trust the caller's cell/entity args.
           const realCell = this._resolveCell(cell);
           if (!realCell) return { possible: false, reason: "Target cell does not exist." };
+          // Fog enforcement (Shahin, 2026-11-09): the target must be explored
+          // by the unit's owner. Checked first, before occupancy / terrain /
+          // path / cost, so a canDo probe on an unexplored cell reveals
+          // nothing about it — not even its movement cost (each terrain has
+          // a distinct cost, so a finite cost would leak the terrain type).
+          // Ownerless entities (barbarians) pass vacuously: "unexplored" is
+          // meaningless without an owner.
+          const owner = this.owner;
+          const isExploredByOwner = (c) => !owner || typeof owner.isExplored !== 'function' || owner.isExplored(c.q, c.r);
+          if (!isExploredByOwner(realCell)) return { possible: false, reason: "Target cell is unexplored." };
           const occupant = this.gameState?.getEntityAt?.(realCell.q, realCell.r);
           if (occupant && occupant !== this) return { possible: false, reason: "Target cell is occupied." };
           if (!this.canStandOn(realCell)) return { possible: false, reason: "Cannot stand on target terrain." };
 
+          // The pathfinder routes around fog: getMovementCost returns
+          // Infinity for unexplored cells, so this finds the cheapest
+          // explored path, or null if none exists.
           const pathRes = this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.movementCostTo(this.cell, realCell, this.getMovementCost.bind(this)) : null;
           if (!pathRes) return { possible: false, reason: "No valid path to target cell." };
 
