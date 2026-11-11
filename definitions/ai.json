@@ -22,6 +22,14 @@
             "url": "./ai/tactical/adaptiveManager.js",
             "config": {}
         },
+        "bigPickle": {
+            "url": "./ai/tactical/bigPickle.js",
+            "config": {}
+        },
+        "apex": {
+            "url": "./ai/tactical/apexAi.js",
+            "config": {}
+        },
         "hark": {
             "url": "./ai/tactical/harkManager.js",
             "config": {
@@ -71,6 +79,45 @@
                 "maxIterationsPerOrder": 4,
                 "minimumIterations": 40
             }
+        },
+        "fable": {
+            "url": "./ai/tactical/fableAi.js",
+            "config": {
+                "planningHorizon": 10,
+                "stockHorizon": 30,
+                "buildShare": 0.5,
+                "enableDiscount": 0.5,
+                "chainDepth": 3,
+                "scarcityCap": 4,
+                "crisisBoost": 4,
+                "siteEvalLimit": 4,
+                "threatTurns": 2,
+                "threatHorizon": 5,
+                "threatWeight": 1,
+                "retaliationBoost": 0.5,
+                "riskWeight": 1,
+                "defenseMargin": 1.5,
+                "threatMemory": 0.9,
+                "guardShare": 0.5,
+                "guardExploreFactor": 0.2,
+                "builderExploreFactor": 0.2,
+                "detourTurns": 2,
+                "sightEfficiency": 0.5,
+                "repairThreshold": 0.5,
+                "foreignStructureBuffer": 3,
+                "offensiveRatio": 2,
+                "cautionRatio": 2,
+                "grudgeTurns": 5,
+                "rivalWeight": 0.5,
+                "focusBoost": 2,
+                "goalBoost": 2,
+                "targetLimit": 4,
+                "maxIterationsPerOrder": 4
+            }
+        },
+        "opus": {
+            "url": "./ai/tactical/opusAi.js",
+            "config": {}
         },
         "llm-json-gemma-4": {
             "url": "./ai/llm/json/harness.js",
