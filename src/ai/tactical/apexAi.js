@@ -687,7 +687,7 @@ export default class ApexAi extends FableAi {
 
     attackOptions(ctx) {
         const { helper, gameState, player, cfg } = this;
-        const targets = ctx.foes.filter(f => f.rawValue > 0 && f.type.dmg > 0);
+        const targets = ctx.foes.filter(f => f.rawValue > 0);
         if (targets.length === 0) return [];
         const out = [];
         for (const u of ctx.mine) {

@@ -144,7 +144,7 @@ export default class OpusAI extends BaseManager {
     // Logging (hint 11): reasoning, source/target location, owning player.
     // =====================================================================
     log(msg) {
-        console.log(`[OpusAI ${this.player.name} R${this.gameState.currentRound}] ${msg}`);
+        this.helper.aiLog(this.player, 'detail', `[OpusAI ${this.player.name} R${this.gameState.currentRound}] ${msg}`);
     }
     where(x) { return `(${x.q},${x.r})`; }
     ownerName(id) {
@@ -238,11 +238,8 @@ export default class OpusAI extends BaseManager {
 
     canStand(def, cell) {
         if (!cell) return false;
-        if (!def.movement) {
-            const t = def.spawnConditions?.terrain;
-            return !t || t.some(n => n.toLowerCase() === String(cell.t).toLowerCase());
-        }
-        return Number.isFinite(this.moveCost(def, cell));
+        const t = def.spawnConditions?.terrain;
+        return !t || t.some(n => n.toLowerCase() === String(cell.t).toLowerCase());
     }
 
     /** Dijkstra over explored cells; units may pass occupied cells but not stop on them. */
