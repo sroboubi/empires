@@ -295,7 +295,7 @@ Zone of control:
 
 ## Task: Phase 25 (TODO) - Enhance AI leaders and interactions ##
 
-1. add trade to chat screen (or as slide out panel):
+1. add trade to chat screen (or as slide out panel) [COMPLETED]:
    - one time offer: build a resource bundle offering (a set of resource amounts: e.g. {iron: 50, gold: 10}) and ask for a bundle in return. Allow other player to adjust bundle and offer it back to you. This can be done until one player rejects the process, or both players accept the exchange bundles.
    - similar to above, but the bundle is per turn. Every turn the bundles are exchanged (resources transferred between players) until one player cancels the exchange. Keep track of these exchanges in game state. If a player does not have the required resources to build the bundle on a turn, then the exchange does that happen on that turn.
    - a history entry is added for every successful and failed exchange.

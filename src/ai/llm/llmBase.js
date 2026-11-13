@@ -8,6 +8,7 @@ import { BaseManager } from '../baseManager.js';
 import { LLMClient } from './client.js';
 import { manifestToMarkdown } from './markdown.js';
 import { DEFAULT_PROMPT_URLS } from './promptUrls.js';
+import { formatResourceBundle } from '../../gameState.js';
 
 export class LlmBaseManager extends BaseManager {
     constructor(player, helper) {
@@ -252,6 +253,137 @@ export class LlmBaseManager extends BaseManager {
             }
         } catch (err) {
             console.error(`[Harness] Failed to summarize chat for ${this.player.name}:`, err);
+        }
+    }
+
+    /**
+     * Evaluates a trade proposal from an opponent leader using the LLM.
+     * @param {Player} proposer
+     * @param {Object} offer - { type: 'one_time'|'per_turn', proposerGives: Object, proposerAsks: Object }
+     * @returns {Promise<{ action: 'accept'|'counter'|'reject', message: string, counterOffer?: Object }>}
+     */
+    async handleTradeOffer(proposer, offer) {
+        const client = this.getLLMClient();
+        if (!client) {
+            return {
+                action: 'reject',
+                message: `${this.player.name} cannot consider trade offers at this time.`
+            };
+        }
+
+        const tradeTypeDesc = offer.type === 'per_turn'
+            ? 'Ongoing Per-Turn Trade Agreement (bundles exchanged each round until canceled)'
+            : 'One-Time Immediate Resource Exchange';
+
+        const profile = this.player.getResourceProfile(this.gameState);
+        const myStock = JSON.stringify(this.player.resources || {});
+        const myNet = JSON.stringify(profile.netIncome || {});
+        const offeredToMe = formatResourceBundle(offer.proposerGives);
+        const requestedFromMe = formatResourceBundle(offer.proposerAsks);
+
+        const promptText = `
+You are ${this.player.name}, leader of your empire.
+${this.personaBlock()}
+
+DIPLOMATIC TRADE PROPOSAL:
+Opponent Leader: ${proposer.name}
+Agreement Type: ${tradeTypeDesc}
+They Offer to Send You: ${offeredToMe} (${JSON.stringify(offer.proposerGives)})
+They Request in Return: ${requestedFromMe} (${JSON.stringify(offer.proposerAsks)})
+
+YOUR EMPIRE'S CURRENT ECONOMIC STATE:
+Your Current Stock: ${myStock}
+Your Net Income Per Turn: ${myNet}
+Current Round: ${this.gameState.currentRound}
+
+EVALUATION RULES:
+1. Examine what is offered vs requested in terms of your empire's needs, reserves, and income.
+2. If the deal is favorable or acceptable to you, and you can afford what is requested (have enough stock, or enough net income if per-turn), select "accept".
+3. If the deal is close but needs adjustment (e.g. asking too much or offering too little), select "counter" and provide an adjusted "counterOffer" containing "proposerGives" (what they should send you) and "proposerAsks" (what you are willing to send them).
+4. If the deal is unacceptable, insulting, or completely unaffordable, select "reject".
+5. Provide a diplomatic, in-character explanation in "message" written directly to ${proposer.name}.
+`;
+
+        const responseSchema = {
+            type: 'object',
+            properties: {
+                action: { type: 'string', enum: ['accept', 'counter', 'reject'] },
+                message: { type: 'string', description: 'In-character diplomatic message explaining your decision' },
+                counterOffer: {
+                    type: 'object',
+                    description: 'Required if action is counter. What the proposer gives and what the proposer receives.',
+                    properties: {
+                        proposerGives: { type: 'object', description: 'Resource quantities the proposer sends to you' },
+                        proposerAsks: { type: 'object', description: 'Resource quantities you send to the proposer' }
+                    }
+                }
+            },
+            required: ['action', 'message']
+        };
+
+        try {
+            console.log(`[Harness] ${this.player.name} evaluating trade proposal from ${proposer.name}...`);
+            const rawResponse = await client.generate(
+                promptText,
+                `You are a strategic AI leader in a 4X civilization game. Evaluate trade offers strictly adhering to the requested JSON schema.`,
+                {
+                    responseSchema,
+                    temperature: 0.5,
+                    thinkingBudget: 0,
+                    maxOutputTokens: 600
+                }
+            );
+
+            if (!rawResponse) {
+                return {
+                    action: 'reject',
+                    message: "We have deliberated, but cannot agree to these terms."
+                };
+            }
+
+            const parsed = typeof rawResponse === 'string' ? JSON.parse(rawResponse) : rawResponse;
+            const action = ['accept', 'counter', 'reject'].includes(parsed.action) ? parsed.action : 'reject';
+            const message = parsed.message || `${this.player.name} has reached a decision regarding the trade.`;
+
+            // If action is accept, verify AI actually has the resources requested for one-time
+            if (action === 'accept' && offer.type === 'one_time') {
+                if (!this.player.hasResources(offer.proposerAsks)) {
+                    return {
+                        action: 'reject',
+                        message: "Upon inspecting our warehouses, we realize we do not currently possess the goods you requested."
+                    };
+                }
+            }
+
+            // Sanitize counterOffer if provided
+            let counterOffer = null;
+            if (action === 'counter' && parsed.counterOffer) {
+                const cleanBundle = (b) => {
+                    if (!b || typeof b !== 'object') return {};
+                    const res = {};
+                    for (const [k, v] of Object.entries(b)) {
+                        const num = Math.round(Number(v));
+                        if (num > 0) res[k] = num;
+                    }
+                    return res;
+                };
+                counterOffer = {
+                    proposerGives: cleanBundle(parsed.counterOffer.proposerGives),
+                    proposerAsks: cleanBundle(parsed.counterOffer.proposerAsks)
+                };
+            }
+
+            return {
+                action,
+                message,
+                counterOffer
+            };
+        } catch (err) {
+            console.error(`[Harness] Error evaluating trade offer:`, err);
+            return {
+                action: 'reject',
+                message: "Our council advises against entering into this agreement at this juncture."
+            };
         }
     }
 

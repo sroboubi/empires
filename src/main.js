@@ -1,4 +1,4 @@
-import { GameState } from './gameState.js';
+import { GameState, formatResourceBundle } from './gameState.js';
 import { CONFIG } from './config.js';
 import { showToast, displayNum } from './utils.js';
 import {
@@ -318,6 +318,37 @@ async function init() {
           sendChatMessage();
         }
       });
+    }
+
+    const btnToggleTrade = document.getElementById('btn-toggle-trade');
+    if (btnToggleTrade) {
+      btnToggleTrade.addEventListener('click', () => toggleTradeDrawer());
+    }
+
+    const btnCloseTradeDrawer = document.getElementById('btn-close-trade-drawer');
+    if (btnCloseTradeDrawer) {
+      btnCloseTradeDrawer.addEventListener('click', () => toggleTradeDrawer(false));
+    }
+
+    const btnTradeOneTime = document.getElementById('trade-tab-onetime');
+    if (btnTradeOneTime) {
+      btnTradeOneTime.addEventListener('click', () => {
+        currentChatSession.tradeType = 'one_time';
+        renderTradeDrawer();
+      });
+    }
+
+    const btnTradePerTurn = document.getElementById('trade-tab-perturn');
+    if (btnTradePerTurn) {
+      btnTradePerTurn.addEventListener('click', () => {
+        currentChatSession.tradeType = 'per_turn';
+        renderTradeDrawer();
+      });
+    }
+
+    const btnProposeTrade = document.getElementById('btn-propose-trade');
+    if (btnProposeTrade) {
+      btnProposeTrade.addEventListener('click', () => handleProposeTradeClicked());
     }
 
     // Barbarian setup UI bindings
@@ -1559,7 +1590,12 @@ let currentChatSession = {
   humanPlayer: null,
   aiPlayer: null,
   resolvePromise: null,
-  isWaitingForAi: false
+  isWaitingForAi: false,
+  isTradeDrawerOpen: false,
+  tradeType: 'one_time',
+  pendingOffer: null,
+  draftGives: {},
+  draftAsks: {}
 };
 
 function escapeHTML(str) {
@@ -1570,6 +1606,409 @@ function escapeHTML(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+function getAvailableTradeResources() {
+  const resSet = new Map();
+  // 1. From manifestData.resources
+  const manifestResources = gameState?.manifestData?.resources || [];
+  for (const r of manifestResources) {
+    if (r.name) resSet.set(r.name.toLowerCase(), { name: r.name, color: r.color || 'var(--accent-color)' });
+  }
+  // 2. From initializationSettings.startingResources
+  const initRes = gameState?.initializationSettings?.startingResources || {};
+  for (const k of Object.keys(initRes)) {
+    if (!resSet.has(k.toLowerCase())) resSet.set(k.toLowerCase(), { name: k, color: 'var(--accent-color)' });
+  }
+  // 3. From active players' resources
+  if (gameState?.players) {
+    for (const p of gameState.players) {
+      for (const k of Object.keys(p.resources || {})) {
+        if (!resSet.has(k.toLowerCase())) resSet.set(k.toLowerCase(), { name: k, color: 'var(--accent-color)' });
+      }
+    }
+  }
+  return Array.from(resSet.values());
+}
+
+function toggleTradeDrawer(forceState = null) {
+  const modalCard = document.getElementById('chat-modal-card');
+  const tradeDrawer = document.getElementById('chat-trade-drawer');
+  const toggleBtn = document.getElementById('btn-toggle-trade');
+  if (!tradeDrawer || !modalCard) return;
+
+  const newState = forceState !== null ? forceState : !currentChatSession.isTradeDrawerOpen;
+  currentChatSession.isTradeDrawerOpen = newState;
+
+  if (newState) {
+    modalCard.classList.add('chat-card-expanded');
+    tradeDrawer.classList.add('active');
+    if (toggleBtn) {
+      toggleBtn.style.background = '#10b981';
+      toggleBtn.style.color = '#fff';
+    }
+    renderTradeDrawer();
+  } else {
+    modalCard.classList.remove('chat-card-expanded');
+    tradeDrawer.classList.remove('active');
+    if (toggleBtn) {
+      toggleBtn.style.background = 'rgba(16, 185, 129, 0.2)';
+      toggleBtn.style.color = '#10b981';
+    }
+  }
+}
+
+function renderTradeDrawer() {
+  const drawer = document.getElementById('chat-trade-drawer');
+  if (!drawer || !currentChatSession.humanPlayer || !currentChatSession.aiPlayer) return;
+
+  const { humanPlayer, aiPlayer, tradeType, pendingOffer } = currentChatSession;
+
+  // 1. Update trade type pills
+  const btnOneTime = document.getElementById('trade-tab-onetime');
+  const btnPerTurn = document.getElementById('trade-tab-perturn');
+  if (btnOneTime) btnOneTime.classList.toggle('active', tradeType === 'one_time');
+  if (btnPerTurn) btnPerTurn.classList.toggle('active', tradeType === 'per_turn');
+
+  const modeLabel = document.getElementById('trade-offer-mode-label');
+  if (modeLabel) {
+    modeLabel.textContent = tradeType === 'one_time' ? '(Your Stock)' : '(Per-Turn Outflow)';
+    modeLabel.style.color = tradeType === 'one_time' ? '#10b981' : '#38bdf8';
+  }
+
+  // 2. Status Box
+  const statusBox = document.getElementById('trade-offer-status-box');
+  if (statusBox) {
+    if (pendingOffer) {
+      statusBox.style.display = 'flex';
+      if (pendingOffer.status === 'waiting') {
+        statusBox.innerHTML = `
+          <div class="trade-offer-box">
+            <div style="display: flex; align-items: center; gap: 6px; color: #10b981; font-weight: 700;">
+              <span style="display: inline-block; animation: pulse 1.5s infinite;">⏳</span>
+              <span>Proposal Pending</span>
+            </div>
+            <div style="font-size: 11px;"><strong>You Offer:</strong> ${escapeHTML(formatResourceBundle(pendingOffer.proposerGives))}</div>
+            <div style="font-size: 11px;"><strong>You Request:</strong> ${escapeHTML(formatResourceBundle(pendingOffer.proposerAsks))}</div>
+            <div class="text-muted-tiny" style="color: #94a3b8; font-size: 10px;">${escapeHTML(aiPlayer.name)} is evaluating...</div>
+          </div>
+        `;
+      } else if (pendingOffer.status === 'countered') {
+        statusBox.innerHTML = `
+          <div class="trade-offer-box trade-offer-counter">
+            <div style="color: #f59e0b; font-weight: 700; font-size: 11px;">
+              ⚖ Counter-Offer from ${escapeHTML(aiPlayer.name)}
+            </div>
+            <div style="font-size: 11px;"><strong>They request you send:</strong> <span style="color: #f87171;">${escapeHTML(formatResourceBundle(pendingOffer.proposerGives))}</span></div>
+            <div style="font-size: 11px;"><strong>They offer to send you:</strong> <span style="color: #10b981;">${escapeHTML(formatResourceBundle(pendingOffer.proposerAsks))}</span></div>
+            <div style="display: flex; gap: 6px; margin-top: 6px;">
+              <button id="btn-accept-counter" class="btn btn-small" style="background: #10b981; color: #fff; flex: 1; padding: 5px 0; font-size: 11px; cursor: pointer;">Accept Deal</button>
+              <button id="btn-adjust-counter" class="btn btn-small" style="background: #38bdf8; color: #fff; flex: 1; padding: 5px 0; font-size: 11px; cursor: pointer;">Adjust</button>
+              <button id="btn-reject-offer" class="btn btn-small" style="background: #ef4444; color: #fff; flex: 1; padding: 5px 0; font-size: 11px; cursor: pointer;">Reject</button>
+            </div>
+          </div>
+        `;
+        const acceptBtn = document.getElementById('btn-accept-counter');
+        if (acceptBtn) acceptBtn.onclick = () => handleAcceptCounterOffer();
+        const adjustBtn = document.getElementById('btn-adjust-counter');
+        if (adjustBtn) adjustBtn.onclick = () => handleAdjustCounterOffer();
+        const rejectBtn = document.getElementById('btn-reject-offer');
+        if (rejectBtn) rejectBtn.onclick = () => handleRejectTradeOffer();
+      }
+    } else {
+      statusBox.style.display = 'none';
+      statusBox.innerHTML = '';
+    }
+  }
+
+  // 3. Propose button state
+  const proposeBtn = document.getElementById('btn-propose-trade');
+  if (proposeBtn) {
+    proposeBtn.disabled = pendingOffer && pendingOffer.status === 'waiting';
+    proposeBtn.textContent = tradeType === 'one_time' ? 'Propose One-Time Trade' : 'Propose Agreement';
+  }
+
+  // 4. Render Resource Inputs
+  const availableResources = getAvailableTradeResources();
+  const offerContainer = document.getElementById('trade-offer-resources-container');
+  const requestContainer = document.getElementById('trade-request-resources-container');
+
+  if (offerContainer) {
+    offerContainer.innerHTML = availableResources.map(r => {
+      const stock = humanPlayer.resources[r.name] || 0;
+      const currentVal = currentChatSession.draftGives[r.name] || 0;
+      return `
+        <div class="trade-resource-row">
+          <div class="trade-resource-name">
+            <span class="player-color-dot" style="background-color: ${r.color}; width: 8px; height: 8px;"></span>
+            <span style="font-weight: 600; text-transform: capitalize;">${escapeHTML(r.name)}</span>
+          </div>
+          <span class="text-muted-tiny" style="color: #94a3b8; font-size: 10px;">Stock: ${stock}</span>
+          <div class="trade-qty-control">
+            <button class="trade-qty-btn btn-trade-dec" data-side="gives" data-res="${escapeHTML(r.name)}">-</button>
+            <input type="number" class="trade-qty-input inp-trade-qty" data-side="gives" data-res="${escapeHTML(r.name)}" value="${currentVal}" min="0" ${tradeType === 'one_time' ? `max="${stock}"` : ''} />
+            <button class="trade-qty-btn btn-trade-inc" data-side="gives" data-res="${escapeHTML(r.name)}">+</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  if (requestContainer) {
+    requestContainer.innerHTML = availableResources.map(r => {
+      const currentVal = currentChatSession.draftAsks[r.name] || 0;
+      return `
+        <div class="trade-resource-row">
+          <div class="trade-resource-name">
+            <span class="player-color-dot" style="background-color: ${r.color}; width: 8px; height: 8px;"></span>
+            <span style="font-weight: 600; text-transform: capitalize;">${escapeHTML(r.name)}</span>
+          </div>
+          <div></div>
+          <div class="trade-qty-control">
+            <button class="trade-qty-btn btn-trade-dec" data-side="asks" data-res="${escapeHTML(r.name)}">-</button>
+            <input type="number" class="trade-qty-input inp-trade-qty" data-side="asks" data-res="${escapeHTML(r.name)}" value="${currentVal}" min="0" />
+            <button class="trade-qty-btn btn-trade-inc" data-side="asks" data-res="${escapeHTML(r.name)}">+</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // Attach input & button listeners for resource amounts
+  drawer.querySelectorAll('.btn-trade-inc').forEach(btn => {
+    btn.onclick = (e) => {
+      const side = e.currentTarget.getAttribute('data-side');
+      const resName = e.currentTarget.getAttribute('data-res');
+      const targetObj = side === 'gives' ? currentChatSession.draftGives : currentChatSession.draftAsks;
+      const step = e.shiftKey ? 1 : 5;
+      const cur = targetObj[resName] || 0;
+      let next = cur + step;
+      if (side === 'gives' && tradeType === 'one_time') {
+        const stock = humanPlayer.resources[resName] || 0;
+        next = Math.min(stock, next);
+      }
+      targetObj[resName] = next;
+      const inp = drawer.querySelector(`.inp-trade-qty[data-side="${side}"][data-res="${resName}"]`);
+      if (inp) inp.value = next;
+    };
+  });
+
+  drawer.querySelectorAll('.btn-trade-dec').forEach(btn => {
+    btn.onclick = (e) => {
+      const side = e.currentTarget.getAttribute('data-side');
+      const resName = e.currentTarget.getAttribute('data-res');
+      const targetObj = side === 'gives' ? currentChatSession.draftGives : currentChatSession.draftAsks;
+      const step = e.shiftKey ? 1 : 5;
+      const cur = targetObj[resName] || 0;
+      const next = Math.max(0, cur - step);
+      targetObj[resName] = next;
+      const inp = drawer.querySelector(`.inp-trade-qty[data-side="${side}"][data-res="${resName}"]`);
+      if (inp) inp.value = next;
+    };
+  });
+
+  drawer.querySelectorAll('.inp-trade-qty').forEach(inp => {
+    inp.onchange = (e) => {
+      const side = e.currentTarget.getAttribute('data-side');
+      const resName = e.currentTarget.getAttribute('data-res');
+      const targetObj = side === 'gives' ? currentChatSession.draftGives : currentChatSession.draftAsks;
+      let val = Math.max(0, parseInt(e.currentTarget.value || '0', 10));
+      if (isNaN(val)) val = 0;
+      if (side === 'gives' && tradeType === 'one_time') {
+        const stock = humanPlayer.resources[resName] || 0;
+        val = Math.min(stock, val);
+      }
+      e.currentTarget.value = val;
+      targetObj[resName] = val;
+    };
+  });
+
+  // 5. Active Per-Turn Agreements with this Leader
+  const activeList = document.getElementById('trade-active-agreements-list');
+  if (activeList) {
+    const activeWithPartner = (gameState.trades || []).filter(t =>
+      t.active && t.type === 'per_turn' &&
+      ((String(t.player1Id) === String(humanPlayer.id) && String(t.player2Id) === String(aiPlayer.id)) ||
+       (String(t.player1Id) === String(aiPlayer.id) && String(t.player2Id) === String(humanPlayer.id)))
+    );
+
+    if (activeWithPartner.length === 0) {
+      activeList.innerHTML = `<div class="text-muted-tiny" style="color: var(--text-muted); font-size: 11px;">None active with this leader.</div>`;
+    } else {
+      activeList.innerHTML = activeWithPartner.map(t => {
+        const isP1 = String(t.player1Id) === String(humanPlayer.id);
+        const givesBundle = isP1 ? t.bundle1 : t.bundle2;
+        const asksBundle = isP1 ? t.bundle2 : t.bundle1;
+        return `
+          <div class="trade-ongoing-item">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-weight: 600; color: #10b981; font-size: 10px;">Round ${t.createdRound} Agreement</span>
+              <button class="btn btn-small btn-cancel-drawer-trade" data-trade-id="${t.id}" style="background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.5); color: #f87171; padding: 2px 6px; font-size: 10px; cursor: pointer;">
+                Cancel
+              </button>
+            </div>
+            <div style="font-size: 10px; color: var(--text-muted);">
+              <div><span style="color: #f87171;">Send:</span> ${escapeHTML(formatResourceBundle(givesBundle))}/turn</div>
+              <div><span style="color: #10b981;">Receive:</span> ${escapeHTML(formatResourceBundle(asksBundle))}/turn</div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      activeList.querySelectorAll('.btn-cancel-drawer-trade').forEach(btn => {
+        btn.onclick = (e) => {
+          const tradeId = e.currentTarget.getAttribute('data-trade-id');
+          handleCancelTradeFromDrawer(tradeId);
+        };
+      });
+    }
+  }
+}
+
+async function handleProposeTradeClicked() {
+  const { humanPlayer, aiPlayer, tradeType, draftGives, draftAsks } = currentChatSession;
+  if (!humanPlayer || !aiPlayer) return;
+
+  const givesCount = Object.values(draftGives).reduce((sum, v) => sum + (v || 0), 0);
+  const asksCount = Object.values(draftAsks).reduce((sum, v) => sum + (v || 0), 0);
+  if (givesCount === 0 && asksCount === 0) {
+    showToast('Cannot propose an empty trade bundle.', true);
+    return;
+  }
+
+  if (tradeType === 'one_time' && !humanPlayer.hasResources(draftGives)) {
+    showToast('You do not possess the offered resources in stock.', true);
+    return;
+  }
+
+  const offer = {
+    type: tradeType,
+    proposerGives: { ...draftGives },
+    proposerAsks: { ...draftAsks }
+  };
+  currentChatSession.pendingOffer = { ...offer, status: 'waiting' };
+
+  const typeLabel = tradeType === 'per_turn' ? 'ongoing per-turn' : 'one-time';
+  gameState.addChatMessage(
+    humanPlayer,
+    aiPlayer,
+    `*[Trade Proposal: Proposing ${typeLabel} exchange — Offering ${formatResourceBundle(offer.proposerGives)} for ${formatResourceBundle(offer.proposerAsks)}]*`
+  );
+  renderChatMessages();
+  renderTradeDrawer();
+
+  try {
+    const mgr = await aiPlayer.getAiManager();
+    if (!mgr) {
+      showToast(`${aiPlayer.name} cannot negotiate trade right now.`, true);
+      currentChatSession.pendingOffer = null;
+      renderTradeDrawer();
+      return;
+    }
+
+    const decision = await mgr.handleTradeOffer(humanPlayer, offer);
+
+    if (decision.message) {
+      gameState.addChatMessage(aiPlayer, humanPlayer, decision.message);
+      renderChatMessages();
+    }
+
+    if (decision.action === 'accept') {
+      if (tradeType === 'one_time') {
+        const res = gameState.executeOneTimeTrade(humanPlayer, aiPlayer, offer.proposerGives, offer.proposerAsks);
+        if (res.success) {
+          showToast(`Trade accepted by ${aiPlayer.name}!`);
+        } else {
+          showToast(`Trade failed: ${res.reason}`, true);
+        }
+      } else {
+        gameState.createPerTurnTrade(humanPlayer, aiPlayer, offer.proposerGives, offer.proposerAsks);
+        showToast(`Ongoing trade agreement established with ${aiPlayer.name}!`);
+      }
+      currentChatSession.pendingOffer = null;
+      currentChatSession.draftGives = {};
+      currentChatSession.draftAsks = {};
+      updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
+      renderTradeDrawer();
+    } else if (decision.action === 'counter') {
+      currentChatSession.pendingOffer = {
+        type: tradeType,
+        proposerGives: decision.counterOffer?.proposerGives || offer.proposerGives,
+        proposerAsks: decision.counterOffer?.proposerAsks || offer.proposerAsks,
+        status: 'countered'
+      };
+      showToast(`${aiPlayer.name} made a counter-offer.`);
+      renderTradeDrawer();
+    } else {
+      currentChatSession.pendingOffer = null;
+      showToast(`${aiPlayer.name} declined the trade offer.`);
+      renderTradeDrawer();
+    }
+  } catch (err) {
+    console.error('Error during trade proposal:', err);
+    currentChatSession.pendingOffer = null;
+    showToast('Failed to negotiate trade proposal.', true);
+    renderTradeDrawer();
+  }
+}
+
+function handleAcceptCounterOffer() {
+  const { humanPlayer, aiPlayer, pendingOffer } = currentChatSession;
+  if (!humanPlayer || !aiPlayer || !pendingOffer) return;
+
+  if (pendingOffer.type === 'one_time') {
+    const res = gameState.executeOneTimeTrade(humanPlayer, aiPlayer, pendingOffer.proposerGives, pendingOffer.proposerAsks);
+    if (!res.success) {
+      showToast(`Cannot complete trade: ${res.reason}`, true);
+      return;
+    }
+    showToast(`Trade finalized with ${aiPlayer.name}!`);
+    gameState.addChatMessage(humanPlayer, aiPlayer, `*[Agreed to counter-offer: Exchanged ${formatResourceBundle(pendingOffer.proposerGives)} for ${formatResourceBundle(pendingOffer.proposerAsks)}]*`);
+  } else {
+    gameState.createPerTurnTrade(humanPlayer, aiPlayer, pendingOffer.proposerGives, pendingOffer.proposerAsks);
+    showToast(`Per-turn trade agreement established with ${aiPlayer.name}!`);
+    gameState.addChatMessage(humanPlayer, aiPlayer, `*[Agreed to counter-offer: Established ongoing per-turn agreement]*`);
+  }
+
+  currentChatSession.pendingOffer = null;
+  currentChatSession.draftGives = {};
+  currentChatSession.draftAsks = {};
+  updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
+  renderChatMessages();
+  renderTradeDrawer();
+}
+
+function handleAdjustCounterOffer() {
+  const { pendingOffer } = currentChatSession;
+  if (!pendingOffer) return;
+  currentChatSession.draftGives = { ...(pendingOffer.proposerGives || {}) };
+  currentChatSession.draftAsks = { ...(pendingOffer.proposerAsks || {}) };
+  currentChatSession.pendingOffer = null;
+  renderTradeDrawer();
+}
+
+function handleRejectTradeOffer() {
+  const { humanPlayer, aiPlayer } = currentChatSession;
+  currentChatSession.pendingOffer = null;
+  if (humanPlayer && aiPlayer) {
+    gameState.addChatMessage(humanPlayer, aiPlayer, `*[Declined trade proposal]*`);
+    renderChatMessages();
+  }
+  showToast('Trade negotiation ended.');
+  renderTradeDrawer();
+}
+
+function handleCancelTradeFromDrawer(tradeId) {
+  const { humanPlayer, aiPlayer } = currentChatSession;
+  if (!tradeId) return;
+  gameState.cancelTrade(tradeId, humanPlayer);
+  if (humanPlayer && aiPlayer) {
+    gameState.addChatMessage(humanPlayer, aiPlayer, `*[Canceled per-turn trade agreement]*`);
+    renderChatMessages();
+  }
+  updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
+  renderTradeDrawer();
+  showToast('Trade agreement canceled.');
 }
 
 function renderChatMessages() {
@@ -1632,15 +2071,31 @@ function openChatModal(humanPlayer, aiPlayer, options = {}) {
   input.disabled = false;
   sendBtn.disabled = false;
 
+  const modalCard = document.getElementById('chat-modal-card');
+  if (modalCard) modalCard.classList.remove('chat-card-expanded');
+  const tradeDrawer = document.getElementById('chat-trade-drawer');
+  if (tradeDrawer) tradeDrawer.classList.remove('active');
+  const toggleBtn = document.getElementById('btn-toggle-trade');
+  if (toggleBtn) {
+    toggleBtn.style.background = 'rgba(16, 185, 129, 0.2)';
+    toggleBtn.style.color = '#10b981';
+  }
+
   return new Promise((resolve) => {
     currentChatSession = {
       humanPlayer,
       aiPlayer,
       resolvePromise: resolve,
-      isWaitingForAi: false
+      isWaitingForAi: false,
+      isTradeDrawerOpen: false,
+      tradeType: 'one_time',
+      pendingOffer: null,
+      draftGives: {},
+      draftAsks: {}
     };
 
     renderChatMessages();
+    renderTradeDrawer();
     overlay.classList.add('active');
     setTimeout(() => input.focus(), 100);
   });
@@ -1651,6 +2106,16 @@ async function closeChatModal() {
   if (!overlay || !overlay.classList.contains('active')) return;
 
   overlay.classList.remove('active');
+
+  const modalCard = document.getElementById('chat-modal-card');
+  if (modalCard) modalCard.classList.remove('chat-card-expanded');
+  const tradeDrawer = document.getElementById('chat-trade-drawer');
+  if (tradeDrawer) tradeDrawer.classList.remove('active');
+  const toggleBtn = document.getElementById('btn-toggle-trade');
+  if (toggleBtn) {
+    toggleBtn.style.background = 'rgba(16, 185, 129, 0.2)';
+    toggleBtn.style.color = '#10b981';
+  }
 
   const { humanPlayer, aiPlayer, resolvePromise } = currentChatSession;
   // L6: try/finally — a throwing summarize used to hang the AI turn
@@ -1673,7 +2138,12 @@ async function closeChatModal() {
       humanPlayer: null,
       aiPlayer: null,
       resolvePromise: null,
-      isWaitingForAi: false
+      isWaitingForAi: false,
+      isTradeDrawerOpen: false,
+      tradeType: 'one_time',
+      pendingOffer: null,
+      draftGives: {},
+      draftAsks: {}
     };
   }
 }
@@ -1924,7 +2394,7 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
   // owned entities) and history are hidden from the human unless SHOW_ALL
   // is on. Scores stay public — they are already in the player list.
   const hidePrivate = player.isAI && !CONFIG.SHOW_ALL;
-  const { totalUpkeep, totalYields, netIncome } = player.getResourceProfile(gameState);
+  const { totalUpkeep, totalYields, netIncome, netTrade, activeTrades } = player.getResourceProfile(gameState);
   const myEntities = player.getEntities(gameState);
 
   const resourceKeys = Array.from(new Set([
@@ -1968,6 +2438,7 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
     const yields = totalYields[res] || 0;
     const upkeep = totalUpkeep[res] || 0;
     const net = netIncome[res] || 0;
+    const tradeDelta = (netTrade && netTrade[res]) || 0;
     const projectedStock = Math.max(0, stock + net);
 
     const netClass = net > 0 ? 'positive' : (net < 0 ? 'negative' : 'neutral');
@@ -2029,10 +2500,64 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
         <div class="resource-details-line">
           <span class="text-positive">▲ Yield: +${displayNum(yields)}/turn</span>
           <span class="text-negative">▼ Upkeep: -${displayNum(upkeep)}/turn</span>
+          ${tradeDelta !== 0 ? `<span style="color: ${tradeDelta > 0 ? '#10b981' : '#f87171'};">⇄ Trade: ${tradeDelta > 0 ? '+' : ''}${displayNum(tradeDelta)}/turn</span>` : ''}
         </div>
       </div>
     `;
   });
+
+  // Active trade agreements section for full modal view
+  let tradesHTML = '';
+  if (!isCompact && !hidePrivate) {
+    const trades = activeTrades || [];
+    let tradesContent = '';
+    if (trades.length > 0) {
+      tradesContent = trades.map(trade => {
+        const isP1 = String(trade.player1Id) === String(player.id);
+        const partnerId = isP1 ? trade.player2Id : trade.player1Id;
+        const partner = gameState.players.find(p => String(p.id) === String(partnerId));
+        const partnerName = partner ? partner.name : 'Unknown Empire';
+        const partnerColor = partner ? partner.color : '#fff';
+        const sentBundle = isP1 ? trade.bundle1 : trade.bundle2;
+        const recBundle = isP1 ? trade.bundle2 : trade.bundle1;
+        const isHumanInvolved = !player.isAI || (gameState.activePlayer && !gameState.activePlayer.isAI && (String(trade.player1Id) === String(gameState.activePlayer.id) || String(trade.player2Id) === String(gameState.activePlayer.id)));
+
+        return `
+          <div class="trade-ongoing-item" style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; margin-bottom: 6px;">
+            <div style="display: flex; flex-direction: column; gap: 3px;">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span class="player-color-dot" style="background-color: ${partnerColor}; width: 8px; height: 8px;"></span>
+                <strong style="color: #fff; font-size: 12px;">With ${escapeHTML(partnerName)}</strong>
+                <span class="text-muted-tiny" style="font-size: 10px; color: var(--text-muted);">(Since Round ${trade.createdRound})</span>
+              </div>
+              <div style="font-size: 11px;">
+                <span style="color: #f87171;">Sending: -${escapeHTML(formatResourceBundle(sentBundle))}/turn</span> &nbsp;|&nbsp;
+                <span style="color: #10b981;">Receiving: +${escapeHTML(formatResourceBundle(recBundle))}/turn</span>
+              </div>
+            </div>
+            ${isHumanInvolved ? `
+              <button class="btn btn-small btn-cancel-profile-trade" data-trade-id="${trade.id}" style="background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.5); color: #f87171; padding: 4px 10px; font-size: 11px; cursor: pointer;">
+                Cancel Agreement
+              </button>
+            ` : ''}
+          </div>
+        `;
+      }).join('');
+    } else {
+      tradesContent = `<div class="text-muted-small" style="padding: 6px 0;">No active ongoing per-turn trade agreements.</div>`;
+    }
+
+    tradesHTML = `
+      <div class="divider divider-spaced"></div>
+      <div class="section-title section-title-row">
+        <span>Active Trade Agreements</span>
+        <span class="text-muted-small">${trades.length} active</span>
+      </div>
+      <div style="margin-top: 6px;">
+        ${tradesContent}
+      </div>
+    `;
+  }
 
   // Entity breakdown section for full modal view
   let entityBreakdownHTML = '';
@@ -2093,6 +2618,7 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
             'spawn': '#2ecc71',
             'destroy': '#e67e22',
             'orders': '#f1c40f',
+            'trade': '#10b981',
             'note': '#38bdf8'
           };
           const categoryColor = categoryColors[entry.category] || 'var(--text-main)';
@@ -2155,6 +2681,7 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
       ? `<div class="text-muted-small" style="margin-top: 8px;">Resource info and history are hidden for AI players unless SHOW_ALL is enabled.</div>`
       : `<div class="section-title section-title-spaced">Resource Flow & Balance</div>
     ${chartsHTML}
+    ${tradesHTML}
     ${entityBreakdownHTML}
     ${historyHTML}`}
   `;
@@ -2195,6 +2722,18 @@ function openProfileModal(player, gameState) {
         updateModalContent();
       };
     }
+
+    const cancelBtns = content.querySelectorAll('.btn-cancel-profile-trade');
+    cancelBtns.forEach(btn => {
+      btn.onclick = (e) => {
+        const tradeId = e.currentTarget.getAttribute('data-trade-id');
+        if (tradeId) {
+          gameState.cancelTrade(tradeId, gameState.activePlayer);
+          updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
+          updateModalContent();
+        }
+      };
+    });
   }
 
   updateModalContent();

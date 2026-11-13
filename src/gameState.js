@@ -8,6 +8,22 @@ import { createSeededRandom } from './random.js';
 import Entity from './entity.js';
 
 /**
+ * Formats a resource bundle map (e.g. { iron: 50, gold: 10 }) to a human-readable string.
+ * @param {Object} bundle
+ * @returns {string}
+ */
+export function formatResourceBundle(bundle) {
+  if (!bundle) return 'nothing';
+  const parts = [];
+  for (const [res, amt] of Object.entries(bundle)) {
+    if (amt > 0) {
+      parts.push(`${amt} ${res}`);
+    }
+  }
+  return parts.length > 0 ? parts.join(', ') : 'nothing';
+}
+
+/**
  * GameState tracks players, turn cycle, the hex grid, and active entity instances.
  * It is fully serializable to and from JSON.
  */
@@ -40,6 +56,7 @@ export class GameState {
     this.settings = null;
     this.gameOver = false;
     this.chatHistory = {};
+    this.trades = [];
     this.replayRecorder = null;
     this.fogPovPlayer = null; // Replay only: fog POV override (snapshot's active player); null = human-player union
     // Single shared AiHelper instance (used by barbarians, players, harnesses).
@@ -113,6 +130,204 @@ export class GameState {
   }
 
   /**
+   * Finds a player by ID.
+   * @param {string|number} id
+   * @returns {Player|null}
+   */
+  getPlayerById(id) {
+    if (!this.players) return null;
+    return this.players.find(p => String(p.id) === String(id)) || null;
+  }
+
+  /**
+   * Returns active trades involving a specific player.
+   * @param {Player|string|number} player
+   * @returns {Array<Object>}
+   */
+  getActiveTradesForPlayer(player) {
+    if (!this.trades) return [];
+    const playerId = (player && typeof player === 'object') ? player.id : player;
+    return this.trades.filter(t => t.active && (String(t.player1Id) === String(playerId) || String(t.player2Id) === String(playerId)));
+  }
+
+  /**
+   * Executes an immediate one-time trade between two players.
+   * @param {Player} player1 - Initiator
+   * @param {Player} player2 - Counterpart
+   * @param {Object} bundle1 - Resources player1 gives to player2
+   * @param {Object} bundle2 - Resources player2 gives to player1
+   * @returns {{ success: boolean, reason?: string }}
+   */
+  executeOneTimeTrade(player1, player2, bundle1, bundle2) {
+    if (!player1 || !player2) return { success: false, reason: 'Invalid players' };
+    if (!player1.hasResources(bundle1)) {
+      return { success: false, reason: `${player1.name} has insufficient resources` };
+    }
+    if (!player2.hasResources(bundle2)) {
+      return { success: false, reason: `${player2.name} has insufficient resources` };
+    }
+
+    player1.consumeResources(bundle1);
+    player1.addResources(bundle2);
+    player2.consumeResources(bundle2);
+    player2.addResources(bundle1);
+
+    const desc1 = `Completed one-time trade with ${player2.name}: sent ${formatResourceBundle(bundle1)}, received ${formatResourceBundle(bundle2)}`;
+    const desc2 = `Completed one-time trade with ${player1.name}: sent ${formatResourceBundle(bundle2)}, received ${formatResourceBundle(bundle1)}`;
+
+    player1.addHistoryEntry(this.currentRound, {
+      category: 'trade',
+      details: desc1,
+      extra: { partnerId: player2.id, sent: bundle1, received: bundle2, type: 'one_time' }
+    });
+    player2.addHistoryEntry(this.currentRound, {
+      category: 'trade',
+      details: desc2,
+      extra: { partnerId: player1.id, sent: bundle2, received: bundle1, type: 'one_time' }
+    });
+
+    console.log(`[GameState] One-time trade executed: ${player1.name} <-> ${player2.name} (${desc1})`);
+    return { success: true };
+  }
+
+  /**
+   * Creates an ongoing per-turn trade agreement between two players.
+   * @param {Player} player1
+   * @param {Player} player2
+   * @param {Object} bundle1 - Resources player1 sends per turn
+   * @param {Object} bundle2 - Resources player2 sends per turn
+   * @returns {Object}
+   */
+  createPerTurnTrade(player1, player2, bundle1, bundle2) {
+    if (!this.trades) this.trades = [];
+    const trade = {
+      id: 'trade_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+      type: 'per_turn',
+      player1Id: player1.id,
+      player2Id: player2.id,
+      bundle1: { ...bundle1 },
+      bundle2: { ...bundle2 },
+      createdRound: this.currentRound,
+      active: true
+    };
+    this.trades.push(trade);
+
+    const desc1 = `Established per-turn trade agreement with ${player2.name}: sending ${formatResourceBundle(bundle1)}/turn, receiving ${formatResourceBundle(bundle2)}/turn`;
+    const desc2 = `Established per-turn trade agreement with ${player1.name}: sending ${formatResourceBundle(bundle2)}/turn, receiving ${formatResourceBundle(bundle1)}/turn`;
+
+    player1.addHistoryEntry(this.currentRound, {
+      category: 'trade',
+      details: desc1,
+      extra: { tradeId: trade.id, partnerId: player2.id, sent: bundle1, received: bundle2, type: 'per_turn' }
+    });
+    player2.addHistoryEntry(this.currentRound, {
+      category: 'trade',
+      details: desc2,
+      extra: { tradeId: trade.id, partnerId: player1.id, sent: bundle2, received: bundle1, type: 'per_turn' }
+    });
+
+    console.log(`[GameState] Per-turn trade established (ID: ${trade.id}): ${player1.name} sends ${formatResourceBundle(bundle1)}/turn, receives ${formatResourceBundle(bundle2)}/turn from ${player2.name}`);
+    return trade;
+  }
+
+  /**
+   * Cancels an ongoing trade agreement.
+   * @param {string} tradeId
+   * @param {Player|null} cancelingPlayer
+   * @returns {boolean}
+   */
+  cancelTrade(tradeId, cancelingPlayer = null) {
+    if (!this.trades) return false;
+    const trade = this.trades.find(t => t.id === tradeId && t.active);
+    if (!trade) return false;
+    trade.active = false;
+
+    const p1 = this.getPlayerById(trade.player1Id);
+    const p2 = this.getPlayerById(trade.player2Id);
+    const cancelerName = cancelingPlayer ? cancelingPlayer.name : 'A participant';
+
+    if (p1) {
+      p1.addHistoryEntry(this.currentRound, {
+        category: 'trade',
+        details: `Canceled per-turn trade agreement with ${p2 ? p2.name : 'partner'} (${cancelerName} canceled)`,
+        extra: { tradeId, canceledBy: cancelingPlayer?.id }
+      });
+    }
+    if (p2) {
+      p2.addHistoryEntry(this.currentRound, {
+        category: 'trade',
+        details: `Canceled per-turn trade agreement with ${p1 ? p1.name : 'partner'} (${cancelerName} canceled)`,
+        extra: { tradeId, canceledBy: cancelingPlayer?.id }
+      });
+    }
+
+    console.log(`[GameState] Trade agreement ${tradeId} canceled by ${cancelerName}`);
+    return true;
+  }
+
+  /**
+   * Executes all active per-turn trades at round boundary.
+   */
+  executePerTurnTrades() {
+    if (!this.trades || this.trades.length === 0) return;
+    const activeTrades = this.trades.filter(t => t.active && t.type === 'per_turn');
+    for (const trade of activeTrades) {
+      const p1 = this.getPlayerById(trade.player1Id);
+      const p2 = this.getPlayerById(trade.player2Id);
+      if (!p1 || !p2) {
+        trade.active = false;
+        continue;
+      }
+
+      const p1Can = p1.hasResources(trade.bundle1);
+      const p2Can = p2.hasResources(trade.bundle2);
+
+      if (p1Can && p2Can) {
+        p1.consumeResources(trade.bundle1);
+        p1.addResources(trade.bundle2);
+        p2.consumeResources(trade.bundle2);
+        p2.addResources(trade.bundle1);
+
+        const desc1 = `Executed trade agreement with ${p2.name}: sent ${formatResourceBundle(trade.bundle1)}, received ${formatResourceBundle(trade.bundle2)}`;
+        const desc2 = `Executed trade agreement with ${p1.name}: sent ${formatResourceBundle(trade.bundle2)}, received ${formatResourceBundle(trade.bundle1)}`;
+
+        p1.addHistoryEntry(this.currentRound, {
+          category: 'trade',
+          details: desc1,
+          extra: { tradeId: trade.id, partnerId: p2.id, sent: trade.bundle1, received: trade.bundle2 }
+        });
+        p2.addHistoryEntry(this.currentRound, {
+          category: 'trade',
+          details: desc2,
+          extra: { tradeId: trade.id, partnerId: p1.id, sent: trade.bundle2, received: trade.bundle1 }
+        });
+
+        console.log(`[GameState] Per-turn trade executed for round ${this.currentRound} (ID: ${trade.id}): ${p1.name} <-> ${p2.name}`);
+      } else {
+        const failureReason = !p1Can && !p2Can
+          ? `both ${p1.name} and ${p2.name} lacked required stock`
+          : (!p1Can ? `${p1.name} lacked required stock` : `${p2.name} lacked required stock`);
+
+        const desc1 = `Trade agreement with ${p2.name} skipped for round ${this.currentRound}: ${failureReason}`;
+        const desc2 = `Trade agreement with ${p1.name} skipped for round ${this.currentRound}: ${failureReason}`;
+
+        p1.addHistoryEntry(this.currentRound, {
+          category: 'trade',
+          details: desc1,
+          extra: { tradeId: trade.id, partnerId: p2.id, skipped: true, reason: failureReason }
+        });
+        p2.addHistoryEntry(this.currentRound, {
+          category: 'trade',
+          details: desc2,
+          extra: { tradeId: trade.id, partnerId: p1.id, skipped: true, reason: failureReason }
+        });
+
+        console.log(`[GameState] Per-turn trade SKIPPED for round ${this.currentRound} (ID: ${trade.id}): ${failureReason}`);
+      }
+    }
+  }
+
+  /**
    * Returns the currently active Player instance.
    * @returns {Player|null}
    */
@@ -146,6 +361,7 @@ export class GameState {
     this.activePlayerIndex = 0;
     this.currentRound = 1;
     this.chatHistory = {};
+    this.trades = [];
 
     // Default placeholder players if manifest not initialized yet
     this.players = [];
@@ -386,6 +602,7 @@ export class GameState {
    */
   async onRoundEnd() {
     if (this.settings?.barbarians) await manageBarbarians(this.settings.barbarians, this.aiHelper);
+    this.executePerTurnTrades();
     this.currentRound++;
     if (this.replayRecorder?.isRecording()) {
       this.replayRecorder.recordSnapshot(this, `Round ${this.currentRound} began`);
@@ -594,7 +811,8 @@ export class GameState {
       unownedEntityCounter: this.unownedEntityCounter,
       cells: this.hexGrid ? this.hexGrid.getCellsObject() : {},
       settings: this.settings,
-      chatHistory: this.chatHistory || {}
+      chatHistory: this.chatHistory || {},
+      trades: this.trades || []
     });
   }
 
@@ -616,6 +834,7 @@ export class GameState {
       this.initializationSettings = this.settings?.initialization || {};
 
       this.chatHistory = data.chatHistory || {};
+      this.trades = data.trades || [];
 
       if (data.activePlayerIndex !== undefined) {
         this.activePlayerIndex = data.activePlayerIndex;

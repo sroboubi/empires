@@ -2175,6 +2175,13 @@ export class AdaptiveManager extends BaseManager {
             ended: true,
         };
     }
+
+    async handleTradeOffer(proposer, offer) {
+        return {
+            action: 'reject',
+            message: "Our resources are reserved for our own realm's defense and development."
+        };
+    }
 }
 
 export default AdaptiveManager;

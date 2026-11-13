@@ -96,7 +96,7 @@ const PLAYER_METHODS = new Set([
   'addHistoryEntry',
 ]);
 const GAMESTATE_METHODS = new Set([
-  'getEntityAt', 'getEntityById', 'getChatHistory', 'getChatKey',
+  'getEntityAt', 'getEntityById', 'getChatHistory', 'getChatKey', 'getActiveTradesForPlayer',
 ]);
 const ENTITY_METHODS = new Set([
   'getActions', 'canSpawnOn', 'getMovementCost', 'getCostToMaintain',
@@ -608,6 +608,22 @@ export function createGameStateProxy(gameState, ownPlayer, aiName, seen = new We
           }
         }
         return deepWrap(filtered, aiName, seen, ownPlayer);
+      }
+
+      // Trades privacy: an AI may only inspect trade agreements involving its own empire.
+      if (prop === 'trades') {
+        const trades = target.trades || [];
+        const filtered = trades.filter(t => String(t.player1Id) === String(ownPlayerId) || String(t.player2Id) === String(ownPlayerId));
+        return deepWrap(filtered, aiName, seen, ownPlayer);
+      }
+
+      if (prop === 'getActiveTradesForPlayer') {
+        return (p) => {
+          const playerId = (p && typeof p === 'object') ? p.id : p;
+          if (String(playerId) !== String(ownPlayerId)) return [];
+          const list = target.getActiveTradesForPlayer(p);
+          return deepWrap(list, aiName, seen, ownPlayer);
+        };
       }
 
       // Reflect.get with receiver can throw for built-in accessors (e.g. Set.prototype.size

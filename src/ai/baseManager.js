@@ -58,4 +58,18 @@ export class BaseManager {
     async summarizeChatAndAddNote(otherPlayer) {
         throw new Error('summarizeChatAndAddNote() must be implemented by subclass.');
     }
+
+    /**
+     * Handles a diplomatic trade proposal from another player.
+     * Default implementation politely rejects the offer (used by standard and tactical AIs).
+     * @param {Player} proposer
+     * @param {Object} offer - { type: 'one_time'|'per_turn', proposerGives: Object, proposerAsks: Object }
+     * @returns {Promise<{ action: 'accept'|'counter'|'reject', message: string, counterOffer?: Object }>}
+     */
+    async handleTradeOffer(proposer, offer) {
+        return {
+            action: 'reject',
+            message: `${this.player.name} declines the trade offer.`
+        };
+    }
 }
