@@ -1,0 +1,13 @@
+{
+  "name": "empires-local-browser-tests",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local Chromium smoke test: loads the real game, starts a game, advances turns, checks the autosave.",
+  "scripts": {
+    "test": "node smoke.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "^1.49.0"
+  }
+}

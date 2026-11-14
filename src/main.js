@@ -296,7 +296,7 @@ async function init() {
         });
 
         updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
-        openChatModal(activeP, targetAi);
+        openChatModal(activeP, targetAi, { isNewInitiation: true });
       });
     }
 
@@ -308,6 +308,11 @@ async function init() {
     const btnSendChat = document.getElementById('btn-send-chat');
     if (btnSendChat) {
       btnSendChat.addEventListener('click', () => sendChatMessage());
+    }
+
+    const btnEndChat = document.getElementById('btn-end-chat');
+    if (btnEndChat) {
+      btnEndChat.addEventListener('click', () => handleEndChat());
     }
 
     const chatInput = document.getElementById('chat-message-input');
@@ -1591,6 +1596,7 @@ let currentChatSession = {
   aiPlayer: null,
   resolvePromise: null,
   isWaitingForAi: false,
+  isChatEnded: false,
   isTradeDrawerOpen: false,
   tradeType: 'one_time',
   pendingOffer: null,
@@ -1663,6 +1669,13 @@ function renderTradeDrawer() {
   if (!drawer || !currentChatSession.humanPlayer || !currentChatSession.aiPlayer) return;
 
   const { humanPlayer, aiPlayer, tradeType, pendingOffer } = currentChatSession;
+  const isChatEnded = !!currentChatSession.isChatEnded;
+
+  // Banner for concluded negotiations
+  const concludedBanner = document.getElementById('trade-concluded-banner');
+  if (concludedBanner) {
+    concludedBanner.style.display = isChatEnded ? 'block' : 'none';
+  }
 
   // 1. Update trade type pills
   const btnOneTime = document.getElementById('trade-tab-onetime');
@@ -1709,9 +1722,23 @@ function renderTradeDrawer() {
           </div>
         `;
         const acceptBtn = document.getElementById('btn-accept-counter');
-        if (acceptBtn) acceptBtn.onclick = () => handleAcceptCounterOffer();
+        if (acceptBtn) {
+          acceptBtn.onclick = () => handleAcceptCounterOffer();
+          if (isChatEnded) {
+            acceptBtn.disabled = true;
+            acceptBtn.style.opacity = '0.4';
+            acceptBtn.style.cursor = 'not-allowed';
+          }
+        }
         const adjustBtn = document.getElementById('btn-adjust-counter');
-        if (adjustBtn) adjustBtn.onclick = () => handleAdjustCounterOffer();
+        if (adjustBtn) {
+          adjustBtn.onclick = () => handleAdjustCounterOffer();
+          if (isChatEnded) {
+            adjustBtn.disabled = true;
+            adjustBtn.style.opacity = '0.4';
+            adjustBtn.style.cursor = 'not-allowed';
+          }
+        }
         const rejectBtn = document.getElementById('btn-reject-offer');
         if (rejectBtn) rejectBtn.onclick = () => handleRejectTradeOffer();
       }
@@ -1724,7 +1751,21 @@ function renderTradeDrawer() {
   // 3. Propose button state
   const proposeBtn = document.getElementById('btn-propose-trade');
   if (proposeBtn) {
-    proposeBtn.disabled = pendingOffer && pendingOffer.status === 'waiting';
+    const isPending = pendingOffer && pendingOffer.status === 'waiting';
+    proposeBtn.disabled = isChatEnded || isPending;
+    if (isChatEnded) {
+      proposeBtn.title = 'Trade is not allowed because negotiations have concluded.';
+      proposeBtn.style.opacity = '0.4';
+      proposeBtn.style.cursor = 'not-allowed';
+    } else if (isPending) {
+      proposeBtn.title = 'A trade proposal is pending.';
+      proposeBtn.style.opacity = '';
+      proposeBtn.style.cursor = '';
+    } else {
+      proposeBtn.title = '';
+      proposeBtn.style.opacity = '';
+      proposeBtn.style.cursor = '';
+    }
     proposeBtn.textContent = tradeType === 'one_time' ? 'Propose One-Time Trade' : 'Propose Agreement';
   }
 
@@ -1823,6 +1864,12 @@ function renderTradeDrawer() {
     };
   });
 
+  if (isChatEnded) {
+    drawer.querySelectorAll('.btn-trade-inc, .btn-trade-dec, .inp-trade-qty').forEach(el => {
+      el.disabled = true;
+    });
+  }
+
   // 5. Active Per-Turn Agreements with this Leader
   const activeList = document.getElementById('trade-active-agreements-list');
   if (activeList) {
@@ -1866,6 +1913,10 @@ function renderTradeDrawer() {
 }
 
 async function handleProposeTradeClicked() {
+  if (currentChatSession.isChatEnded) {
+    showToast('Trade is not allowed because negotiations have concluded.', true);
+    return;
+  }
   const { humanPlayer, aiPlayer, tradeType, draftGives, draftAsks } = currentChatSession;
   if (!humanPlayer || !aiPlayer) return;
 
@@ -1953,6 +2004,10 @@ async function handleProposeTradeClicked() {
 }
 
 function handleAcceptCounterOffer() {
+  if (currentChatSession.isChatEnded) {
+    showToast('Trade is not allowed because negotiations have concluded.', true);
+    return;
+  }
   const { humanPlayer, aiPlayer, pendingOffer } = currentChatSession;
   if (!humanPlayer || !aiPlayer || !pendingOffer) return;
 
@@ -2011,6 +2066,33 @@ function handleCancelTradeFromDrawer(tradeId) {
   showToast('Trade agreement canceled.');
 }
 
+function handleEndChat() {
+  if (currentChatSession.isWaitingForAi || currentChatSession.isChatEnded) return;
+  const { humanPlayer, aiPlayer } = currentChatSession;
+  if (!humanPlayer || !aiPlayer) return;
+
+  currentChatSession.isChatEnded = true;
+  currentChatSession.pendingOffer = null;
+
+  gameState.addChatMessage(humanPlayer, aiPlayer, '[Concluded diplomatic negotiations]', true);
+
+  const statusIndicator = document.getElementById('chat-status-indicator');
+  if (statusIndicator) {
+    statusIndicator.innerHTML = `<span style="color: #f1c40f;">[ You have concluded the negotiations. ]</span>`;
+  }
+
+  const input = document.getElementById('chat-message-input');
+  const sendBtn = document.getElementById('btn-send-chat');
+  const endBtn = document.getElementById('btn-end-chat');
+  if (input) input.disabled = true;
+  if (sendBtn) sendBtn.disabled = true;
+  if (endBtn) endBtn.disabled = true;
+
+  renderChatMessages();
+  renderTradeDrawer();
+  updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
+}
+
 function renderChatMessages() {
   const container = document.getElementById('chat-messages-container');
   if (!container || !currentChatSession.humanPlayer || !currentChatSession.aiPlayer) return;
@@ -2062,14 +2144,28 @@ function openChatModal(humanPlayer, aiPlayer, options = {}) {
   const title = document.getElementById('chat-modal-title');
   const input = document.getElementById('chat-message-input');
   const sendBtn = document.getElementById('btn-send-chat');
+  const endBtn = document.getElementById('btn-end-chat');
   const statusIndicator = document.getElementById('chat-status-indicator');
 
   colorDot.style.backgroundColor = aiPlayer.color;
   title.textContent = `DIPLOMACY: ${aiPlayer.name.toUpperCase()}`;
-  statusIndicator.innerHTML = '';
   input.value = '';
-  input.disabled = false;
-  sendBtn.disabled = false;
+
+  const history = gameState.getChatHistory(humanPlayer, aiPlayer);
+  const lastMsg = history && history.length > 0 ? history[history.length - 1] : null;
+  const isConcluded = !options.isNewInitiation && !!(lastMsg && (lastMsg.ended === true || /\[END_CHAT\]/i.test(lastMsg.content) || (typeof lastMsg.content === 'string' && lastMsg.content.includes('[Concluded'))));
+
+  if (isConcluded) {
+    statusIndicator.innerHTML = `<span style="color: #f1c40f;">[ Negotiations have concluded. ]</span>`;
+    input.disabled = true;
+    sendBtn.disabled = true;
+    if (endBtn) endBtn.disabled = true;
+  } else {
+    statusIndicator.innerHTML = '';
+    input.disabled = false;
+    sendBtn.disabled = false;
+    if (endBtn) endBtn.disabled = false;
+  }
 
   const modalCard = document.getElementById('chat-modal-card');
   if (modalCard) modalCard.classList.remove('chat-card-expanded');
@@ -2087,6 +2183,7 @@ function openChatModal(humanPlayer, aiPlayer, options = {}) {
       aiPlayer,
       resolvePromise: resolve,
       isWaitingForAi: false,
+      isChatEnded: isConcluded,
       isTradeDrawerOpen: false,
       tradeType: 'one_time',
       pendingOffer: null,
@@ -2097,7 +2194,9 @@ function openChatModal(humanPlayer, aiPlayer, options = {}) {
     renderChatMessages();
     renderTradeDrawer();
     overlay.classList.add('active');
-    setTimeout(() => input.focus(), 100);
+    if (!isConcluded) {
+      setTimeout(() => input.focus(), 100);
+    }
   });
 }
 
@@ -2134,11 +2233,14 @@ async function closeChatModal() {
     if (resolvePromise) {
       resolvePromise();
     }
+    const endBtn = document.getElementById('btn-end-chat');
+    if (endBtn) endBtn.disabled = false;
     currentChatSession = {
       humanPlayer: null,
       aiPlayer: null,
       resolvePromise: null,
       isWaitingForAi: false,
+      isChatEnded: false,
       isTradeDrawerOpen: false,
       tradeType: 'one_time',
       pendingOffer: null,
@@ -2149,10 +2251,11 @@ async function closeChatModal() {
 }
 
 async function sendChatMessage() {
-  if (currentChatSession.isWaitingForAi) return;
+  if (currentChatSession.isWaitingForAi || currentChatSession.isChatEnded) return;
 
   const input = document.getElementById('chat-message-input');
   const sendBtn = document.getElementById('btn-send-chat');
+  const endBtn = document.getElementById('btn-end-chat');
   const statusIndicator = document.getElementById('chat-status-indicator');
   const text = input.value.trim();
   if (!text) return;
@@ -2160,20 +2263,35 @@ async function sendChatMessage() {
   const { humanPlayer, aiPlayer } = currentChatSession;
   if (!humanPlayer || !aiPlayer) return;
 
+  const humanEnded = /\[END_CHAT\]/i.test(text);
+
   // L6: capture this session — the modal may be closed while the reply is
   // pending, and the reply must not touch the (possibly new) session's
   // waiting flag or UI state.
   const session = currentChatSession;
 
   // Add human message to gameState
-  gameState.addChatMessage(humanPlayer, aiPlayer, text);
+  gameState.addChatMessage(humanPlayer, aiPlayer, text, humanEnded);
   input.value = '';
   renderChatMessages();
+
+  if (humanEnded) {
+    currentChatSession.isChatEnded = true;
+    currentChatSession.pendingOffer = null;
+    statusIndicator.innerHTML = `<span style="color: #f1c40f;">[ You have concluded the negotiations. ]</span>`;
+    input.disabled = true;
+    sendBtn.disabled = true;
+    if (endBtn) endBtn.disabled = true;
+    renderTradeDrawer();
+    updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
+    return;
+  }
 
   // Show thinking indicator & disable input
   currentChatSession.isWaitingForAi = true;
   input.disabled = true;
   sendBtn.disabled = true;
+  if (endBtn) endBtn.disabled = true;
   statusIndicator.innerHTML = `
     <span style="display: inline-block; animation: pulse 1.5s infinite;">⏳</span>
     <span>${escapeHTML(aiPlayer.name)} is formulating a response...</span>
@@ -2185,7 +2303,7 @@ async function sendChatMessage() {
       const reply = await mgr.generateChatReply(humanPlayer);
 
       // Add AI message to gameState
-      gameState.addChatMessage(aiPlayer, humanPlayer, reply.content);
+      gameState.addChatMessage(aiPlayer, humanPlayer, reply.content, reply.ended);
       // L6: the reply belongs in the history even if the modal closed
       // while it was pending — but nothing below may touch the UI or the
       // session if this is no longer the live one.
@@ -2195,12 +2313,19 @@ async function sendChatMessage() {
       if (reply.ended) {
         // Summary note is added by closeChatModal() when the human closes the
         // modal — summarizing here too would double the note and the LLM call.
+        currentChatSession.isChatEnded = true;
+        currentChatSession.pendingOffer = null;
         statusIndicator.innerHTML = `<span style="color: #f1c40f;">[ ${escapeHTML(aiPlayer.name)} has concluded the negotiations. ]</span>`;
+        input.disabled = true;
+        sendBtn.disabled = true;
+        if (endBtn) endBtn.disabled = true;
+        renderTradeDrawer();
         updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
       } else {
         statusIndicator.innerHTML = '';
         input.disabled = false;
         sendBtn.disabled = false;
+        if (endBtn) endBtn.disabled = false;
         input.focus();
       }
     }
@@ -2210,6 +2335,7 @@ async function sendChatMessage() {
     statusIndicator.innerHTML = `<span style="color: #e74c3c;">Failed to get response from ${escapeHTML(aiPlayer.name)}.</span>`;
     input.disabled = false;
     sendBtn.disabled = false;
+    if (endBtn) endBtn.disabled = false;
   } finally {
     // L6: only clear the flag on the session that actually waited — a stale
     // reply used to clear a NEW session's flag (and re-enable its input)

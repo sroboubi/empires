@@ -1210,15 +1210,38 @@
   border-color: var(--accent-color);
 }
 
+.trade-qty-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.modal-card input[type="number"].trade-qty-input,
 .trade-qty-input {
-  width: 50px;
+  width: 58px;
   height: 24px;
+  padding: 0 4px !important;
+  box-sizing: border-box;
   background: rgba(0, 0, 0, 0.4);
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 4px;
   color: #fff;
   text-align: center;
   font-size: 12px;
+  -moz-appearance: textfield;
+  -webkit-appearance: none;
+  appearance: textfield;
+}
+
+.modal-card input[type="number"].trade-qty-input::-webkit-outer-spin-button,
+.modal-card input[type="number"].trade-qty-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.trade-qty-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .trade-offer-box {

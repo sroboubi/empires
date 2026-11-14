@@ -107,7 +107,7 @@ export class GameState {
    * @param {string} content
    * @returns {Object} Added message object
    */
-  addChatMessage(sender, receiver, content) {
+  addChatMessage(sender, receiver, content, ended = false) {
     if (!this.chatHistory) this.chatHistory = {};
     const senderName = typeof sender === 'string' ? sender : sender.name;
     // L6: store the sender's id too — the name alone can't identify the
@@ -122,6 +122,7 @@ export class GameState {
       sender: senderName,
       senderId,
       content: content,
+      ended: !!ended,
       round: this.currentRound,
       timestamp: new Date().toISOString()
     };
