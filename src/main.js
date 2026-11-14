@@ -482,6 +482,13 @@ function closeSetupModal() {
   document.getElementById('setup-modal-overlay').classList.remove('active');
 }
 
+// Player names are interpolated into LLM prompts (trade, chat, diplomacy),
+// so a name must not carry instructions or control characters. Cap the
+// length at 24 and strip control characters at the input source.
+function sanitizePlayerName(name) {
+  return String(name ?? '').replace(/[\u0000-\u001F\u007F]/g, '').slice(0, 24);
+}
+
 function renderSetupPlayers() {
   const container = document.getElementById('setup-players-container');
   container.innerHTML = '';
@@ -526,7 +533,11 @@ function renderSetupPlayers() {
 
     colorInput.addEventListener('change', (e) => { p.color = e.target.value; });
     if (nameInput) {
-      nameInput.addEventListener('input', (e) => { p.name = e.target.value; });
+      nameInput.addEventListener('input', (e) => {
+        const clean = sanitizePlayerName(e.target.value);
+        if (clean !== e.target.value) e.target.value = clean;
+        p.name = clean;
+      });
     }
     if (leaderSelect) {
       leaderSelect.addEventListener('change', (e) => {
