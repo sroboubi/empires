@@ -1211,8 +1211,19 @@ export class AiHelper {
             if (!initiatorHarness) {
                 return { status: 'rejected', reason: 'Counter-offer cannot be evaluated.' };
             }
+            // The counterOffer is in the ORIGINAL proposer's frame (proposerGives
+            // = what the proposer sends, proposerAsks = what the target sends),
+            // but the proposer's handleTradeOffer reads it in the OFFERING
+            // player's frame (proposer = the target). Swap the bundles for the
+            // evaluation so the proposer judges the deal the right way round.
+            // Execution below still uses the original counterOffer (proposer frame).
+            const offerForProposer = {
+                type: counterOffer.type,
+                proposerGives: counterOffer.proposerAsks,
+                proposerAsks: counterOffer.proposerGives
+            };
             const reply = await initiatorHarness.handleTradeOffer(
-                this._viewOfPlayer(initiatorHarness, target), counterOffer
+                this._viewOfPlayer(initiatorHarness, target), offerForProposer
             );
             if (reply?.message) this.gameState.addChatMessage(proposer, target, reply.message);
             if (reply?.action === 'accept') {
