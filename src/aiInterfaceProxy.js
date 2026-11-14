@@ -97,6 +97,7 @@ const PLAYER_METHODS = new Set([
 ]);
 const GAMESTATE_METHODS = new Set([
   'getEntityAt', 'getEntityById', 'getChatHistory', 'getChatKey',
+  'getActiveTradesForPlayer', 'cancelTrade',
 ]);
 const ENTITY_METHODS = new Set([
   'getActions', 'canSpawnOn', 'getMovementCost', 'getCostToMaintain',
@@ -107,13 +108,13 @@ const SET_READ_METHODS = new Set(['has', 'keys', 'values', 'entries', 'forEach',
 const HELPER_METHODS = new Set([
   'distance', 'getNeighbors', 'getCellsArray', 'getCell', 'getCellCount',
   'directionTo', 'movementCostTo', 'getSightAndTrajectory', 'getConfig',
-  'calculateAttackMultiplier', 'camelToTitle', 'aiLog', 'findReachableCells',
+  'calculateAttackMultiplier', 'camelToTitle', 'formatResourceBundle', 'aiLog', 'findReachableCells',
   'findBuildCandidates', 'isBuilder', 'isRepairer', 'isCombatCapable',
   'isMobile', 'getCombatPower', 'combatEffectiveness', 'isDedicatedMilitary',
   'isMilitary', 'getEntitiesByCapability', 'getEntitiesSortedByPower',
   'getEntitiesSortedByEffectiveness', 'findClosestEntity',
   'findPathTowardsUnexplored', 'selectCandidateCombatUnits',
-  'attack', 'build', 'support', 'explore', 'moveAlongPath', 'chat',
+  'attack', 'build', 'support', 'explore', 'moveAlongPath', 'chat', 'initiateTrade',
   'onActionDone', 'getDirections8',
 ]);
 
@@ -610,6 +611,39 @@ export function createGameStateProxy(gameState, ownPlayer, aiName, seen = new We
         return deepWrap(filtered, aiName, seen, ownPlayer);
       }
 
+      // Trades privacy: an AI may only inspect trade agreements involving its own empire.
+      if (prop === 'trades') {
+        const trades = target.trades || [];
+        const filtered = trades.filter(t => String(t.player1Id) === String(ownPlayerId) || String(t.player2Id) === String(ownPlayerId));
+        return deepWrap(filtered, aiName, seen, ownPlayer);
+      }
+
+      if (prop === 'getActiveTradesForPlayer') {
+        return (p) => {
+          const playerId = (p && typeof p === 'object') ? p.id : p;
+          if (String(playerId) !== String(ownPlayerId)) return [];
+          const list = target.getActiveTradesForPlayer(p);
+          return deepWrap(list, aiName, seen, ownPlayer);
+        };
+      }
+
+      // Trade cancellation: an AI may cancel an active agreement only if its
+      // own empire is a participant. The canceling player is forced to the
+      // AI's own player, so a caller cannot cancel or attribute on another
+      // player's behalf.
+      if (prop === 'cancelTrade') {
+        return (tradeId) => {
+          const trades = target.trades || [];
+          const trade = trades.find(t => String(t.id) === String(tradeId) && t.active);
+          if (!trade) return false;
+          if (String(trade.player1Id) !== String(ownPlayerId) &&
+            String(trade.player2Id) !== String(ownPlayerId)) {
+            return false;
+          }
+          return target.cancelTrade(trade.id, target.getPlayerById(ownPlayerId));
+        };
+      }
+
       // Reflect.get with receiver can throw for built-in accessors (e.g. Set.prototype.size
       // when target is a Set): the getter runs with `this` = proxy, which lacks the internal slots.
       // Fall back to target-bound lookup in that case.
@@ -725,6 +759,14 @@ function createHelperProxy(helper, ownPlayer, aiName, seen = new WeakMap(), prox
                 `[AI Interface] Illegal chat: AI '${aiName}' cannot chat as another player.`
               );
             }
+          }
+          // Trade: an AI can only initiate a trade as itself — the
+          // initiator is forced to the AI's own player (same pattern as
+          // the gameState proxy's cancelTrade). A caller cannot propose
+          // (or have accepted) a trade on another player's behalf,
+          // including the human.
+          if (prop === 'initiateTrade') {
+            args[0] = ownPlayer;
           }
           // P8: hand the helper the caller's FILTERED gameState, not the raw
           // one, so its algorithms (build candidates, paths, reachability)

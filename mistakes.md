@@ -101,3 +101,10 @@ This file documents mistakes made during development, reasons why they occurred,
 - **Description**: Placed the AI interface proxy inside `src/ai/interfaceProxy.js` and had `BaseManager` import and construct the proxy wrappers directly.
 - **Why it was made**: Assumed `BaseManager` was the intended injection point based on initial spec notes without considering architectural boundaries and anti-cheat separation.
 - **What to avoid in the future**: AI controllers and base classes in `src/ai/` must remain completely decoupled from and unaware of the engine's isolation/proxy infrastructure. Keep security and proxy harnesses outside the `ai/` directory (e.g. `src/aiInterfaceProxy.js`) and inject the proxied objects via the engine constructor factory (`createAiManager` in `src/player.js`).
+
+---
+
+### Mistake 15: Accidental deletion of existing functions during large file replacements
+- **Description**: While inserting trade drawer helper functions into `src/main.js`, `function renderChatMessages()` was inadvertently omitted in the replacement block, causing runtime `ReferenceError: renderChatMessages is not defined` when opening the chat modal.
+- **Why it was made**: Selected a wide replace target span that enclosed `renderChatMessages()` and forgot to preserve it in the replacement text.
+- **What to avoid in the future**: Keep edit spans tightly scoped to the specific insertion or replacement region, or verify against git diff that existing helper functions within the block were not unintentionally removed.

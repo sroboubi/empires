@@ -20,6 +20,7 @@ AIs MAY use `aiHelper` for convenience (filtered info, multi-step actions), but 
 4. **Explored cells**: terrain and resource info for explored cells.  
 5. **Config and game settings**: FULL config (entities, resources, terrains, game settings, etc.).  
 6. **Chat history**: FULL history for any chat the AI's player was involved in.
+7. **Own trade agreements**: `gameState.getActiveTradesForPlayer(player)` and `gameState.trades`, filtered to agreements involving the AI's player.
 
 ## NOT VISIBLE (Returns `undefined` or empty collection)
 
@@ -33,6 +34,8 @@ AIs MAY use `aiHelper` for convenience (filtered info, multi-step actions), but 
 1. **`action.Do()` on any owned entity.** The action methods enforce all legality (resource costs, order costs, action points, terrain validity, range, etc.).  
 2. **Write to own player history.** (`player.addHistoryEntry()`) (e.g. logging decisions, diplomacy notes)  
 3. **Chat.** Send chat messages via `aiHelper.chat()` (manages order deduction and game chat rules).
+4. **Cancel own per-turn trade agreements.** `gameState.cancelTrade(tradeId)` cancels an active agreement only when the AI's player is a participant; the canceler is always the AI's player. `BaseManager.reviewTrades()` (called at the start of the AI's turn) applies the default policy: cancel a per-turn deal the AI can no longer afford.
+5. **Initiate a trade (trade-capable AIs only).** `helper.initiateTrade(this.player, target, offer)` validates the offer (distinct participants, non-empty positive bundles, one-time affordability), then either asks another AI's manager to evaluate it or opens the human trade UI and waits for the decision. Only the LLM managers (`LlmBaseManager` / `maybeInitiateTrade`) initiate; standard and tactical AIs do not implement the initiator hook and only respond to offers.
 
 ## NOT ALLOWED (proxy throws Error on attempt)
 
@@ -46,6 +49,8 @@ AIs MAY use `aiHelper` for convenience (filtered info, multi-step actions), but 
 - Module-local `Symbol('aiInterfaceUnwrap')` (never exported) allows the proxy to unwrap arguments before calling real engine methods. AI code cannot reference or forge it.
 - The game constructs AI managers via `createAiManager(ManagerClass, player, helper)` (called from `player.js`), which wraps player/gameState before handing them to the manager. `BaseManager` itself never imports the proxy.
 - `AiHelper.chat()` manages diplomatic conversations, order deduction, and player history logging. AI private cooldown tracking (e.g. `_chatCooldownOrders`) is maintained on the harness instance rather than mutating `player`.
+- `AiHelper.formatResourceBundle(bundle)` formats resource-bundle maps for prompts/logs. **AI code in `src/ai/` must never import engine modules** (`gameState.js`, `utils.js`, etc.); everything it needs is reached through the injected `player`, `gameState`, and `helper` proxies.
+- Trade initiation is an LLM-manager capability. `Player.step()` calls `maybeInitiateTrade()` only when the manager defines it, so standard (`SmartManager`) and tactical managers never initiate; they inherit `BaseManager.handleTradeOffer()`, which rejects offers. Human-initiated offers to a standard/tactical AI are rejected the same way.
 
 ## Proxy identity semantics (for AI implementors)
 

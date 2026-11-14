@@ -200,7 +200,21 @@ export class Player {
 
     try {
       const aiManager = await this.getAiManager();
-      if (aiManager) await aiManager.processTurn();
+      if (aiManager) {
+        // Let the AI re-evaluate ongoing per-turn deals before acting. A
+        // trade-review failure must never block the rest of the turn.
+        try {
+          if (typeof aiManager.reviewTrades === 'function') await aiManager.reviewTrades();
+        } catch (err) {
+          console.error(`Trade review failed for player ${this.name}:`, err);
+        }
+        try {
+          if (typeof aiManager.maybeInitiateTrade === 'function') await aiManager.maybeInitiateTrade();
+        } catch (err) {
+          console.error(`Trade proposal failed for player ${this.name}:`, err);
+        }
+        await aiManager.processTurn();
+      }
     } catch (err) {
       console.error(`Error during step for player ${this.name}:`, err);
       throw err;
@@ -261,11 +275,36 @@ export class Player {
     }
 
     let criticalResource = null;
+    const tradeIncome = {};
+    const tradeExpense = {};
+    const netTrade = {};
+    const activeTrades = (this.gameState?.trades || []).filter(t => t.active && t.type === 'per_turn' && (String(t.player1Id) === String(this.id) || String(t.player2Id) === String(this.id)));
+    for (const trade of activeTrades) {
+      const isP1 = String(trade.player1Id) === String(this.id);
+      const mySend = isP1 ? trade.bundle1 : trade.bundle2;
+      const myReceive = isP1 ? trade.bundle2 : trade.bundle1;
+      for (const [res, amt] of Object.entries(mySend || {})) {
+        if (amt > 0) {
+          resourceKeys.add(res);
+          tradeExpense[res] = (tradeExpense[res] || 0) + amt;
+        }
+      }
+      for (const [res, amt] of Object.entries(myReceive || {})) {
+        if (amt > 0) {
+          resourceKeys.add(res);
+          tradeIncome[res] = (tradeIncome[res] || 0) + amt;
+        }
+      }
+    }
+
     for (const resKey of resourceKeys) {
       if (totalUpkeep[resKey] == undefined) totalUpkeep[resKey] = 0;
       if (totalYields[resKey] == undefined) totalYields[resKey] = 0;
       if (maxTotalYields[resKey] == undefined) maxTotalYields[resKey] = 0;
-      netIncome[resKey] = totalYields[resKey] - totalUpkeep[resKey];
+      tradeIncome[resKey] = tradeIncome[resKey] || 0;
+      tradeExpense[resKey] = tradeExpense[resKey] || 0;
+      netTrade[resKey] = tradeIncome[resKey] - tradeExpense[resKey];
+      netIncome[resKey] = totalYields[resKey] - totalUpkeep[resKey] + netTrade[resKey];
       turnsRemaining[resKey] = netIncome[resKey] < 0 ? Math.floor((stock[resKey] || 0) / -netIncome[resKey]) : Infinity;
       if (turnsRemaining[resKey] < Infinity) {
         if (!criticalResource || turnsRemaining[resKey] < turnsRemaining[criticalResource]) {
@@ -279,9 +318,13 @@ export class Player {
       totalUpkeep,
       totalYields,
       maxTotalYields,
+      tradeIncome,
+      tradeExpense,
+      netTrade,
       netIncome,
       turnsRemaining,
-      criticalResource
+      criticalResource,
+      activeTrades
     }
   }
 

@@ -682,6 +682,13 @@ export class SmartManager extends BaseManager {
             ended: true
         };
     }
+
+    async handleTradeOffer(proposer, offer) {
+        return {
+            action: 'reject',
+            message: "Our economy does not support foreign resource trading at this time."
+        };
+    }
 }
 
 export default SmartManager;
