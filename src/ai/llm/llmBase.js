@@ -8,12 +8,16 @@ import { BaseManager } from '../baseManager.js';
 import { LLMClient } from './client.js';
 import { manifestToMarkdown } from './markdown.js';
 import { DEFAULT_PROMPT_URLS } from './promptUrls.js';
-import { formatResourceBundle } from '../../gameState.js';
+
+/** Minimum rounds between AI-initiated trade proposals by the same manager. */
+const TRADE_PROPOSAL_COOLDOWN_ROUNDS = 4;
 
 export class LlmBaseManager extends BaseManager {
     constructor(player, helper) {
         super(player, helper);
         this.llmClient = null;
+        // Round of the last AI-initiated trade proposal (see maybeInitiateTrade).
+        this._lastTradeProposalRound = -Infinity;
     }
 
     /**
@@ -278,8 +282,10 @@ export class LlmBaseManager extends BaseManager {
         const profile = this.player.getResourceProfile(this.gameState);
         const myStock = JSON.stringify(this.player.resources || {});
         const myNet = JSON.stringify(profile.netIncome || {});
-        const offeredToMe = formatResourceBundle(offer.proposerGives);
-        const requestedFromMe = formatResourceBundle(offer.proposerAsks);
+        // Formatting is an engine utility: access it through the injected
+        // helper proxy (src/ai must never import engine modules directly).
+        const offeredToMe = this.helper.formatResourceBundle(offer.proposerGives);
+        const requestedFromMe = this.helper.formatResourceBundle(offer.proposerAsks);
 
         const promptText = `
 You are ${this.player.name}, leader of your empire.
@@ -385,6 +391,92 @@ EVALUATION RULES:
                 message: "Our council advises against entering into this agreement at this juncture."
             };
         }
+    }
+
+    /**
+     * Opportunistically proposes a trade to a known opponent when the empire
+     * is short of a resource but has a surplus of another.
+     *
+     * Trade initiation is an LLM-manager capability only: standard and
+     * tactical AIs do not implement this hook, so Player.step never calls it
+     * for them. Subclasses may override this with a model-driven policy; the
+     * default is deterministic and cheap.
+     *
+     * Default policy:
+     * - only when a resource is projected to run out within 10 rounds;
+     * - give a resource with positive net income (or a large stock);
+     * - acute shortages (<= 3 rounds) become per-turn imports, otherwise a
+     *   one-time lump-sum exchange;
+     * - at most one proposal every few rounds, and never to an opponent that
+     *   already has an active per-turn agreement with us.
+     *
+     * The actual negotiation is delegated to `helper.initiateTrade()`, which
+     * handles AI evaluation or the human trade UI.
+     * @returns {Promise<void>}
+     */
+    async maybeInitiateTrade() {
+        const gs = this.gameState;
+        if (!gs || typeof this.helper?.initiateTrade !== 'function') return;
+        if (gs.currentRound - (this._lastTradeProposalRound ?? -Infinity) < TRADE_PROPOSAL_COOLDOWN_ROUNDS) return;
+
+        const profile = this.player.getResourceProfile();
+        const deficit = profile.criticalResource;
+        if (!deficit) return;
+
+        const turnsLeft = profile.turnsRemaining?.[deficit] ?? Infinity;
+        if (!Number.isFinite(turnsLeft) || turnsLeft > 10) return;
+        // Asking for a resource we already break even on makes no sense.
+        if ((profile.netIncome?.[deficit] ?? 0) >= 0) return;
+
+        const giveKey = Object.keys(profile.netIncome || {})
+            .filter(res => res !== deficit)
+            .map(res => ({
+                res,
+                net: profile.netIncome[res] || 0,
+                stock: profile.stock?.[res] || 0
+            }))
+            .filter(x => x.net > 0 || x.stock >= 30)
+            .sort((a, b) => (b.net - a.net) || (b.stock - a.stock))[0]?.res;
+        if (!giveKey) return;
+
+        const giveStock = profile.stock?.[giveKey] || 0;
+        const perTurn = turnsLeft <= 3;
+        let amount;
+        if (perTurn) {
+            const net = profile.netIncome?.[giveKey] || 0;
+            amount = Math.max(1, Math.min(3, Math.floor((net > 0 ? net : giveStock / 10) / 2)));
+        } else {
+            amount = Math.max(1, Math.min(10, Math.floor(giveStock / 4)));
+        }
+        amount = Math.min(amount, Math.floor(giveStock));
+        if (amount < 1) return;
+
+        // First visible opponent without an active per-turn deal with us.
+        const active = gs.getActiveTradesForPlayer(this.player) || [];
+        const busy = new Set(active.map(t =>
+            String(t.player1Id) === String(this.player.id)
+                ? String(t.player2Id)
+                : String(t.player1Id)
+        ));
+        const opponents = this.player.getOpponents?.() || {};
+        const targetId = Object.keys(opponents)
+            .filter(id => /^\d+$/.test(id) && !busy.has(id))
+            .sort((a, b) => Number(a) - Number(b))[0];
+        if (!targetId) return;
+
+        const offer = {
+            type: perTurn ? 'per_turn' : 'one_time',
+            proposerGives: { [giveKey]: amount },
+            proposerAsks: { [deficit]: amount }
+        };
+
+        this._lastTradeProposalRound = gs.currentRound;
+        const result = await this.helper.initiateTrade(this.player, Number(targetId), offer);
+        this.helper.aiLog?.(
+            this.player,
+            'trade',
+            `Proposed ${offer.type} to ${targetId}: ${this.helper.formatResourceBundle(offer.proposerGives)} for ${this.helper.formatResourceBundle(offer.proposerAsks)} -> ${result.status}${result.reason ? ` (${result.reason})` : ''}`
+        );
     }
 
     summarizeGameState() {

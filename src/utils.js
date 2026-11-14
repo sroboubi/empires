@@ -15,6 +15,23 @@ export const camelToTitle = (text) => {
     return text.replace(/([A-Z])/g, ' $1').replace(/^./, (str) => str.toUpperCase()).trim();
 };
 
+/**
+ * Formats a resource bundle map (e.g. { iron: 50, gold: 10 }) to a
+ * human-readable string. Pure helper: safe for both engine and AI use.
+ * @param {Object} bundle
+ * @returns {string}
+ */
+export function formatResourceBundle(bundle) {
+    if (!bundle) return 'nothing';
+    const parts = [];
+    for (const [res, amt] of Object.entries(bundle)) {
+        if (amt > 0) {
+            parts.push(`${amt} ${res}`);
+        }
+    }
+    return parts.length > 0 ? parts.join(', ') : 'nothing';
+}
+
 export const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 export function showToast(message, isError = false, timeout = 2500) {

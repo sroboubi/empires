@@ -209,7 +209,30 @@ const save = await page.evaluate(async () => {
         if (typeof v === 'number' && !Number.isFinite(v)) { bad.push(`${p.name}: ${k} is NaN`); break; }
       }
     }
-    return { ok: bad.length === 0, round: d.currentRound, entities: d.entities?.length, problems: bad };
+    // Trade state must survive serialization in the same shape the engine
+    // accepts: distinct participants and non-empty, positive bundles.
+    if (!Array.isArray(d.trades)) {
+      bad.push('trades is not an array');
+    } else {
+      for (const t of d.trades) {
+        if (!t || typeof t !== 'object') { bad.push('invalid trade record'); break; }
+        if (String(t.player1Id) === String(t.player2Id)) { bad.push(`trade ${t.id}: same player`); break; }
+        let tradeBad = false;
+        for (const [side, bundle] of [['bundle1', t.bundle1], ['bundle2', t.bundle2]]) {
+          if (!bundle || typeof bundle !== 'object' || Object.keys(bundle).length === 0) {
+            bad.push(`trade ${t.id}: ${side} is empty`); tradeBad = true; break;
+          }
+          const invalid = Object.entries(bundle).find(([, v]) => !Number.isFinite(v) || v <= 0);
+          if (invalid) {
+            bad.push(`trade ${t.id}: ${side} has invalid amount for ${invalid[0]}`);
+            tradeBad = true;
+            break;
+          }
+        }
+        if (tradeBad) break;
+      }
+    }
+    return { ok: bad.length === 0, round: d.currentRound, entities: d.entities?.length, trades: d.trades?.length, problems: bad };
   } catch (e) { return { ok: false, reason: String(e) }; }
 });
 

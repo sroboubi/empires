@@ -200,7 +200,21 @@ export class Player {
 
     try {
       const aiManager = await this.getAiManager();
-      if (aiManager) await aiManager.processTurn();
+      if (aiManager) {
+        // Let the AI re-evaluate ongoing per-turn deals before acting. A
+        // trade-review failure must never block the rest of the turn.
+        try {
+          if (typeof aiManager.reviewTrades === 'function') await aiManager.reviewTrades();
+        } catch (err) {
+          console.error(`Trade review failed for player ${this.name}:`, err);
+        }
+        try {
+          if (typeof aiManager.maybeInitiateTrade === 'function') await aiManager.maybeInitiateTrade();
+        } catch (err) {
+          console.error(`Trade proposal failed for player ${this.name}:`, err);
+        }
+        await aiManager.processTurn();
+      }
     } catch (err) {
       console.error(`Error during step for player ${this.name}:`, err);
       throw err;

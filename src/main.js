@@ -1,6 +1,6 @@
-import { GameState, formatResourceBundle } from './gameState.js';
+import { GameState } from './gameState.js';
 import { CONFIG } from './config.js';
-import { showToast, displayNum } from './utils.js';
+import { showToast, displayNum, formatResourceBundle } from './utils.js';
 import {
   initRenderer,
   drawGrid,
@@ -1050,7 +1050,11 @@ function startNewGame(settings) {
 
   gameState = new GameState({
     onActionDone,
-    onOpenChatModal: (humanPlayer, aiPlayer) => openChatModal(humanPlayer, aiPlayer),
+    // Every onOpenChatModal call is a fresh initiation (AiHelper.chat deducts
+    // the order and generates an opening), so it must bypass the "concluded"
+    // lock even if a previous conversation with this leader had ended.
+    onOpenChatModal: (humanPlayer, aiPlayer) => openChatModal(humanPlayer, aiPlayer, { isNewInitiation: true }),
+    onOpenTradeModal: (humanPlayer, aiPlayer, offer) => openIncomingTradeModal(humanPlayer, aiPlayer, offer),
     onCloseChatModal: () => closeChatModal(),
     // M5: autosave at the clean turn boundary, not after the next AI starts.
     onCleanBoundary: () => checkAutoSave(),
@@ -1233,7 +1237,11 @@ async function doLoadGame(saveName) {
 
     gameState = new GameState({
     onActionDone,
-    onOpenChatModal: (humanPlayer, aiPlayer) => openChatModal(humanPlayer, aiPlayer),
+    // Every onOpenChatModal call is a fresh initiation (AiHelper.chat deducts
+    // the order and generates an opening), so it must bypass the "concluded"
+    // lock even if a previous conversation with this leader had ended.
+    onOpenChatModal: (humanPlayer, aiPlayer) => openChatModal(humanPlayer, aiPlayer, { isNewInitiation: true }),
+    onOpenTradeModal: (humanPlayer, aiPlayer, offer) => openIncomingTradeModal(humanPlayer, aiPlayer, offer),
     onCloseChatModal: () => closeChatModal(),
     // M5: autosave at the clean turn boundary, not after the next AI starts.
     onCleanBoundary: () => checkAutoSave(),
@@ -1346,7 +1354,11 @@ async function startReplayMode(replayData) {
   // Instantiate GameState for replay from initial state
   gameState = new GameState({
     onActionDone,
-    onOpenChatModal: (humanPlayer, aiPlayer) => openChatModal(humanPlayer, aiPlayer),
+    // Every onOpenChatModal call is a fresh initiation (AiHelper.chat deducts
+    // the order and generates an opening), so it must bypass the "concluded"
+    // lock even if a previous conversation with this leader had ended.
+    onOpenChatModal: (humanPlayer, aiPlayer) => openChatModal(humanPlayer, aiPlayer, { isNewInitiation: true }),
+    onOpenTradeModal: (humanPlayer, aiPlayer, offer) => openIncomingTradeModal(humanPlayer, aiPlayer, offer),
     onCloseChatModal: () => closeChatModal(),
     // M5: autosave at the clean turn boundary, not after the next AI starts.
     onCleanBoundary: () => checkAutoSave(),
@@ -1668,7 +1680,7 @@ function renderTradeDrawer() {
   const drawer = document.getElementById('chat-trade-drawer');
   if (!drawer || !currentChatSession.humanPlayer || !currentChatSession.aiPlayer) return;
 
-  const { humanPlayer, aiPlayer, tradeType, pendingOffer } = currentChatSession;
+  const { humanPlayer, aiPlayer, tradeType, pendingOffer, incomingOffer } = currentChatSession;
   const isChatEnded = !!currentChatSession.isChatEnded;
 
   // Banner for concluded negotiations
@@ -1692,7 +1704,45 @@ function renderTradeDrawer() {
   // 2. Status Box
   const statusBox = document.getElementById('trade-offer-status-box');
   if (statusBox) {
-    if (pendingOffer) {
+    if (incomingOffer) {
+      // AI-initiated proposal: the human decides. The AI's turn is waiting on
+      // this decision (see openIncomingTradeModal).
+      statusBox.style.display = 'flex';
+      statusBox.innerHTML = `
+        <div class="trade-offer-box trade-offer-incoming">
+          <div style="color: #38bdf8; font-weight: 700; font-size: 11px;">
+            📜 Incoming Offer from ${escapeHTML(aiPlayer.name)}
+          </div>
+          <div style="font-size: 11px;"><strong>They offer you:</strong> <span style="color: #10b981;">${escapeHTML(formatResourceBundle(incomingOffer.proposerGives))}</span></div>
+          <div style="font-size: 11px;"><strong>They request from you:</strong> <span style="color: #f87171;">${escapeHTML(formatResourceBundle(incomingOffer.proposerAsks))}</span></div>
+          <div style="display: flex; gap: 6px; margin-top: 6px;">
+            <button id="btn-accept-incoming" class="btn btn-small" style="background: #10b981; color: #fff; flex: 1; padding: 5px 0; font-size: 11px; cursor: pointer;">Accept</button>
+            <button id="btn-adjust-incoming" class="btn btn-small" style="background: #38bdf8; color: #fff; flex: 1; padding: 5px 0; font-size: 11px; cursor: pointer;">Counter</button>
+            <button id="btn-reject-incoming" class="btn btn-small" style="background: #ef4444; color: #fff; flex: 1; padding: 5px 0; font-size: 11px; cursor: pointer;">Reject</button>
+          </div>
+        </div>
+      `;
+      const acceptBtn = document.getElementById('btn-accept-incoming');
+      if (acceptBtn) {
+        acceptBtn.onclick = () => handleAcceptIncomingOffer();
+        if (isChatEnded) {
+          acceptBtn.disabled = true;
+          acceptBtn.style.opacity = '0.4';
+          acceptBtn.style.cursor = 'not-allowed';
+        }
+      }
+      const adjustBtn = document.getElementById('btn-adjust-incoming');
+      if (adjustBtn) {
+        adjustBtn.onclick = () => handleAdjustIncomingOffer();
+        if (isChatEnded) {
+          adjustBtn.disabled = true;
+          adjustBtn.style.opacity = '0.4';
+          adjustBtn.style.cursor = 'not-allowed';
+        }
+      }
+      const rejectBtn = document.getElementById('btn-reject-incoming');
+      if (rejectBtn) rejectBtn.onclick = () => handleRejectIncomingOffer();
+    } else if (pendingOffer) {
       statusBox.style.display = 'flex';
       if (pendingOffer.status === 'waiting') {
         statusBox.innerHTML = `
@@ -1752,11 +1802,15 @@ function renderTradeDrawer() {
   const proposeBtn = document.getElementById('btn-propose-trade');
   if (proposeBtn) {
     const isPending = pendingOffer && pendingOffer.status === 'waiting';
-    proposeBtn.disabled = isChatEnded || isPending;
+    proposeBtn.disabled = isChatEnded || isPending || !!incomingOffer;
     if (isChatEnded) {
       proposeBtn.title = 'Trade is not allowed because negotiations have concluded.';
       proposeBtn.style.opacity = '0.4';
       proposeBtn.style.cursor = 'not-allowed';
+    } else if (incomingOffer) {
+      proposeBtn.title = 'Respond to the incoming offer first.';
+      proposeBtn.style.opacity = '';
+      proposeBtn.style.cursor = '';
     } else if (isPending) {
       proposeBtn.title = 'A trade proposal is pending.';
       proposeBtn.style.opacity = '';
@@ -1920,10 +1974,16 @@ async function handleProposeTradeClicked() {
   const { humanPlayer, aiPlayer, tradeType, draftGives, draftAsks } = currentChatSession;
   if (!humanPlayer || !aiPlayer) return;
 
+  // Capture this session: the modal can close (or a new chat can open) while
+  // the AI is evaluating, and a late decision must not write into the new
+  // session's pending offer or draft bundles.
+  const session = currentChatSession;
+  const isLiveSession = () => currentChatSession === session;
+
   const givesCount = Object.values(draftGives).reduce((sum, v) => sum + (v || 0), 0);
   const asksCount = Object.values(draftAsks).reduce((sum, v) => sum + (v || 0), 0);
-  if (givesCount === 0 && asksCount === 0) {
-    showToast('Cannot propose an empty trade bundle.', true);
+  if (givesCount === 0 || asksCount === 0) {
+    showToast('A trade needs at least one resource on each side.', true);
     return;
   }
 
@@ -1937,7 +1997,7 @@ async function handleProposeTradeClicked() {
     proposerGives: { ...draftGives },
     proposerAsks: { ...draftAsks }
   };
-  currentChatSession.pendingOffer = { ...offer, status: 'waiting' };
+  session.pendingOffer = { ...offer, status: 'waiting' };
 
   const typeLabel = tradeType === 'per_turn' ? 'ongoing per-turn' : 'one-time';
   gameState.addChatMessage(
@@ -1952,16 +2012,20 @@ async function handleProposeTradeClicked() {
     const mgr = await aiPlayer.getAiManager();
     if (!mgr) {
       showToast(`${aiPlayer.name} cannot negotiate trade right now.`, true);
-      currentChatSession.pendingOffer = null;
-      renderTradeDrawer();
+      if (isLiveSession()) {
+        session.pendingOffer = null;
+        renderTradeDrawer();
+      }
       return;
     }
 
     const decision = await mgr.handleTradeOffer(humanPlayer, offer);
 
     if (decision.message) {
+      // The reply belongs in the history even if the modal closed while the
+      // AI was evaluating, but only the live session may repaint the UI.
       gameState.addChatMessage(aiPlayer, humanPlayer, decision.message);
-      renderChatMessages();
+      if (isLiveSession()) renderChatMessages();
     }
 
     if (decision.action === 'accept') {
@@ -1973,33 +2037,45 @@ async function handleProposeTradeClicked() {
           showToast(`Trade failed: ${res.reason}`, true);
         }
       } else {
-        gameState.createPerTurnTrade(humanPlayer, aiPlayer, offer.proposerGives, offer.proposerAsks);
-        showToast(`Ongoing trade agreement established with ${aiPlayer.name}!`);
+        const trade = gameState.createPerTurnTrade(humanPlayer, aiPlayer, offer.proposerGives, offer.proposerAsks);
+        if (trade) {
+          showToast(`Ongoing trade agreement established with ${aiPlayer.name}!`);
+        } else {
+          showToast('Trade failed: the per-turn agreement is invalid.', true);
+        }
       }
-      currentChatSession.pendingOffer = null;
-      currentChatSession.draftGives = {};
-      currentChatSession.draftAsks = {};
-      updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
-      renderTradeDrawer();
+      if (isLiveSession()) {
+        session.pendingOffer = null;
+        session.draftGives = {};
+        session.draftAsks = {};
+        updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
+        renderTradeDrawer();
+      }
     } else if (decision.action === 'counter') {
-      currentChatSession.pendingOffer = {
-        type: tradeType,
-        proposerGives: decision.counterOffer?.proposerGives || offer.proposerGives,
-        proposerAsks: decision.counterOffer?.proposerAsks || offer.proposerAsks,
-        status: 'countered'
-      };
       showToast(`${aiPlayer.name} made a counter-offer.`);
-      renderTradeDrawer();
+      if (isLiveSession()) {
+        session.pendingOffer = {
+          type: tradeType,
+          proposerGives: decision.counterOffer?.proposerGives || offer.proposerGives,
+          proposerAsks: decision.counterOffer?.proposerAsks || offer.proposerAsks,
+          status: 'countered'
+        };
+        renderTradeDrawer();
+      }
     } else {
-      currentChatSession.pendingOffer = null;
       showToast(`${aiPlayer.name} declined the trade offer.`);
-      renderTradeDrawer();
+      if (isLiveSession()) {
+        session.pendingOffer = null;
+        renderTradeDrawer();
+      }
     }
   } catch (err) {
     console.error('Error during trade proposal:', err);
-    currentChatSession.pendingOffer = null;
     showToast('Failed to negotiate trade proposal.', true);
-    renderTradeDrawer();
+    if (isLiveSession()) {
+      session.pendingOffer = null;
+      renderTradeDrawer();
+    }
   }
 }
 
@@ -2020,7 +2096,11 @@ function handleAcceptCounterOffer() {
     showToast(`Trade finalized with ${aiPlayer.name}!`);
     gameState.addChatMessage(humanPlayer, aiPlayer, `*[Agreed to counter-offer: Exchanged ${formatResourceBundle(pendingOffer.proposerGives)} for ${formatResourceBundle(pendingOffer.proposerAsks)}]*`);
   } else {
-    gameState.createPerTurnTrade(humanPlayer, aiPlayer, pendingOffer.proposerGives, pendingOffer.proposerAsks);
+    const trade = gameState.createPerTurnTrade(humanPlayer, aiPlayer, pendingOffer.proposerGives, pendingOffer.proposerAsks);
+    if (!trade) {
+      showToast('Cannot complete trade: the per-turn agreement is invalid.', true);
+      return;
+    }
     showToast(`Per-turn trade agreement established with ${aiPlayer.name}!`);
     gameState.addChatMessage(humanPlayer, aiPlayer, `*[Agreed to counter-offer: Established ongoing per-turn agreement]*`);
   }
@@ -2066,6 +2146,80 @@ function handleCancelTradeFromDrawer(tradeId) {
   showToast('Trade agreement canceled.');
 }
 
+function handleAcceptIncomingOffer() {
+  const { humanPlayer, aiPlayer, incomingOffer } = currentChatSession;
+  if (!incomingOffer || !humanPlayer || !aiPlayer) return;
+
+  if (incomingOffer.type === 'one_time') {
+    // The AI is the proposer: it sends proposerGives and receives proposerAsks.
+    const res = gameState.executeOneTimeTrade(
+      aiPlayer, humanPlayer, incomingOffer.proposerGives, incomingOffer.proposerAsks
+    );
+    if (!res.success) {
+      showToast(`Cannot complete trade: ${res.reason}`, true);
+      return;
+    }
+    gameState.addChatMessage(
+      humanPlayer,
+      aiPlayer,
+      `*[Accepted trade: Exchanged ${formatResourceBundle(incomingOffer.proposerAsks)} for ${formatResourceBundle(incomingOffer.proposerGives)}]*`
+    );
+    showToast(`Trade finalized with ${aiPlayer.name}!`);
+  } else {
+    const trade = gameState.createPerTurnTrade(
+      aiPlayer, humanPlayer, incomingOffer.proposerGives, incomingOffer.proposerAsks
+    );
+    if (!trade) {
+      showToast('Cannot create the per-turn agreement: invalid offer.', true);
+      return;
+    }
+    gameState.addChatMessage(
+      humanPlayer,
+      aiPlayer,
+      `*[Accepted per-turn agreement: Sending ${formatResourceBundle(incomingOffer.proposerAsks)}/turn, receiving ${formatResourceBundle(incomingOffer.proposerGives)}/turn]*`
+    );
+    showToast(`Per-turn trade agreement established with ${aiPlayer.name}!`);
+  }
+
+  const resolve = currentChatSession.resolveTradeDecision;
+  currentChatSession.incomingOffer = null;
+  currentChatSession.resolveTradeDecision = null;
+  if (resolve) resolve({ action: 'accept', applied: true });
+  renderChatMessages();
+  updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
+  renderTradeDrawer();
+}
+
+function handleAdjustIncomingOffer() {
+  const { incomingOffer, resolveTradeDecision } = currentChatSession;
+  if (!incomingOffer) return;
+
+  // The human becomes the proposer: give what the AI requested, ask for what
+  // the AI offered. The next "Propose" sends this counter back to the AI.
+  currentChatSession.draftGives = { ...(incomingOffer.proposerAsks || {}) };
+  currentChatSession.draftAsks = { ...(incomingOffer.proposerGives || {}) };
+  currentChatSession.tradeType = incomingOffer.type;
+  currentChatSession.incomingOffer = null;
+  currentChatSession.resolveTradeDecision = null;
+  if (resolveTradeDecision) resolveTradeDecision({ action: 'counter' });
+  showToast('Adjust the bundles, then propose your counter-offer.');
+  renderTradeDrawer();
+}
+
+function handleRejectIncomingOffer() {
+  const { humanPlayer, aiPlayer, incomingOffer, resolveTradeDecision } = currentChatSession;
+  if (!incomingOffer) return;
+  currentChatSession.incomingOffer = null;
+  currentChatSession.resolveTradeDecision = null;
+  if (resolveTradeDecision) resolveTradeDecision({ action: 'reject' });
+  if (humanPlayer && aiPlayer) {
+    gameState.addChatMessage(humanPlayer, aiPlayer, '*[Declined trade proposal]*');
+    renderChatMessages();
+  }
+  showToast('Trade negotiation declined.');
+  renderTradeDrawer();
+}
+
 function handleEndChat() {
   if (currentChatSession.isWaitingForAi || currentChatSession.isChatEnded) return;
   const { humanPlayer, aiPlayer } = currentChatSession;
@@ -2073,6 +2227,10 @@ function handleEndChat() {
 
   currentChatSession.isChatEnded = true;
   currentChatSession.pendingOffer = null;
+  currentChatSession.incomingOffer = null;
+  const resolveDecision = currentChatSession.resolveTradeDecision;
+  currentChatSession.resolveTradeDecision = null;
+  if (resolveDecision) resolveDecision({ action: 'reject', reason: 'ended' });
 
   gameState.addChatMessage(humanPlayer, aiPlayer, '[Concluded diplomatic negotiations]', true);
 
@@ -2187,6 +2345,8 @@ function openChatModal(humanPlayer, aiPlayer, options = {}) {
       isTradeDrawerOpen: false,
       tradeType: 'one_time',
       pendingOffer: null,
+      incomingOffer: options.incomingOffer || null,
+      resolveTradeDecision: options.resolveTradeDecision || null,
       draftGives: {},
       draftAsks: {}
     };
@@ -2194,10 +2354,47 @@ function openChatModal(humanPlayer, aiPlayer, options = {}) {
     renderChatMessages();
     renderTradeDrawer();
     overlay.classList.add('active');
-    if (!isConcluded) {
+    if (currentChatSession.incomingOffer) {
+      // AI-initiated proposal: surface it immediately rather than making the
+      // human hunt for the trade drawer.
+      toggleTradeDrawer(true);
+    } else if (!isConcluded) {
       setTimeout(() => input.focus(), 100);
     }
   });
+}
+
+/**
+ * Opens the chat modal for an AI-initiated trade and resolves with the human's
+ * decision. The AI's turn waits until the modal closes, matching AI-initiated
+ * chat and preventing a second AI from replacing the open offer.
+ * @param {Player} humanPlayer
+ * @param {Player} aiPlayer
+ * @param {{type: string, proposerGives: Object, proposerAsks: Object}} offer
+ * @returns {Promise<{action: 'accept'|'counter'|'reject', applied?: boolean, reason?: string}>}
+ */
+function openIncomingTradeModal(humanPlayer, aiPlayer, offer) {
+  if (!gameState || !humanPlayer || !aiPlayer) {
+    return Promise.resolve({ action: 'reject', reason: 'unavailable' });
+  }
+
+  let decision = null;
+  let resolveDecision;
+  const decisionPromise = new Promise((resolve) => { resolveDecision = resolve; });
+
+  const closed = openChatModal(humanPlayer, aiPlayer, {
+    isNewInitiation: true,
+    incomingOffer: offer,
+    resolveTradeDecision: (d) => {
+      if (!decision) {
+        decision = d;
+        resolveDecision(d);
+      }
+    }
+  });
+
+  return Promise.all([closed, decisionPromise])
+    .then(() => decision || { action: 'reject', reason: 'closed' });
 }
 
 async function closeChatModal() {
@@ -2216,7 +2413,7 @@ async function closeChatModal() {
     toggleBtn.style.color = '#10b981';
   }
 
-  const { humanPlayer, aiPlayer, resolvePromise } = currentChatSession;
+  const { humanPlayer, aiPlayer, resolvePromise, resolveTradeDecision } = currentChatSession;
   // L6: try/finally — a throwing summarize used to hang the AI turn
   // forever (the promise never resolved). The session always resets.
   try {
@@ -2229,6 +2426,10 @@ async function closeChatModal() {
     console.warn('Chat summary failed (non-fatal):', e);
   } finally {
     updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
+
+    // An AI-initiated offer waits on this decision. Closing without an answer
+    // means "reject", so the AI's turn is never left hanging.
+    if (resolveTradeDecision) resolveTradeDecision({ action: 'reject', reason: 'closed' });
 
     if (resolvePromise) {
       resolvePromise();
@@ -2244,6 +2445,8 @@ async function closeChatModal() {
       isTradeDrawerOpen: false,
       tradeType: 'one_time',
       pendingOffer: null,
+      incomingOffer: null,
+      resolveTradeDecision: null,
       draftGives: {},
       draftAsks: {}
     };
@@ -2278,6 +2481,10 @@ async function sendChatMessage() {
   if (humanEnded) {
     currentChatSession.isChatEnded = true;
     currentChatSession.pendingOffer = null;
+    currentChatSession.incomingOffer = null;
+    const resolveDecision = currentChatSession.resolveTradeDecision;
+    currentChatSession.resolveTradeDecision = null;
+    if (resolveDecision) resolveDecision({ action: 'reject', reason: 'ended' });
     statusIndicator.innerHTML = `<span style="color: #f1c40f;">[ You have concluded the negotiations. ]</span>`;
     input.disabled = true;
     sendBtn.disabled = true;
@@ -2315,6 +2522,10 @@ async function sendChatMessage() {
         // modal — summarizing here too would double the note and the LLM call.
         currentChatSession.isChatEnded = true;
         currentChatSession.pendingOffer = null;
+        currentChatSession.incomingOffer = null;
+        const resolveDecision = currentChatSession.resolveTradeDecision;
+        currentChatSession.resolveTradeDecision = null;
+        if (resolveDecision) resolveDecision({ action: 'reject', reason: 'ended' });
         statusIndicator.innerHTML = `<span style="color: #f1c40f;">[ ${escapeHTML(aiPlayer.name)} has concluded the negotiations. ]</span>`;
         input.disabled = true;
         sendBtn.disabled = true;
@@ -2853,8 +3064,16 @@ function openProfileModal(player, gameState) {
     cancelBtns.forEach(btn => {
       btn.onclick = (e) => {
         const tradeId = e.currentTarget.getAttribute('data-trade-id');
-        if (tradeId) {
-          gameState.cancelTrade(tradeId, gameState.activePlayer);
+        if (!tradeId) return;
+        // cancelTrade now requires an actual participant. The viewed player is
+        // used when it is human; for an AI profile, use the human participant.
+        const trade = (gameState.trades || []).find(t => String(t.id) === String(tradeId));
+        const human = !player.isAI
+          ? player
+          : gameState.players.find(p => !p.isAI && trade &&
+            (String(trade.player1Id) === String(p.id) || String(trade.player2Id) === String(p.id)));
+        if (human) {
+          gameState.cancelTrade(tradeId, human);
           updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
           updateModalContent();
         }

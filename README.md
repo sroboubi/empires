@@ -299,6 +299,8 @@ Zone of control:
    - one time offer: build a resource bundle offering (a set of resource amounts: e.g. {iron: 50, gold: 10}) and ask for a bundle in return. Allow other player to adjust bundle and offer it back to you. This can be done until one player rejects the process, or both players accept the exchange bundles.
    - similar to above, but the bundle is per turn. Every turn the bundles are exchanged (resources transferred between players) until one player cancels the exchange. Keep track of these exchanges in game state. If a player does not have the required resources to build the bundle on a turn, then the exchange does that happen on that turn.
    - a history entry is added for every successful and failed exchange.
+   - trade-capable AIs (the LLM managers) may initiate offers: `LlmBaseManager.maybeInitiateTrade()` delegates to `helper.initiateTrade()`, which either asks another AI's manager or opens the human trade UI. Standard and tactical AIs only respond (they reject).
+   - AI players review their ongoing per-turn agreements at the start of their turn and cancel any they can no longer afford (`BaseManager.reviewTrades()`); cancellations are recorded in history.
    - the player resource profile panel should be enhanced to include ongoing trades.
 2. leader portraits and emotes or videos + add all leaders
 3. faction description and special abilities (Asymmetric faction twists. The most praised engagement mechanic in modern 4X (Endless Legend's rule-breaking factions). 2–3 JSON-authored twists per faction)

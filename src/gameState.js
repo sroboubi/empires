@@ -6,21 +6,31 @@ import { spawnCellResources, checkTreasurePickup } from './resources.js';
 import { CONFIG } from './config.js';
 import { createSeededRandom } from './random.js';
 import Entity from './entity.js';
+import { formatResourceBundle } from './utils.js';
 
 /**
- * Formats a resource bundle map (e.g. { iron: 50, gold: 10 }) to a human-readable string.
+ * Validates a single resource bundle used in a trade.
+ * A bundle must be a non-empty object whose values are positive finite numbers.
  * @param {Object} bundle
- * @returns {string}
+ * @returns {{ok: boolean, reason?: string}}
  */
-export function formatResourceBundle(bundle) {
-  if (!bundle) return 'nothing';
-  const parts = [];
-  for (const [res, amt] of Object.entries(bundle)) {
-    if (amt > 0) {
-      parts.push(`${amt} ${res}`);
+function validateTradeBundle(bundle) {
+  if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)) {
+    return { ok: false, reason: 'must be an object of resource amounts.' };
+  }
+  const entries = Object.entries(bundle);
+  if (entries.length === 0) {
+    return { ok: false, reason: 'cannot be empty.' };
+  }
+  for (const [res, amt] of entries) {
+    if (typeof res !== 'string' || res.trim() === '') {
+      return { ok: false, reason: 'contains an empty resource name.' };
+    }
+    if (typeof amt !== 'number' || !Number.isFinite(amt) || amt <= 0) {
+      return { ok: false, reason: `has an invalid amount for '${res}' (must be a positive number).` };
     }
   }
-  return parts.length > 0 ? parts.join(', ') : 'nothing';
+  return { ok: true };
 }
 
 /**
@@ -32,6 +42,7 @@ export class GameState {
    * @param {Object} [callbacks={}] - UI callbacks registered by main.js:
    *   onActionDone(involvedCells, actionDesc),
    *   onOpenChatModal(humanPlayer, aiPlayer),
+   *   onOpenTradeModal(humanPlayer, aiPlayer, offer),
    *   onCloseChatModal()
    */
   constructor(callbacks = {}) {
@@ -64,6 +75,9 @@ export class GameState {
     // UI callbacks (main.js implements these; aiHelper delegates via gameState).
     this.onActionDone = callbacks.onActionDone || null;
     this.onOpenChatModal = callbacks.onOpenChatModal || null;
+    // AI-initiated trade: opens the human trade UI and resolves with the
+    // human's decision ({ action: 'accept'|'counter'|'reject' }).
+    this.onOpenTradeModal = callbacks.onOpenTradeModal || null;
     this.onCloseChatModal = callbacks.onCloseChatModal || null;
     // M5: called at the clean turn boundary (round-end done, next turn not
     // yet started) so the driver can autosave a complete state.
@@ -152,6 +166,39 @@ export class GameState {
   }
 
   /**
+   * Validates a trade's participants and bundles.
+   * @param {Player} player1 - Proposer
+   * @param {Player} player2 - Counterpart
+   * @param {Object} offer - { type: 'one_time'|'per_turn', proposerGives, proposerAsks }
+   * @param {Object} [options]
+   * @param {boolean} [options.requireAffordable=false] - Require player1 to hold proposerGives now
+   * @returns {{ok: boolean, reason?: string}}
+   */
+  validateTradeOffer(player1, player2, offer, { requireAffordable = false } = {}) {
+    if (!player1 || !player2) return { ok: false, reason: 'Invalid players.' };
+    if (String(player1.id) === String(player2.id)) {
+      return { ok: false, reason: 'A player cannot trade with themselves.' };
+    }
+    if (!this.getPlayerById(player1.id) || !this.getPlayerById(player2.id)) {
+      return { ok: false, reason: 'Trade participants must be active players.' };
+    }
+    if (!offer || typeof offer !== 'object' || Array.isArray(offer)) {
+      return { ok: false, reason: 'Invalid trade offer.' };
+    }
+    if (offer.type !== 'one_time' && offer.type !== 'per_turn') {
+      return { ok: false, reason: "Trade type must be 'one_time' or 'per_turn'." };
+    }
+    const gives = validateTradeBundle(offer.proposerGives);
+    if (!gives.ok) return { ok: false, reason: `Offered bundle ${gives.reason}` };
+    const asks = validateTradeBundle(offer.proposerAsks);
+    if (!asks.ok) return { ok: false, reason: `Requested bundle ${asks.reason}` };
+    if (requireAffordable && !player1.hasResources(offer.proposerGives)) {
+      return { ok: false, reason: `${player1.name} has insufficient resources.` };
+    }
+    return { ok: true };
+  }
+
+  /**
    * Executes an immediate one-time trade between two players.
    * @param {Player} player1 - Initiator
    * @param {Player} player2 - Counterpart
@@ -160,7 +207,13 @@ export class GameState {
    * @returns {{ success: boolean, reason?: string }}
    */
   executeOneTimeTrade(player1, player2, bundle1, bundle2) {
-    if (!player1 || !player2) return { success: false, reason: 'Invalid players' };
+    const check = this.validateTradeOffer(player1, player2, {
+      type: 'one_time',
+      proposerGives: bundle1,
+      proposerAsks: bundle2
+    });
+    if (!check.ok) return { success: false, reason: check.reason };
+
     if (!player1.hasResources(bundle1)) {
       return { success: false, reason: `${player1.name} has insufficient resources` };
     }
@@ -197,9 +250,19 @@ export class GameState {
    * @param {Player} player2
    * @param {Object} bundle1 - Resources player1 sends per turn
    * @param {Object} bundle2 - Resources player2 sends per turn
-   * @returns {Object}
+   * @returns {Object|null} The created trade, or null when the offer is invalid
    */
   createPerTurnTrade(player1, player2, bundle1, bundle2) {
+    const check = this.validateTradeOffer(player1, player2, {
+      type: 'per_turn',
+      proposerGives: bundle1,
+      proposerAsks: bundle2
+    });
+    if (!check.ok) {
+      console.warn(`[GameState] Refused per-turn trade: ${check.reason}`);
+      return null;
+    }
+
     if (!this.trades) this.trades = [];
     const trade = {
       id: 'trade_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
@@ -233,32 +296,43 @@ export class GameState {
 
   /**
    * Cancels an ongoing trade agreement.
+   * Only an active participant of that agreement may cancel it.
    * @param {string} tradeId
-   * @param {Player|null} cancelingPlayer
+   * @param {Player|string|number} cancelingPlayer
    * @returns {boolean}
    */
-  cancelTrade(tradeId, cancelingPlayer = null) {
+  cancelTrade(tradeId, cancelingPlayer) {
     if (!this.trades) return false;
     const trade = this.trades.find(t => t.id === tradeId && t.active);
     if (!trade) return false;
+
+    const canceler = cancelingPlayer
+      ? this.getPlayerById((cancelingPlayer && typeof cancelingPlayer === 'object') ? cancelingPlayer.id : cancelingPlayer)
+      : null;
+    if (!canceler) return false;
+    if (String(trade.player1Id) !== String(canceler.id) &&
+      String(trade.player2Id) !== String(canceler.id)) {
+      return false;
+    }
+
     trade.active = false;
 
     const p1 = this.getPlayerById(trade.player1Id);
     const p2 = this.getPlayerById(trade.player2Id);
-    const cancelerName = cancelingPlayer ? cancelingPlayer.name : 'A participant';
+    const cancelerName = canceler.name;
 
     if (p1) {
       p1.addHistoryEntry(this.currentRound, {
         category: 'trade',
         details: `Canceled per-turn trade agreement with ${p2 ? p2.name : 'partner'} (${cancelerName} canceled)`,
-        extra: { tradeId, canceledBy: cancelingPlayer?.id }
+        extra: { tradeId, canceledBy: canceler.id }
       });
     }
     if (p2) {
       p2.addHistoryEntry(this.currentRound, {
         category: 'trade',
         details: `Canceled per-turn trade agreement with ${p1 ? p1.name : 'partner'} (${cancelerName} canceled)`,
-        extra: { tradeId, canceledBy: cancelingPlayer?.id }
+        extra: { tradeId, canceledBy: canceler.id }
       });
     }
 
@@ -276,6 +350,12 @@ export class GameState {
       const p1 = this.getPlayerById(trade.player1Id);
       const p2 = this.getPlayerById(trade.player2Id);
       if (!p1 || !p2) {
+        trade.active = false;
+        continue;
+      }
+      // Defensive: drop malformed agreements (e.g. old/corrupt saves) rather
+      // than throwing while iterating bundles.
+      if (!validateTradeBundle(trade.bundle1).ok || !validateTradeBundle(trade.bundle2).ok) {
         trade.active = false;
         continue;
       }
