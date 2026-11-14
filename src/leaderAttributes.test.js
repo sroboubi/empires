@@ -1,0 +1,280 @@
+/**
+ * Node-based tests for leader attributes (twists, Phase 25) and the
+ * barbarian encounter mechanic.
+ * Run from the repo root with:
+ *   node --import ./tests/headless/stubs.mjs --loader ./tests/headless/loader.mjs --input-type=module -e "import('./src/leaderAttributes.test.js')"
+ *
+ * Uses mocked game states and a small inline leaders list — no browser,
+ * no live game. One test also reads the real definitions/leaders.json to
+ * pin Meera's score multiplier.
+ */
+import { readFileSync } from 'fs';
+import Entity from './entity.js';
+import { Player } from './player.js';
+import { barbarianTargetProbability } from './barbarians/manager.js';
+
+let passed = 0, failed = 0;
+function test(name, fn) {
+  try {
+    fn();
+    passed++;
+    console.log(`  ✓ ${name}`);
+  } catch (e) {
+    failed++;
+    console.log(`  ✗ ${name}: ${e.message}`);
+  }
+}
+function assert(cond, msg) {
+  if (!cond) throw new Error(msg);
+}
+function assertClose(a, b, msg) {
+  if (Math.abs(a - b) > 1e-9) throw new Error(`${msg} (got ${a}, want ${b})`);
+}
+
+// --- fixtures ---------------------------------------------------------------
+
+const LEADERS = [
+  {
+    name: 'Meera',
+    attributes: {
+      economyMultipliers: { income: { gems: 1.5 }, spawnCost: { worker: 0.8 }, maintenanceCost: { farm: 0.8 } },
+      combatMultipliers: { damage: { slashing: 1.2 }, armor: { slashing: 1.5 }, attackCost: { swordsman: 1.2 }, damageVs: { horseman: 1.2 }, terrain: { Desert: 1.2 } },
+      movementCostMultiplier: { Desert: 0.5 },
+      scoreMultiplier: { economic: 1.1 },
+      barbarianAggressionMultiplier: 0.8,
+    },
+  },
+  { name: 'Anselm', attributes: { barbarianAggressionMultiplier: 0.8 } },
+];
+
+function mockGameState(leaders = LEADERS) {
+  return {
+    manifestData: { leaders, entities: {}, naturalResources: [] },
+    entities: [],
+    hexGrid: null,
+    currentRound: 1,
+    random: Math.random,
+    players: [],
+    isVisibleToHuman: () => false,
+  };
+}
+
+function aiPlayer(name, gs, controller = { url: 'test://meera' }) {
+  return new Player(1, name, gs, 'red', {}, '', controller);
+}
+function humanPlayer(name, gs) {
+  return new Player(2, name, gs, 'blue', {}, '', null);
+}
+
+// --- Player.attributes ------------------------------------------------------
+
+test('human player gets no twists even when named after a leader', () => {
+  const gs = mockGameState();
+  const p = humanPlayer('Meera', gs);
+  assert(Object.keys(p.attributes).length === 0, 'human should have empty attributes');
+});
+
+test('AI player resolves its leader attributes by name', () => {
+  const gs = mockGameState();
+  const p = aiPlayer('Meera', gs);
+  assert(p.attributes.scoreMultiplier?.economic === 1.1, 'Meera economic score multiplier');
+  assert(p.attributes.economyMultipliers?.income?.gems === 1.5, 'Meera gems income');
+});
+
+test('AI player with an unmatched name gets no twists', () => {
+  const gs = mockGameState();
+  const p = aiPlayer('Nobody', gs);
+  assert(Object.keys(p.attributes).length === 0, 'unmatched AI should have empty attributes');
+});
+
+test('AI player with no leaders in the manifest gets no twists', () => {
+  const gs = mockGameState([]);
+  const p = aiPlayer('Meera', gs);
+  assert(Object.keys(p.attributes).length === 0, 'missing leaders should give empty attributes');
+});
+
+// --- score ------------------------------------------------------------------
+
+test('recalculateScore applies the economic score multiplier (Meera 1.1)', () => {
+  const gs = mockGameState();
+  const p = aiPlayer('Meera', gs);
+  // One owned entity with score 10/10; 8 explored/visible cells so the
+  // geometric mean is non-zero (exploration = round((8*8)^(1/3)) = 4).
+  gs.entities.push({ owner: p, state: { score: { military: 10, economic: 10 } } });
+  const cells = ['0,0', '1,0', '0,1', '1,1', '2,0', '0,2', '2,2', '1,2'];
+  p.visibleCells = new Set(cells);
+  p.exploredCells = new Set(cells);
+  p.recalculateScore();
+  assertClose(p.score.military, 10, 'military unchanged');
+  assertClose(p.score.economic, 11, 'economic x1.1');
+  assertClose(p.score.exploration, 4, 'exploration unchanged');
+  // total = round((10 * 11 * 4)^(1/3)) = round(7.59) = 8
+  assert(p.score.total === 8, `total should be 8, got ${p.score.total}`);
+});
+
+test('recalculateScore without a multiplier leaves scores unchanged', () => {
+  const gs = mockGameState();
+  const p = humanPlayer('Human', gs);
+  gs.entities.push({ owner: p, state: { score: { military: 10, economic: 10 } } });
+  const cells = ['0,0', '1,0', '0,1', '1,1', '2,0', '0,2', '2,2', '1,2'];
+  p.visibleCells = new Set(cells);
+  p.exploredCells = new Set(cells);
+  p.recalculateScore();
+  assertClose(p.score.economic, 10, 'economic unchanged for human');
+  assert(p.score.total === 7, `total should be 7, got ${p.score.total}`);
+});
+
+// --- entity economy ---------------------------------------------------------
+
+function makeEntity(name, data, owner, gs) {
+  const cell = { q: 0, r: 0, terrain: { name: 'Grasslands', movementCost: 1, height: 1 } };
+  return new Entity({ name, ...data }, owner, gs, cell);
+}
+
+test('yields apply the income multiplier per resource', () => {
+  const gs = mockGameState();
+  const p = aiPlayer('Meera', gs);
+  const e = makeEntity('mine', { yields: { gems: 2, iron: 4 } }, p, gs);
+  assertClose(e.yields.gems, 3, 'gems 2 x 1.5');
+  assertClose(e.yields.iron, 4, 'iron unchanged (no multiplier)');
+});
+
+test('getCostToMaintain applies the maintenance multiplier per entity', () => {
+  const gs = mockGameState();
+  const p = aiPlayer('Meera', gs);
+  const e = makeEntity('farm', { maintenance: { food: 5, gold: 2 } }, p, gs);
+  const cost = e.getCostToMaintain();
+  assertClose(cost.food, 4, 'farm food 5 x 0.8');
+  assertClose(cost.gold, 1.6, 'farm gold 2 x 0.8');
+});
+
+test('getCostToSpawn applies the spawn multiplier per entity', () => {
+  const gs = mockGameState();
+  const p = aiPlayer('Meera', gs);
+  const e = makeEntity('worker', { spawnCost: { food: 10, wood: 4 } }, p, gs);
+  const cost = e.getCostToSpawn();
+  assertClose(cost.food, 8, 'worker food 10 x 0.8');
+  assertClose(cost.wood, 3.2, 'worker wood 4 x 0.8');
+});
+
+test('getCostToMaintain without a multiplier is unchanged', () => {
+  const gs = mockGameState();
+  const p = humanPlayer('Human', gs);
+  const e = makeEntity('farm', { maintenance: { food: 5 } }, p, gs);
+  assertClose(e.getCostToMaintain().food, 5, 'human farm maintenance unchanged');
+});
+
+// --- movement ---------------------------------------------------------------
+
+test('getMovementCost applies the movement multiplier per terrain', () => {
+  const gs = mockGameState();
+  const p = aiPlayer('Meera', gs);
+  const e = makeEntity('scout', { movement: { terrainCostScale: { Desert: 2 } } }, p, gs);
+  const desert = { name: 'Desert', movementCost: 1 };
+  const grass = { name: 'Grasslands', movementCost: 1 };
+  assertClose(e.getMovementCost(desert), 1, 'Desert 1 x 2 x 0.5');
+  assertClose(e.getMovementCost(grass), 1, 'Grasslands 1 x 1 x 1');
+});
+
+test('getMovementCost for an ownerless entity ignores the multiplier', () => {
+  const gs = mockGameState();
+  const e = makeEntity('barbarian', { movement: { terrainCostScale: { Desert: 2 } } }, null, gs);
+  const desert = { name: 'Desert', movementCost: 1 };
+  assertClose(e.getMovementCost(desert), 2, 'barbarian Desert 1 x 2 x 1');
+});
+
+// --- combat: armor + barbarian decision clear -------------------------------
+
+test('receiveDamage scales armor by the defender multiplier and terrain', () => {
+  const gs = mockGameState();
+  const p = aiPlayer('Meera', gs);
+  const e = makeEntity('swordsman', { armor: { slashing: 2 }, damage: { value: 5, type: 'slashing' } }, p, gs);
+  // Cell terrain is Grasslands (no terrain multiplier); armor slashing 1.5.
+  // 10 slashing damage / (2 x 1.5) = 3.3 (rounded to 1dp).
+  e.receiveDamage({ value: 10, type: 'slashing' });
+  assertClose(e.health, 100 - 3.3, 'health after armor-scaled damage');
+});
+
+test('receiveDamage without a multiplier divides by base armor only', () => {
+  const gs = mockGameState();
+  const p = humanPlayer('Human', gs);
+  const e = makeEntity('swordsman', { armor: { slashing: 2 } }, p, gs);
+  e.receiveDamage({ value: 10, type: 'slashing' });
+  assertClose(e.health, 95, 'health after base armor damage');
+});
+
+test('receiveDamage clears a barbarian decision memory', () => {
+  const gs = mockGameState();
+  const e = makeEntity('barbarian', { armor: {} }, null, gs);
+  e.state.barbarianDecisions = { someEntity: 'ignore' };
+  e.receiveDamage({ value: 5, type: 'blunt' });
+  assert(Object.keys(e.state.barbarianDecisions).length === 0, 'decisions cleared after damage');
+});
+
+test('receiveDamage with zero effective damage keeps the decisions', () => {
+  const gs = mockGameState();
+  const e = makeEntity('barbarian', { armor: {} }, null, gs);
+  e.state.barbarianDecisions = { someEntity: 'ignore' };
+  e.receiveDamage({ value: 0, type: 'blunt' });
+  assert(Object.keys(e.state.barbarianDecisions).length === 1, 'decisions kept when undamaged');
+});
+
+// --- barbarian target probability -------------------------------------------
+
+test('barbarianTargetProbability: leader at max score is P = aggression', () => {
+  const gs = mockGameState();
+  const leader = aiPlayer('Meera', gs);
+  const other = aiPlayer('Anselm', gs);
+  leader.score = { total: 100, military: 0, economic: 0, exploration: 0 };
+  other.score = { total: 50, military: 0, economic: 0, exploration: 0 };
+  gs.players = [leader, other];
+  // Meera's own aggression multiplier is 0.8 (she is the owner here).
+  const p = barbarianTargetProbability({ aggression: 1 }, gs, leader);
+  assertClose(p, 0.8, 'P = 1 x 0.8 x (100/100)^3');
+});
+
+test('barbarianTargetProbability: trailing player is cubed down', () => {
+  const gs = mockGameState();
+  const leader = aiPlayer('Meera', gs);
+  const other = aiPlayer('Anselm', gs);
+  leader.score = { total: 100, military: 0, economic: 0, exploration: 0 };
+  other.score = { total: 50, military: 0, economic: 0, exploration: 0 };
+  gs.players = [leader, other];
+  // Anselm's multiplier is 0.8 too; (50/100)^3 = 0.125 -> P = 0.1.
+  const p = barbarianTargetProbability({ aggression: 1 }, gs, other);
+  assertClose(p, 0.1, 'P = 1 x 0.8 x 0.125');
+});
+
+test('barbarianTargetProbability: all scores zero guards to ratio 1', () => {
+  const gs = mockGameState();
+  const leader = aiPlayer('Meera', gs);
+  const other = aiPlayer('Anselm', gs);
+  leader.score = { total: 0, military: 0, economic: 0, exploration: 0 };
+  other.score = { total: 0, military: 0, economic: 0, exploration: 0 };
+  gs.players = [leader, other];
+  const p = barbarianTargetProbability({ aggression: 1 }, gs, leader);
+  assertClose(p, 0.8, 'P = 1 x 0.8 x 1 (guard)');
+});
+
+test('barbarianTargetProbability: defaults to aggression 1 and multiplier 1', () => {
+  const gs = mockGameState();
+  const leader = aiPlayer('Meera', gs);
+  leader.score = { total: 100, military: 0, economic: 0, exploration: 0 };
+  gs.players = [leader];
+  const p = barbarianTargetProbability({}, gs, null);
+  assertClose(p, 0, 'ownerless target with max > 0 has score 0 -> P = 0');
+  const p2 = barbarianTargetProbability({ aggression: 2 }, gs, leader);
+  assertClose(p2, 1, 'P clamps to 1 (2 x 0.8 = 1.6)');
+});
+
+// --- real leaders.json ------------------------------------------------------
+
+test('real leaders.json: Meera has scoreMultiplier.economic 1.1', () => {
+  const leaders = JSON.parse(readFileSync(new URL('../definitions/leaders.json', import.meta.url), 'utf-8'));
+  const meera = leaders.find(l => l.name === 'Meera');
+  assert(meera, 'Meera exists in leaders.json');
+  assert(meera.attributes?.scoreMultiplier?.economic === 1.1, 'Meera economic score multiplier is 1.1');
+});
+
+console.log(`\nleaderAttributes: ${passed} passed, ${failed} failed`);
+if (failed > 0) process.exitCode = 1;

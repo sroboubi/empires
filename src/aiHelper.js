@@ -548,18 +548,21 @@ export class AiHelper {
             const costFunc = sourceEntity.getMovementCost.bind(sourceEntity);
             // Dry-run attack cost from a candidate cell (same formula as
             // entity.js Attack canDo, without moving there first).
+            // Leader twist (Phase 25): the attacker's attackCost multiplier
+            // for its own entity type scales the cost, matching canDo.
+            const attackCostMult = sourceEntity.owner?.attributes?.combatMultipliers?.attackCost?.[sourceEntity.name] ?? 1;
             const attackCostFrom = (cell) => {
                 const scale = sourceEntity.attackCostScale ?? 1;
                 const exh = sourceEntity.state?.battleExhaustion ?? 1;
                 if (sourceEntity.range && typeof sourceEntity.range === 'object') {
-                    return Math.ceil(scale * exh * this.distance(cell, targetCell));
+                    return Math.ceil(scale * exh * this.distance(cell, targetCell) * attackCostMult);
                 }
                 const pathRes = this.movementCostTo(cell, targetCell, costFunc, { allowDetours: true });
                 // A best-effort path's cost is the cost to the closest
                 // reachable cell, NOT to the target — an unreachable target
                 // must look unaffordable, not cheap.
                 if (!pathRes || !pathRes.reached) return Infinity;
-                return Math.ceil(scale * exh * pathRes.cost);
+                return Math.ceil(scale * exh * pathRes.cost * attackCostMult);
             };
 
             if (isCurrentPossible && currentMult > 1.0) {

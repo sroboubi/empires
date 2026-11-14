@@ -53,6 +53,27 @@ export function findOppositeBorderCell(fromCell, helper, entity = null) {
 }
 
 /**
+ * Target probability for a barbarian encountering an owner entity (Phase 25).
+ * P = settings.barbarians.aggression * owner.barbarianAggressionMultiplier
+ *     * (ownerTotalScore / maxTotalScore)^3, clamped to [0, 1].
+ * Guard: when maxTotalScore is 0 (all players tied at zero), the ratio is
+ * treated as 1 — every owner is a co-leader — so P = aggression * multiplier.
+ * @param {Object} [config] - Barbarian settings (settings.barbarians)
+ * @param {Object} gameState
+ * @param {Player|null} [owner] - Owning player of the encountered entity
+ * @returns {number} probability in [0, 1]
+ */
+export function barbarianTargetProbability(config, gameState, owner) {
+  const aggression = config?.aggression ?? 1;
+  const ownerMult = owner?.attributes?.barbarianAggressionMultiplier ?? 1;
+  const players = gameState?.players || [];
+  const maxTotalScore = players.reduce((m, p) => Math.max(m, p.score?.total ?? 0), 0);
+  const ownerTotalScore = owner?.score?.total ?? 0;
+  const ratio = maxTotalScore > 0 ? ownerTotalScore / maxTotalScore : 1;
+  return Math.min(1, Math.max(0, aggression * ownerMult * Math.pow(ratio, 3)));
+}
+
+/**
  * Manages barbarian lifecycle, spawning, combat, and movement dynamically
  * based on the provided settings configuration.
  *
@@ -179,6 +200,25 @@ export async function manageBarbarians(config, helper) {
       // stand off forever. Fall through to marching if none is reachable.
       let attacked = false;
       for (const targetEnemy of visibleEnemies) {
+        // Barbarian encounter mechanic (Phase 25): on first encounter with
+        // an owner entity, roll whether to target or ignore it; the decision
+        // is remembered on the barbarian (state.barbarianDecisions, keyed by
+        // entity ID) so an ignored entity is never targeted again. Taking
+        // damage clears the memory (Entity.receiveDamage).
+        if (!entity.state.barbarianDecisions) entity.state.barbarianDecisions = {};
+        const decision = entity.state.barbarianDecisions[targetEnemy.id];
+        if (decision === 'ignore') {
+          console.debug(`[Barbarians] ${entity.name} ignoring ${targetEnemy.name} (${targetEnemy.id}) — decided earlier.`);
+          continue;
+        }
+        if (decision !== 'target') {
+          const p = barbarianTargetProbability(config, gameState, targetEnemy.owner);
+          const roll = gameState.random();
+          const verdict = roll < p ? 'target' : 'ignore';
+          entity.state.barbarianDecisions[targetEnemy.id] = verdict;
+          console.debug(`[Barbarians] ${entity.name} encounters ${targetEnemy.name} (Owner: ${targetEnemy.owner?.name || 'neutral'}) at (${targetEnemy.q}, ${targetEnemy.r}): P(target)=${p.toFixed(3)}, roll=${roll.toFixed(3)} -> ${verdict}.`);
+          if (verdict === 'ignore') continue;
+        }
         console.debug(`[Barbarians] ${entity.name} at (${entity.q}, ${entity.r}) attacking ${targetEnemy.name} (Owner: ${targetEnemy.owner?.name || 'neutral'}) at (${targetEnemy.q}, ${targetEnemy.r})`);
         const res = helper.attack(gameState, entity, targetEnemy, Infinity);
         if (res && res.ordersUsed > 0) {

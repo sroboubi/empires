@@ -86,6 +86,23 @@ export class Player {
   }
 
   /**
+   * The leader's twist attributes for this player (Phase 25), resolved
+   * from definitions/leaders.json in the game manifest by the player's
+   * name. Human players get no twists (default settings), even if their
+   * free-text name happens to match a leader. AI players pick a leader
+   * name at setup, so this resolves to their leader's attributes.
+   * All multipliers default to 1 when absent.
+   * @returns {Object} attributes object (possibly empty)
+   */
+  get attributes() {
+    if (!this.isAI) return {};
+    const leaders = this.gameState?.manifestData?.leaders;
+    if (!Array.isArray(leaders)) return {};
+    const leader = leaders.find(l => l.name === this.name);
+    return leader?.attributes || {};
+  }
+
+  /**
    * Adds a history entry for a specific round.
    * Entries are inserted at the beginning for reverse chronological order (newest first).
    * @param {number} round - Round number
@@ -168,6 +185,12 @@ export class Player {
     }
 
     this.score.exploration = Math.round(Math.pow(this.visibleCells.size * this.exploredCells.size, 1 / 3));
+    // Leader score multipliers (Phase 25 twists): apply per category, then
+    // the total is the geometric mean of the multiplied categories.
+    const sm = this.attributes?.scoreMultiplier || {};
+    this.score.military *= (sm.military ?? 1);
+    this.score.economic *= (sm.economic ?? 1);
+    this.score.exploration *= (sm.exploration ?? 1);
     this.score.total = Math.round(Math.pow(this.score.military * this.score.economic * this.score.exploration, 1 / 3));
   }
 

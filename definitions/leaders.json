@@ -105,6 +105,9 @@
                 "spawnCost": {
                     "worker": 0.8
                 }
+            },
+            "scoreMultiplier": {
+                "economic": 1.1
             }
         }
     },

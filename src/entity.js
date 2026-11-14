@@ -207,18 +207,34 @@ export default class Entity {
 
   /**
    * Returns object e.g. {food: 2, wood: 3} with maintenance cost deducted on each step().
+   * Leader twist (Phase 25): the owner's maintenanceCost multiplier for
+   * this entity type scales each resource (default 1).
    * @returns {Object}
    */
   getCostToMaintain() {
-    return { ...(this.state.maintenance || {}) };
+    const base = { ...(this.state.maintenance || {}) };
+    const mult = this.owner?.attributes?.economyMultipliers?.maintenanceCost?.[this.name] ?? 1;
+    if (mult === 1) return base;
+    const adjusted = {};
+    for (const [res, amt] of Object.entries(base)) adjusted[res] = amt * mult;
+    return adjusted;
   }
 
   /**
    * Returns object e.g. {food: 20, gold: 10} with cost to create the entity.
+   * Leader twist (Phase 25): the owner's spawnCost multiplier for this
+   * entity type scales each resource (default 1). This is the cost the
+   * owner actually pays; the Build action applies the same multiplier to
+   * the target's manifest cost.
    * @returns {Object}
    */
   getCostToSpawn() {
-    return { ...(this.state.spawnCost || {}) };
+    const base = { ...(this.state.spawnCost || {}) };
+    const mult = this.owner?.attributes?.economyMultipliers?.spawnCost?.[this.name] ?? 1;
+    if (mult === 1) return base;
+    const adjusted = {};
+    for (const [res, amt] of Object.entries(base)) adjusted[res] = amt * mult;
+    return adjusted;
   }
 
   /**
@@ -234,7 +250,17 @@ export default class Entity {
   }
 
   get yields() {
-    return applyResourceYieldBonus(this, this.baseYields, this.gameState);
+    const base = applyResourceYieldBonus(this, this.baseYields, this.gameState);
+    // Leader twist (Phase 25): the owner's income multiplier per resource
+    // scales the final yield (after the natural-resource bonus).
+    const income = this.owner?.attributes?.economyMultipliers?.income;
+    if (!income) return base;
+    const adjusted = { ...base };
+    for (const res of Object.keys(adjusted)) {
+      const mult = income[res] ?? 1;
+      if (mult !== 1) adjusted[res] = adjusted[res] * mult;
+    }
+    return adjusted;
   }
 
   /**
@@ -334,7 +360,10 @@ export default class Entity {
     // A null scale is a JSON-corrupted Infinity (see constructor): fail
     // closed — impassable, never free (null would multiply to a cost of 0).
     if (scale === null) scale = Infinity;
-    return (terrain.movementCost || 1) * scale;
+    // Leader twist (Phase 25): the owner's movementCostMultiplier for this
+    // terrain scales the cost. Ownerless entities (barbarians) get 1.
+    const moveMult = this.owner?.attributes?.movementCostMultiplier?.[terrain.name] ?? 1;
+    return (terrain.movementCost || 1) * scale * moveMult;
   }
 
   /**
@@ -470,13 +499,26 @@ export default class Entity {
       rawValue += this.health * damage.lifeFraction;
     }
 
-    const armor = this.armor[damageType] || 1;
+    // Leader twists (Phase 25): the defender's armor multiplier for this
+    // damage type, and the terrain multiplier for the terrain the defender
+    // stands on, both scale the armor that divides the damage.
+    const combat = this.owner?.attributes?.combatMultipliers || {};
+    const armorMult = combat.armor?.[damageType] ?? 1;
+    const terrainMult = combat.terrain?.[this.cell?.terrain?.name] ?? 1;
+    const armor = (this.armor[damageType] || 1) * armorMult * terrainMult;
     let effectiveDamage = rawValue / armor;
 
     // Round to 1 decimal place for clean stats
     effectiveDamage = Math.round(effectiveDamage * 10) / 10;
 
     this.state.health -= effectiveDamage;
+
+    // Barbarian encounter mechanic (Phase 25): a barbarian that is actually
+    // damaged forgets its target/ignore decisions and re-evaluates
+    // everything next time it encounters an owner entity.
+    if (effectiveDamage > 0 && this.state.barbarianDecisions) {
+      this.state.barbarianDecisions = {};
+    }
 
     const wasDestroyed = this.state.health <= 0;
 
@@ -757,6 +799,9 @@ export default class Entity {
           let cost = 0;
 
           // Ranged vs Melee evaluation
+          // Leader twist (Phase 25): the attacker's attackCost multiplier
+          // for its own entity type scales the AP cost.
+          const attackCostMult = this.owner?.attributes?.combatMultipliers?.attackCost?.[this.name] ?? 1;
           if (this.range && typeof this.range === 'object') {
             const minD = this.range.minCells || 1;
             const maxD = this.range.maxCells || 1;
@@ -771,7 +816,7 @@ export default class Entity {
                 return { possible: false, reason: "Ranged trajectory blocked by terrain height." };
               }
             }
-            cost = Math.ceil(this.attackCostScale * this.state.battleExhaustion * dist);
+            cost = Math.ceil(this.attackCostScale * this.state.battleExhaustion * dist * attackCostMult);
           } else {
             // Melee attack
             const pathRes = this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.movementCostTo(this.cell, targetCell, this.getMovementCost.bind(this)) : null;
@@ -780,7 +825,7 @@ export default class Entity {
             } else if (pathRes.path.length > 2) {
               return { possible: false, reason: "Can only melee attack adjacent targets." };
             }
-            cost = Math.ceil(this.attackCostScale * this.state.battleExhaustion * pathRes.cost);
+            cost = Math.ceil(this.attackCostScale * this.state.battleExhaustion * pathRes.cost * attackCostMult);
           }
 
           const affordability = this.checkActionAffordability(cost);
@@ -789,7 +834,15 @@ export default class Entity {
           }
 
           const multiplier = calculateAttackMultiplier(this.gameState, this.cell, this.damage.elevationAdjustment, entity);
-          const rawDamage = this.damage.value * multiplier.total;
+          // Leader twists (Phase 25): the attacker's damage multiplier for
+          // this damage type, the damageVs bonus against the target's entity
+          // type, and the terrain multiplier for the terrain the attacker
+          // stands on, all scale the raw damage.
+          const combat = this.owner?.attributes?.combatMultipliers || {};
+          const dmgMult = combat.damage?.[this.damage.type] ?? 1;
+          const vsMult = combat.damageVs?.[entity.name] ?? 1;
+          const atkTerrainMult = combat.terrain?.[this.cell?.terrain?.name] ?? 1;
+          const rawDamage = this.damage.value * multiplier.total * dmgMult * vsMult * atkTerrainMult;
           const lifeFractionStr = this.damage.lifeFraction ? ` + ${this.damage.lifeFraction} of current health` : '';
 
           return {
@@ -978,7 +1031,12 @@ export default class Entity {
           const affordability = this.checkActionAffordability(apCost);
           if (!affordability.possible) return affordability;
 
-          const cost = (meta && meta.spawnCost) || {};
+          // Leader twist (Phase 25): the owner's spawnCost multiplier for
+          // the entity being built scales each resource.
+          const baseCost = (meta && meta.spawnCost) || {};
+          const spawnMult = this.owner?.attributes?.economyMultipliers?.spawnCost?.[buildable] ?? 1;
+          const cost = {};
+          for (const [res, amt] of Object.entries(baseCost)) cost[res] = amt * spawnMult;
           const costStr = Object.entries(cost).map(([k, v]) => `${v} ${k}`).join(', ');
           if (this.owner && !this.owner.hasResources(cost)) {
             return { possible: false, reason: `Insufficient resources to build ${targetName} (${costStr} required).` };
