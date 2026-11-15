@@ -12,6 +12,36 @@ import { DEFAULT_PROMPT_URLS } from './promptUrls.js';
 /** Minimum rounds between AI-initiated trade proposals by the same manager. */
 const TRADE_PROPOSAL_COOLDOWN_ROUNDS = 4;
 
+/**
+ * Emotes the LLM may express in diplomatic chat (Phase 25). These are the
+ * portrait filename stems under assets/leaders/<Name>/ — the approved
+ * subset of the 21 portraits. Excluded: blushing, stealthy, drunk, dying,
+ * unconscious and wounded — they don't fit a diplomatic exchange.
+ * 'neutral' is the default/fallback when the LLM omits the tag or names
+ * an emote outside this list.
+ */
+export const APPROVED_CHAT_EMOTES = [
+    'neutral', 'joy', 'anger', 'sadness', 'surprise', 'suspicious', 'smug',
+    'thinking', 'trust', 'fear', 'confused', 'anticipation', 'concentrating',
+    'disgust', 'eye_roll',
+];
+
+/**
+ * Extracts the [EMOTE: <name>] tag from an LLM chat reply (same convention
+ * as [END_CHAT]). Normalizes the name to the portrait filename stem
+ * (lowercase, spaces to underscores) and validates it against
+ * APPROVED_CHAT_EMOTES; anything missing or outside the list falls back
+ * to 'neutral'. Returns the emote and the text with the tag stripped.
+ * @param {string} rawText
+ * @returns {{emote: string, text: string}}
+ */
+export function extractChatEmote(rawText) {
+    const match = /\[EMOTE:\s*([^\]]+)\]/i.exec(rawText);
+    const raw = match ? match[1].trim().toLowerCase().replace(/\s+/g, '_') : '';
+    const emote = APPROVED_CHAT_EMOTES.includes(raw) ? raw : 'neutral';
+    return { emote, text: rawText.replace(/\[EMOTE:\s*[^\]]+\]/gi, '').trim() };
+}
+
 export class LlmBaseManager extends BaseManager {
     constructor(player, helper) {
         super(player, helper);
@@ -142,7 +172,10 @@ export class LlmBaseManager extends BaseManager {
             .replace('{OTHER_TOTAL}', otherScore.total)
             .replace('{MY_RESOURCES}', Object.entries(this.player.resources || {}).map(([k, v]) => `${k} ${Math.round(v)}`).join(', ') || 'none')
             .replace('{MY_UNITS}', summarizeUnitCounts(this.player.getEntities(this.gameState)))
-            .replace('{OTHER_UNITS}', summarizeUnitCounts((this.gameState.entities || []).filter(e => e.owner?.id === otherPlayer?.id && this.player.isVisible?.(e.q, e.r))));
+            .replace('{OTHER_UNITS}', summarizeUnitCounts((this.gameState.entities || []).filter(e => e.owner?.id === otherPlayer?.id && this.player.isVisible?.(e.q, e.r))))
+            // Phase 25: the emote list the LLM may choose from — one source
+            // of truth with APPROVED_CHAT_EMOTES (the parser validates it).
+            .replace('{EMOTE_LIST}', APPROVED_CHAT_EMOTES.join(', '));
     }
 
     /**
@@ -197,7 +230,8 @@ export class LlmBaseManager extends BaseManager {
         if (!rawResponse) {
             return {
                 content: "... (The leader deliberates silently)",
-                ended: false
+                ended: false,
+                emote: 'neutral'
             };
         }
 
@@ -206,11 +240,15 @@ export class LlmBaseManager extends BaseManager {
         // old code detected '[END_CHAT]' exactly but stripped /gi, so a
         // lowercase [end_chat] was stripped without ending the chat.
         const ended = /\[END_CHAT\]/i.test(rawText);
-        const cleanContent = rawText.replace(/\[END_CHAT\]/gi, '').trim();
+        // Phase 25: the [EMOTE: <name>] tag (same convention) is parsed
+        // the same way — stripped from the text, returned for the portrait.
+        const { emote, text: noEmote } = extractChatEmote(rawText);
+        const cleanContent = noEmote.replace(/\[END_CHAT\]/gi, '').trim();
 
         return {
             content: cleanContent || "... (no further comment)",
-            ended: ended
+            ended: ended,
+            emote: emote
         };
     }
 

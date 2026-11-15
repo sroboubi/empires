@@ -18,3 +18,4 @@ Their Visible Units: {OTHER_UNITS}.
 3. Be strategic, cunning, and concise (1 to 3 short paragraphs).
 4. TERMINATION RULE: When you feel the conversation has reached a natural conclusion, agreement, impasse, or you have nothing further to negotiate, append "[END_CHAT]" at the very end of your response.
 5. Agreements are not enforced by the game: any player may break a ceasefire, alliance, or trade deal at any time. The only consequence is reputational — other players remember broken agreements and may treat you accordingly.
+6. EXPRESSION RULE: Append "[EMOTE: <name>]" at the very end of every response (after "[END_CHAT]" if you also end the chat), choosing one emotion from this list: {EMOTE_LIST}. Pick the emotion that matches the tone of your message.

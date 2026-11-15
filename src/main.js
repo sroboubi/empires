@@ -2266,10 +2266,46 @@ function handleEndChat() {
   updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
 }
 
+/**
+ * Phase 25: the portrait URL for a leader's chat emote. Returns null when
+ * the player is not one of the leaders in leaders.json (generic AI names
+ * have no portraits on disk). The emote is already a filename stem
+ * ('joy', 'eye_roll'); anything odd falls back to 'neutral'.
+ */
+function leaderPortraitUrl(playerName, emote) {
+  if (!Array.isArray(leadersJson) || !leadersJson.some(l => l.name === playerName)) return null;
+  const stem = (emote || 'neutral').toLowerCase().replace(/\s+/g, '_') || 'neutral';
+  return `assets/leaders/${playerName}/${stem}.png`;
+}
+
+/**
+ * Phase 25: the chat modal header shows the AI leader's latest emote
+ * portrait (neutral until they have spoken). Hidden for non-leader AIs.
+ */
+function updateChatModalPortrait() {
+  const img = document.getElementById('chat-modal-portrait');
+  if (!img || !currentChatSession.aiPlayer) return;
+  const history = gameState.getChatHistory(currentChatSession.humanPlayer, currentChatSession.aiPlayer);
+  let emote = 'neutral';
+  if (history) {
+    for (let i = history.length - 1; i >= 0; i--) {
+      const m = history[i];
+      const isHuman = m.senderId != null
+        ? m.senderId === currentChatSession.humanPlayer.id
+        : m.sender === currentChatSession.humanPlayer.name;
+      if (!isHuman) { emote = m.emote || 'neutral'; break; }
+    }
+  }
+  const url = leaderPortraitUrl(currentChatSession.aiPlayer.name, emote);
+  if (url) { img.src = url; img.style.display = ''; }
+  else { img.style.display = 'none'; }
+}
+
 function renderChatMessages() {
   const container = document.getElementById('chat-messages-container');
   if (!container || !currentChatSession.humanPlayer || !currentChatSession.aiPlayer) return;
 
+  updateChatModalPortrait();
   const history = gameState.getChatHistory(currentChatSession.humanPlayer, currentChatSession.aiPlayer);
   if (!history || history.length === 0) {
     container.innerHTML = `
@@ -2292,7 +2328,7 @@ function renderChatMessages() {
     const bubbleClass = isHuman ? 'chat-msg chat-msg-sent' : 'chat-msg chat-msg-received';
     const borderStyle = isHuman ? '' : `border-left: 3px solid ${currentChatSession.aiPlayer.color};`;
 
-    return `
+    const bubble = `
       <div class="${bubbleClass}" style="${borderStyle}">
         <div class="chat-msg-header">
           <div style="display: flex; align-items: center; gap: 6px;">
@@ -2302,6 +2338,18 @@ function renderChatMessages() {
           <span class="chat-msg-time">${timeStr}</span>
         </div>
         <div class="chat-msg-body">${escapeHTML(msg.content)}</div>
+      </div>
+    `;
+    // Phase 25: the AI leader's emote portrait sits beside their message.
+    // Human messages get no portrait; a message without an emote (system
+    // lines, coded AIs, old saves) shows the neutral portrait.
+    if (isHuman) return bubble;
+    const portrait = leaderPortraitUrl(currentChatSession.aiPlayer.name, msg.emote || 'neutral');
+    if (!portrait) return bubble;
+    return `
+      <div style="display: flex; gap: 10px; align-items: flex-start;">
+        <img src="${portrait}" alt="" style="width: 48px; height: 48px; border-radius: 8px; object-fit: cover; flex-shrink: 0;" onerror="this.style.display='none'" />
+        <div style="flex: 1; min-width: 0;">${bubble}</div>
       </div>
     `;
   }).join('');
@@ -2524,8 +2572,10 @@ async function sendChatMessage() {
     if (mgr) {
       const reply = await mgr.generateChatReply(humanPlayer);
 
-      // Add AI message to gameState
-      gameState.addChatMessage(aiPlayer, humanPlayer, reply.content, reply.ended);
+      // Add AI message to gameState (Phase 25: carry the reply's emote
+      // so the portrait renders beside it; coded AIs return no emote
+      // and render with the neutral portrait).
+      gameState.addChatMessage(aiPlayer, humanPlayer, reply.content, reply.ended, reply.emote);
       // L6: the reply belongs in the history even if the modal closed
       // while it was pending — but nothing below may touch the UI or the
       // session if this is no longer the live one.
