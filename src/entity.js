@@ -513,13 +513,6 @@ export default class Entity {
 
     this.state.health -= effectiveDamage;
 
-    // Barbarian encounter mechanic (Phase 25): a barbarian that is actually
-    // damaged forgets its target/ignore decisions and re-evaluates
-    // everything next time it encounters an owner entity.
-    if (effectiveDamage > 0 && this.state.barbarianDecisions) {
-      this.state.barbarianDecisions = {};
-    }
-
     const wasDestroyed = this.state.health <= 0;
 
     // Add history entry for damage received

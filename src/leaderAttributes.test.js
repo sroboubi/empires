@@ -11,7 +11,7 @@
 import { readFileSync } from 'fs';
 import Entity from './entity.js';
 import { Player } from './player.js';
-import { barbarianTargetProbability } from './barbarians/manager.js';
+import { barbarianTargetProbability, clearDecisionsIfDamaged } from './barbarians/manager.js';
 
 let passed = 0, failed = 0;
 function test(name, fn) {
@@ -203,20 +203,45 @@ test('receiveDamage without a multiplier divides by base armor only', () => {
   assertClose(e.health, 95, 'health after base armor damage');
 });
 
-test('receiveDamage clears a barbarian decision memory', () => {
+// --- barbarian decision memory (manager owns it, not Entity) -------------
+
+test('clearDecisionsIfDamaged clears decisions when health dropped', () => {
   const gs = mockGameState();
   const e = makeEntity('barbarian', { armor: {} }, null, gs);
-  e.state.barbarianDecisions = { someEntity: 'ignore' };
-  e.receiveDamage({ value: 5, type: 'blunt' });
+  e.state.previousHealth = 100;
+  e.state.barbarianDecisions = { someEntity: 'ignore', otherEntity: 'target' };
+  e.health = 80;
+  clearDecisionsIfDamaged(e);
   assert(Object.keys(e.state.barbarianDecisions).length === 0, 'decisions cleared after damage');
 });
 
-test('receiveDamage with zero effective damage keeps the decisions', () => {
+test('clearDecisionsIfDamaged keeps decisions when health is unchanged', () => {
+  const gs = mockGameState();
+  const e = makeEntity('barbarian', { armor: {} }, null, gs);
+  e.state.previousHealth = 100;
+  e.state.barbarianDecisions = { someEntity: 'ignore' };
+  e.health = 100;
+  clearDecisionsIfDamaged(e);
+  assert(Object.keys(e.state.barbarianDecisions).length === 1, 'decisions kept when undamaged');
+});
+
+test('clearDecisionsIfDamaged keeps decisions when healed above previous', () => {
+  const gs = mockGameState();
+  const e = makeEntity('barbarian', { armor: {} }, null, gs);
+  e.state.previousHealth = 80;
+  e.state.barbarianDecisions = { someEntity: 'ignore' };
+  e.health = 90;
+  clearDecisionsIfDamaged(e);
+  assert(Object.keys(e.state.barbarianDecisions).length === 1, 'decisions kept when healed');
+});
+
+test('clearDecisionsIfDamaged is a no-op on the first turn (no previousHealth)', () => {
   const gs = mockGameState();
   const e = makeEntity('barbarian', { armor: {} }, null, gs);
   e.state.barbarianDecisions = { someEntity: 'ignore' };
-  e.receiveDamage({ value: 0, type: 'blunt' });
-  assert(Object.keys(e.state.barbarianDecisions).length === 1, 'decisions kept when undamaged');
+  e.health = 80;
+  clearDecisionsIfDamaged(e);
+  assert(Object.keys(e.state.barbarianDecisions).length === 1, 'decisions kept on first turn');
 });
 
 // --- barbarian target probability -------------------------------------------

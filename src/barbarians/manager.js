@@ -74,6 +74,20 @@ export function barbarianTargetProbability(config, gameState, owner) {
 }
 
 /**
+ * Barbarian encounter mechanic (Phase 25): if a barbarian lost health since
+ * the end of its last turn (state.previousHealth, recorded by
+ * manageBarbarians), it was damaged — forget its target/ignore decisions so
+ * it re-evaluates every encounter. Called at the start of the barbarian's
+ * turn, before step() (whose regen would otherwise mask the damage).
+ * @param {Object} entity - Barbarian entity
+ */
+export function clearDecisionsIfDamaged(entity) {
+  if (entity.state.previousHealth !== undefined && entity.health < entity.state.previousHealth) {
+    entity.state.barbarianDecisions = {};
+  }
+}
+
+/**
  * Manages barbarian lifecycle, spawning, combat, and movement dynamically
  * based on the provided settings configuration.
  *
@@ -169,6 +183,12 @@ export async function manageBarbarians(config, helper) {
   for (const entity of activeBarbarians) {
     if (entity.destroyed) continue;
 
+    // Barbarian encounter mechanic (Phase 25): if this barbarian lost health
+    // since the end of its last turn, it was damaged — forget its
+    // target/ignore decisions. Checked before step(), whose regen would
+    // otherwise mask the damage.
+    clearDecisionsIfDamaged(entity);
+
     // Reset AP and advance entity age
     entity.step(gameState);
 
@@ -204,7 +224,8 @@ export async function manageBarbarians(config, helper) {
         // an owner entity, roll whether to target or ignore it; the decision
         // is remembered on the barbarian (state.barbarianDecisions, keyed by
         // entity ID) so an ignored entity is never targeted again. Taking
-        // damage clears the memory (Entity.receiveDamage).
+        // damage clears the memory (clearDecisionsIfDamaged, at the start of
+        // the barbarian's next turn).
         if (!entity.state.barbarianDecisions) entity.state.barbarianDecisions = {};
         const decision = entity.state.barbarianDecisions[targetEnemy.id];
         if (decision === 'ignore') {
@@ -227,6 +248,9 @@ export async function manageBarbarians(config, helper) {
           break;
         }
       }
+      // End of this barbarian's turn: record its health so the next turn can
+      // tell whether it was damaged in the meantime.
+      entity.state.previousHealth = entity.health;
       if (attacked) continue;
     }
 
@@ -310,6 +334,10 @@ export async function manageBarbarians(config, helper) {
         }
       }
     }
+
+    // End of this barbarian's turn: record its health so the next turn can
+    // tell whether it was damaged in the meantime.
+    entity.state.previousHealth = entity.health;
   }
 
   // ensure entities are in the right place after all moves (e.g. in case SHOW_ALL is true)
