@@ -86,7 +86,14 @@ function mockGameState(leaders = LEADERS, entities = TEST_ENTITIES) {
 }
 
 function aiPlayer(name, gs, controller = { url: 'test://meera' }) {
-  return new Player(1, name, gs, 'red', {}, '', controller);
+  // Simulates setup (buildController): the leader's attributes ride on
+  // the controller, and the Player copies them at construction. The
+  // Player itself never looks a leader up by name — this helper is the
+  // only place a name is resolved, exactly as setup does it.
+  const leader = (gs.manifestData?.leaders || []).find(l => l.name === name);
+  const ctrl = { ...controller };
+  if (leader?.attributes) ctrl.attributes = { ...leader.attributes };
+  return new Player(1, name, gs, 'red', {}, '', ctrl);
 }
 function humanPlayer(name, gs) {
   return new Player(2, name, gs, 'blue', {}, '', null);

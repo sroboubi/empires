@@ -30,6 +30,11 @@ export class Player {
     this.gameState = gameState;
     this.description = description || '';
     this.controller = controller || null;
+    // Leader twist attributes (Phase 25): resolved once at setup and
+    // carried on the controller (buildController), so the Player owns a
+    // plain copy — no manifest lookup by name. Human players (no
+    // controller) and non-leader AIs get {}. Never mutated after this.
+    this.attributes = controller?.attributes ? { ...controller.attributes } : {};
     this.resources = { ...startingResources };
     this.startCoord = { q: 0, r: 0 };
     this.score = {
@@ -83,23 +88,6 @@ export class Player {
    */
   get isAI() {
     return !!this.controller;
-  }
-
-  /**
-   * The leader's twist attributes for this player (Phase 25), resolved
-   * from definitions/leaders.json in the game manifest by the player's
-   * name. Human players get no twists (default settings), even if their
-   * free-text name happens to match a leader. AI players pick a leader
-   * name at setup, so this resolves to their leader's attributes.
-   * All multipliers default to 1 when absent.
-   * @returns {Object} attributes object (possibly empty)
-   */
-  get attributes() {
-    if (!this.isAI) return {};
-    const leaders = this.gameState?.manifestData?.leaders;
-    if (!Array.isArray(leaders)) return {};
-    const leader = leaders.find(l => l.name === this.name);
-    return leader?.attributes || {};
   }
 
   /**
@@ -690,6 +678,7 @@ export class Player {
       color: this.color,
       description: this.description,
       controller: this.controller,
+      attributes: this.attributes,
       resources: this.resources,
       orders: this.orders,
       maxOrders: this.maxOrders,
@@ -718,6 +707,13 @@ export class Player {
       delete data.controller.config.apiKey;
     }
     const player = new Player(data.id, data.name, gameState, data.color, data.resources, data.description, data.controller, data.ordersConfig, isReplay);
+    // Leader twist attributes (Phase 25): they travel with the player in
+    // the save (see toJSON), so a loaded game keeps them without any
+    // re-resolution. The constructor already copied them from
+    // data.controller; this covers a save whose controller lacks them.
+    if (data.attributes) {
+      player.attributes = { ...data.attributes };
+    }
     player.maxOrders = data.maxOrders ?? 0;
     player.ordersPerTurn = data.ordersPerTurn ?? 0;
     player.orders = data.orders ?? 0;
