@@ -975,6 +975,21 @@ function handleStartGameClicked() {
     return;
   }
 
+  // Phase 25: player names must be unique (case-insensitive). A human
+  // sharing an AI leader's name would inherit that leader's portrait in
+  // chat and break sender identity. Use the same effective name as the
+  // settings below (trimmed, falling back to "Player N").
+  const seenNames = new Set();
+  for (let i = 0; i < setupPlayers.length; i++) {
+    const name = (setupPlayers[i].name || '').trim() || `Player ${i + 1}`;
+    const key = name.toLowerCase();
+    if (seenNames.has(key)) {
+      showToast(`Two players are named "${name}". Player names must be unique.`, true);
+      return;
+    }
+    seenNames.add(key);
+  }
+
   const startingResources = {};
   for (const [res, val] of Object.entries(defaultSettings?.initialization?.startingResources || {})) {
     const el = document.getElementById(`res-val-${res}`);
@@ -2266,10 +2281,54 @@ function handleEndChat() {
   updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
 }
 
+/**
+ * Phase 25: the portrait URL for a leader's chat emote. The base URL is
+ * configured per leader in leaders.json (leader.mediaBaseUrl) — not
+ * hardcoded here — so a leader's media can later live on another host,
+ * and videos, voices or other media can sit beside the emotes under the
+ * same base. Returns null when the player is not one of the leaders
+ * (generic AI names have no portraits) or the leader has no base URL.
+ * The emote is already a filename stem ('joy', 'eye_roll'); anything odd
+ * falls back to 'neutral'.
+ */
+function leaderPortraitUrl(playerName, emote) {
+  if (!Array.isArray(leadersJson)) return null;
+  const leader = leadersJson.find(l => l.name === playerName);
+  if (!leader?.mediaBaseUrl) return null;
+  const stem = (emote || 'neutral').toLowerCase().replace(/\s+/g, '_') || 'neutral';
+  const base = leader.mediaBaseUrl.replace(/\/+$/, '');
+  return `${base}/emotes/${stem}.png`;
+}
+
+/**
+ * Phase 25: the chat modal header shows the latest emote portrait of
+ * whoever last spoke with a portrait (neutral until they have spoken).
+ * Every message is treated the same — a sender without a portrait (the
+ * human) simply has none, so the search walks back to the last message
+ * that does. Hidden when the conversation partner is not a leader.
+ */
+function updateChatModalPortrait() {
+  const img = document.getElementById('chat-modal-portrait');
+  if (!img || !currentChatSession.aiPlayer) return;
+  const history = gameState.getChatHistory(currentChatSession.humanPlayer, currentChatSession.aiPlayer);
+  let url = null;
+  if (history) {
+    for (let i = history.length - 1; i >= 0; i--) {
+      const m = history[i];
+      url = leaderPortraitUrl(m.sender, m.emote || 'neutral');
+      if (url) break;
+    }
+  }
+  if (!url) url = leaderPortraitUrl(currentChatSession.aiPlayer.name, 'neutral');
+  if (url) { img.src = url; img.style.display = ''; }
+  else { img.style.display = 'none'; }
+}
+
 function renderChatMessages() {
   const container = document.getElementById('chat-messages-container');
   if (!container || !currentChatSession.humanPlayer || !currentChatSession.aiPlayer) return;
 
+  updateChatModalPortrait();
   const history = gameState.getChatHistory(currentChatSession.humanPlayer, currentChatSession.aiPlayer);
   if (!history || history.length === 0) {
     container.innerHTML = `
@@ -2292,7 +2351,7 @@ function renderChatMessages() {
     const bubbleClass = isHuman ? 'chat-msg chat-msg-sent' : 'chat-msg chat-msg-received';
     const borderStyle = isHuman ? '' : `border-left: 3px solid ${currentChatSession.aiPlayer.color};`;
 
-    return `
+    const bubble = `
       <div class="${bubbleClass}" style="${borderStyle}">
         <div class="chat-msg-header">
           <div style="display: flex; align-items: center; gap: 6px;">
@@ -2302,6 +2361,19 @@ function renderChatMessages() {
           <span class="chat-msg-time">${timeStr}</span>
         </div>
         <div class="chat-msg-body">${escapeHTML(msg.content)}</div>
+      </div>
+    `;
+    // Phase 25: every message is treated the same — show the sender's
+    // emote portrait if one exists for that name, otherwise no portrait.
+    // A human sender has no portrait, so theirs simply don't show one;
+    // a message without an emote (system lines, coded AIs, old saves)
+    // shows the neutral portrait.
+    const portrait = leaderPortraitUrl(msg.sender, msg.emote || 'neutral');
+    if (!portrait) return bubble;
+    return `
+      <div style="display: flex; gap: 10px; align-items: flex-start;">
+        <img src="${portrait}" alt="" style="width: 48px; height: 48px; border-radius: 8px; object-fit: cover; flex-shrink: 0;" onerror="this.style.display='none'" />
+        <div style="flex: 1; min-width: 0;">${bubble}</div>
       </div>
     `;
   }).join('');
@@ -2524,8 +2596,10 @@ async function sendChatMessage() {
     if (mgr) {
       const reply = await mgr.generateChatReply(humanPlayer);
 
-      // Add AI message to gameState
-      gameState.addChatMessage(aiPlayer, humanPlayer, reply.content, reply.ended);
+      // Add AI message to gameState (Phase 25: carry the reply's emote
+      // so the portrait renders beside it; coded AIs return no emote
+      // and render with the neutral portrait).
+      gameState.addChatMessage(aiPlayer, humanPlayer, reply.content, reply.ended, reply.emote);
       // L6: the reply belongs in the history even if the modal closed
       // while it was pending — but nothing below may touch the UI or the
       // session if this is no longer the live one.

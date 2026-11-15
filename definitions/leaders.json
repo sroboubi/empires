@@ -21,7 +21,8 @@
                     "worker": 0.8
                 }
             }
-        }
+        },
+        "mediaBaseUrl": "assets/leaders/Anselm"
     },
     {
         "name": "Bramble",
@@ -42,7 +43,8 @@
                 "Grasslands": 0.8,
                 "Swamp": 0.8
             }
-        }
+        },
+        "mediaBaseUrl": "assets/leaders/Bramble"
     },
     {
         "name": "Dagna",
@@ -63,7 +65,8 @@
                     "mine": 0.8
                 }
             }
-        }
+        },
+        "mediaBaseUrl": "assets/leaders/Dagna"
     },
     {
         "name": "Kaida",
@@ -86,7 +89,8 @@
                     "slashing": 1.2
                 }
             }
-        }
+        },
+        "mediaBaseUrl": "assets/leaders/Kaida"
     },
     {
         "name": "Meera",
@@ -109,7 +113,8 @@
             "scoreMultiplier": {
                 "economic": 1.1
             }
-        }
+        },
+        "mediaBaseUrl": "assets/leaders/Meera"
     },
     {
         "name": "Rashid",
@@ -129,7 +134,8 @@
             "movementCostMultiplier": {
                 "Desert": 0.8
             }
-        }
+        },
+        "mediaBaseUrl": "assets/leaders/Rashid"
     },
     {
         "name": "Samara",
@@ -149,7 +155,8 @@
             "movementCostMultiplier": {
                 "Desert": 0.5
             }
-        }
+        },
+        "mediaBaseUrl": "assets/leaders/Samara"
     },
     {
         "name": "Sefu",
@@ -173,7 +180,8 @@
                     "swordsman": 0.8
                 }
             }
-        }
+        },
+        "mediaBaseUrl": "assets/leaders/Sefu"
     },
     {
         "name": "Temur",
@@ -198,7 +206,8 @@
                     "knight": 0.8
                 }
             }
-        }
+        },
+        "mediaBaseUrl": "assets/leaders/Temur"
     },
     {
         "name": "Yrsa",
@@ -223,6 +232,7 @@
                 "SnowyHills": 0.8,
                 "SnowyMountains": 0.8
             }
-        }
+        },
+        "mediaBaseUrl": "assets/leaders/Yrsa"
     }
 ]

@@ -1,12 +1,12 @@
 /**
  * Node-based tests for the menu interface (src/ai/llm/menu/menu.js).
- * Run from the repo root with: node --import ./tests/headless/stubs.mjs --loader ./tests/headless/loader.mjs --input-type=module -e "import('./src/ai/llm/menu/menu.test.js')"
+ * Run from the repo root with: node --import ./tests/headless/stubs.mjs --loader ./tests/headless/loader.mjs --input-type=module -e "import('./src/ai/tests/menu.test.js')"
  *
  * Uses mocked game states to validate option building, X/Y candidate
  * filtering, the 0-orders collapse, and response parsing — without a browser.
  */
-import { buildMenu, parseMenuResponse, renderMenuPrompt } from './menu.js';
-import { AiHelper } from '../../../aiHelper.js';
+import { buildMenu, parseMenuResponse, renderMenuPrompt } from '../llm/menu/menu.js';
+import { AiHelper } from '../../aiHelper.js';
 
 // buildMenu only needs distance/directions/capability helpers, not a live game.
 const helper = new AiHelper({});

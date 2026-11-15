@@ -119,9 +119,13 @@ export class GameState {
    * @param {Player|string} sender
    * @param {Player|string} receiver
    * @param {string} content
+   * @param {boolean} [ended=false]
+   * @param {string|null} [emote=null] - Phase 25: the AI leader's portrait
+   *   emote for this message (a filename stem, e.g. 'joy'), or null for
+   *   human and system messages (rendered with the neutral portrait).
    * @returns {Object} Added message object
    */
-  addChatMessage(sender, receiver, content, ended = false) {
+  addChatMessage(sender, receiver, content, ended = false, emote = null) {
     if (!this.chatHistory) this.chatHistory = {};
     const senderName = typeof sender === 'string' ? sender : sender.name;
     // L6: store the sender's id too — the name alone can't identify the
@@ -137,6 +141,7 @@ export class GameState {
       senderId,
       content: content,
       ended: !!ended,
+      emote: emote || null,
       round: this.currentRound,
       timestamp: new Date().toISOString()
     };
