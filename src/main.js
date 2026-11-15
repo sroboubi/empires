@@ -2267,15 +2267,22 @@ function handleEndChat() {
 }
 
 /**
- * Phase 25: the portrait URL for a leader's chat emote. Returns null when
- * the player is not one of the leaders in leaders.json (generic AI names
- * have no portraits on disk). The emote is already a filename stem
- * ('joy', 'eye_roll'); anything odd falls back to 'neutral'.
+ * Phase 25: the portrait URL for a leader's chat emote. The base URL is
+ * configured per leader in leaders.json (leader.mediaBaseUrl) — not
+ * hardcoded here — so a leader's media can later live on another host,
+ * and videos, voices or other media can sit beside the emotes under the
+ * same base. Returns null when the player is not one of the leaders
+ * (generic AI names have no portraits) or the leader has no base URL.
+ * The emote is already a filename stem ('joy', 'eye_roll'); anything odd
+ * falls back to 'neutral'.
  */
 function leaderPortraitUrl(playerName, emote) {
-  if (!Array.isArray(leadersJson) || !leadersJson.some(l => l.name === playerName)) return null;
+  if (!Array.isArray(leadersJson)) return null;
+  const leader = leadersJson.find(l => l.name === playerName);
+  if (!leader?.mediaBaseUrl) return null;
   const stem = (emote || 'neutral').toLowerCase().replace(/\s+/g, '_') || 'neutral';
-  return `assets/leaders/${playerName}/${stem}.png`;
+  const base = leader.mediaBaseUrl.replace(/\/+$/, '');
+  return `${base}/emotes/${stem}.png`;
 }
 
 /**
