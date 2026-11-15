@@ -1,13 +1,13 @@
 /**
  * Node-based tests for the diplomatic chat emote tag (Phase 25).
- * Run with: node --input-type=module -e "import('./src/ai/llm/chatEmote.test.js')"
+ * Run with: node --input-type=module -e "import('./src/ai/tests/chatEmote.test.js')"
  *
  * Covers extractChatEmote: tag parsing, normalization to the portrait
  * filename stem, validation against the approved subset, and the
  * neutral fallback. generateChatReply itself needs a live LLM client,
  * so it is not exercised here.
  */
-import { APPROVED_CHAT_EMOTES, extractChatEmote } from './llmBase.js';
+import { APPROVED_CHAT_EMOTES, extractChatEmote } from '../llm/llmBase.js';
 
 let passed = 0, failed = 0;
 
