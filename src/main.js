@@ -2288,14 +2288,20 @@ function handleEndChat() {
  * and videos, voices or other media can sit beside the emotes under the
  * same base. Returns null when the player is not one of the leaders
  * (generic AI names have no portraits) or the leader has no base URL.
- * The emote is already a filename stem ('joy', 'eye_roll'); anything odd
- * falls back to 'neutral'.
+ * The emote is already a filename stem ('joy', 'eye_roll'). It is
+ * validated by shape here (lowercase letters and underscores only) —
+ * a stored emote from an old or imported save is not validated by the
+ * LLM parser, and the stem is interpolated into <img src="...">, so
+ * anything that fails the check falls back to 'neutral'. main.js cannot
+ * import APPROVED_CHAT_EMOTES (src/ai isolation); a well-formed but
+ * unknown stem just 404s and the img hides (onerror).
  */
 function leaderPortraitUrl(playerName, emote) {
   if (!Array.isArray(leadersJson)) return null;
   const leader = leadersJson.find(l => l.name === playerName);
   if (!leader?.mediaBaseUrl) return null;
-  const stem = (emote || 'neutral').toLowerCase().replace(/\s+/g, '_') || 'neutral';
+  let stem = (emote || 'neutral').toLowerCase().replace(/\s+/g, '_');
+  if (!/^[a-z_]+$/.test(stem)) stem = 'neutral';
   const base = leader.mediaBaseUrl.replace(/\/+$/, '');
   return `${base}/emotes/${stem}.png`;
 }
