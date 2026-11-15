@@ -94,6 +94,10 @@ const PLAYER_METHODS = new Set([
   'getEntities', 'getOpponents', 'isExplored', 'isVisible', 'hasResources',
   'hasOrders', 'getResourceProfile', 'getHistory', 'getHistoryRange',
   'addHistoryEntry',
+  // Leader-twist adjusted values (Phase 25): read-only, own player only
+  // (foreign players get the restricted proxy, so their twists stay hidden).
+  'getSpawnCost', 'getMaintenanceCost', 'getYields', 'getAttackCost',
+  'getAttackValue', 'getArmorValue', 'getMovementCostMultiplier',
 ]);
 const GAMESTATE_METHODS = new Set([
   'getEntityAt', 'getEntityById', 'getChatHistory', 'getChatKey',

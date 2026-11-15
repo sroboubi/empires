@@ -110,7 +110,10 @@ export function buildMenu(gameState, player, cfg = {}, helper) {
         const buildables = def?.buildables || [];
         for (const item of buildables) {
             const bDef = manifestList.find(m => m.name === item);
-            const cost = bDef?.spawnCost || {};
+            // Leader twists (Phase 25): affordability is judged on the cost
+            // the acting player actually pays, not the raw manifest cost —
+            // otherwise the menu offers builds that fail, or hides affordable ones.
+            const cost = player.getSpawnCost?.(item) || bDef?.spawnCost || {};
             const affordable = Object.entries(cost).every(([res, amt]) =>
                 !(amt > 0) || (player.resources?.[res] || 0) >= amt);
             if (!affordable) continue;

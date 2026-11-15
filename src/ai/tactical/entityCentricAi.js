@@ -1,4 +1,5 @@
 import { BaseManager } from '../baseManager.js';
+import { adjustedView } from '../adjustedView.js';
 
 /**
  * EntityCentricAI - tactical AI using Shahin's entity-centric design.
@@ -357,7 +358,13 @@ export class EntityCentricAI extends BaseManager {
     if (asNumber(this.player.orders) < 2) return false;
 
     const range = this.attackRange(unit);
-    const scale = asNumber(unit.attackCostScale, 1);
+    // Leader twist (Phase 25): the unit's own adjusted attack-cost scale,
+    // from the owning player's getAttackCost — matching the engine's Attack
+    // canDo / aiHelper.attackCostFrom. Falls back to the unit's own scale
+    // when it has no owner.
+    const scale = unit.owner?.getAttackCost
+      ? unit.owner.getAttackCost(unit.name)
+      : asNumber(unit.attackCostScale, 1);
     const exhaustion = asNumber(unit.state?.battleExhaustion, 1);
     const costFunc = typeof unit.getMovementCost === 'function'
       ? unit.getMovementCost.bind(unit)
@@ -607,9 +614,11 @@ export class EntityCentricAI extends BaseManager {
     if (!profile) return { critical, deficit, runway, netIncome, criticalResource: null };
 
     // Median build cost across the manifest, for the low-stock check.
+    // Leader twist (Phase 25): the median is what WE would pay to build, so
+    // each type's spawn cost comes from our own Player function.
     const costs = [];
-    for (const meta of Object.values(this.gameState.manifestData?.entities || {})) {
-      const total = Object.values(meta?.spawnCost || {})
+    for (const [typeName, meta] of Object.entries(this.gameState.manifestData?.entities || {})) {
+      const total = Object.values(this.player.getSpawnCost(typeName))
         .filter(v => typeof v === 'number')
         .reduce((s, v) => s + v, 0);
       if (total > 0) costs.push(total);
@@ -870,8 +879,16 @@ export class EntityCentricAI extends BaseManager {
     for (const rawTarget of this.getBuildables(entity)) {
       const targetName = this.canonicalName(rawTarget);
       if (!targetName) continue;
-      const meta = this.gameState.manifestData?.entities?.[targetName]
-        || this.getEntityDef(targetName);
+      // Leader twist (Phase 25): value the build at what WE would pay and
+      // get — spawn cost, yields and damage from our own Player functions,
+      // via adjustedView. Callers below (scoreUnitBuildable,
+      // costUsesCritical, categorizeProducer, producesDeficit) all read
+      // from this adjusted meta.
+      const meta = adjustedView(
+        this.player,
+        this.gameState.manifestData?.entities?.[targetName] || this.getEntityDef(targetName),
+        targetName
+      );
       if (!meta) continue;
 
       const isUnit = !!meta.movement;
@@ -986,7 +1003,14 @@ export class EntityCentricAI extends BaseManager {
     let isMilitaryEnabler = false;
     let isSettlement = false;
     for (const childName of buildables) {
-      const childMeta = manifest?.entities?.[childName] || this.getEntityDef(childName);
+      // Leader twist (Phase 25): the child is a unit WE would build, so its
+      // damage (read by isMilitaryMeta, with thresholds) comes from our own
+      // Player functions, via adjustedView.
+      const childMeta = adjustedView(
+        this.player,
+        manifest?.entities?.[childName] || this.getEntityDef(childName),
+        childName
+      );
       if (!childMeta) continue;
       if (this.isMilitaryMeta(childMeta, childName)) isMilitaryEnabler = true;
       if ((childMeta.buildables || []).length > 0) isSettlement = true;

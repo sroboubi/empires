@@ -12,6 +12,7 @@ import { readFileSync } from 'fs';
 import Entity from './entity.js';
 import { Player } from './player.js';
 import { barbarianTargetProbability, clearDecisionsIfDamaged } from './barbarians/manager.js';
+import { adjustedView } from './ai/adjustedView.js';
 
 let passed = 0, failed = 0;
 function test(name, fn) {
@@ -30,6 +31,10 @@ function assert(cond, msg) {
 function assertClose(a, b, msg) {
   if (Math.abs(a - b) > 1e-9) throw new Error(`${msg} (got ${a}, want ${b})`);
 }
+function assertDeepEqual(a, b, msg) {
+  const sa = JSON.stringify(a), sb = JSON.stringify(b);
+  if (sa !== sb) throw new Error(`${msg} (got ${sa}, want ${sb})`);
+}
 
 // --- fixtures ---------------------------------------------------------------
 
@@ -47,9 +52,30 @@ const LEADERS = [
   { name: 'Anselm', attributes: { barbarianAggressionMultiplier: 0.8 } },
 ];
 
-function mockGameState(leaders = LEADERS) {
+// Manifest entity definitions the Player functions read. These mirror the
+// meta passed to makeEntity in the tests below, so the Player functions
+// (which read the manifest by name) and the entity's own state agree — as
+// they do in a real game, where the entity is built from the manifest.
+const TEST_ENTITIES = {
+  mine: { yields: { gems: 2, iron: 4 } },
+  farm: { maintenance: { food: 5, gold: 2 }, yields: { gold: 4, food: 2 } },
+  worker: { spawnCost: { food: 10, wood: 4 }, maintenance: { gold: 2 }, attackCostScale: 10 },
+  scout: { movement: { terrainCostScale: { Desert: 2 } } },
+  barbarian: { movement: { terrainCostScale: { Desert: 2 } }, armor: {}, damage: { value: 5, type: 'blunt' } },
+  swordsman: {
+    armor: { slashing: 2, blunt: 1 },
+    damage: { value: 5, type: 'slashing' },
+    attackCostScale: 10,
+    spawnCost: { food: 10, gold: 5 },
+    maintenance: { gold: 2 },
+    yields: { gold: 4 },
+  },
+  pikeman: { damage: { value: 4, type: 'polearm' }, armor: { polearm: 1 } },
+};
+
+function mockGameState(leaders = LEADERS, entities = TEST_ENTITIES) {
   return {
-    manifestData: { leaders, entities: {}, naturalResources: [] },
+    manifestData: { leaders, entities, naturalResources: [] },
     entities: [],
     hexGrid: null,
     currentRound: 1,
@@ -299,6 +325,132 @@ test('real leaders.json: Meera has scoreMultiplier.economic 1.1', () => {
   const meera = leaders.find(l => l.name === 'Meera');
   assert(meera, 'Meera exists in leaders.json');
   assert(meera.attributes?.scoreMultiplier?.economic === 1.1, 'Meera economic score multiplier is 1.1');
+});
+
+// --- Player functions: the AI sees the real (twist-adjusted) values -----
+// The adjustment multipliers live only in the Player class; the engine and
+// the AI both call these. A leader with a fuller twist set than Meera, so
+// every multiplier path is covered.
+
+const twistAttrs = {
+  economyMultipliers: {
+    income: { gold: 2 },
+    spawnCost: { swordsman: 0.5 },
+    maintenanceCost: { swordsman: 1.5 },
+  },
+  combatMultipliers: {
+    damage: { slashing: 1.2 },
+    armor: { slashing: 0.5 },
+    attackCost: { swordsman: 0.8 },
+    damageVs: { pikeman: 2 },
+    terrain: { Desert: 1.5 },
+  },
+  movementCostMultiplier: { Desert: 0.5 },
+};
+const TWIST_LEADER = { name: 'Twisty', attributes: twistAttrs };
+
+function twistPlayer(gs = mockGameState([TWIST_LEADER])) {
+  return aiPlayer('Twisty', gs);
+}
+
+test('getSpawnCost scales per-entity, defaults to 1', () => {
+  const p = twistPlayer();
+  assertDeepEqual(p.getSpawnCost('swordsman'), { food: 5, gold: 2.5 }, 'discounted');
+  assertDeepEqual(p.getSpawnCost('worker'), { food: 10, wood: 4 }, 'unlisted type unchanged');
+  const human = humanPlayer('Human', mockGameState([TWIST_LEADER]));
+  assertDeepEqual(human.getSpawnCost('swordsman'), { food: 10, gold: 5 }, 'human (no twists) unchanged');
+});
+
+test('getYields scales per-resource, defaults to 1', () => {
+  const p = twistPlayer();
+  assertDeepEqual(p.getYields('farm'), { gold: 8, food: 2 }, 'gold doubled, food unchanged');
+  const human = humanPlayer('Human', mockGameState([TWIST_LEADER]));
+  assertDeepEqual(human.getYields('farm'), { gold: 4, food: 2 }, 'human unchanged');
+});
+
+test('getMaintenanceCost scales per-entity, defaults to 1', () => {
+  const p = twistPlayer();
+  assertDeepEqual(p.getMaintenanceCost('swordsman'), { gold: 3 }, '1.5x upkeep');
+  assertDeepEqual(p.getMaintenanceCost('worker'), { gold: 2 }, 'unlisted type unchanged');
+});
+
+test('getAttackCost scales per-entity, defaults to 1', () => {
+  const p = twistPlayer();
+  assert(p.getAttackCost('swordsman') === 8, '0.8x cost');
+  assert(p.getAttackCost('worker') === 10, 'unlisted type unchanged');
+  const human = humanPlayer('Human', mockGameState([TWIST_LEADER]));
+  assert(human.getAttackCost('swordsman') === 10, 'human unchanged');
+});
+
+test('getAttackValue applies damage type, damageVs and terrain multipliers', () => {
+  const p = twistPlayer();
+  // swordsman damage is { value: 5, type: 'slashing' } in the manifest.
+  const generic = p.getAttackValue('swordsman');
+  assertClose(generic.value, 6, 'damage-type only (5 x 1.2)');
+  assert(generic.type === 'slashing', 'type is slashing');
+  assertClose(p.getAttackValue('swordsman', { targetType: 'pikeman' }).value, 12, 'plus damageVs (5 x 1.2 x 2)');
+  assertClose(p.getAttackValue('swordsman', { targetType: 'pikeman', terrainType: 'Desert' }).value, 18, 'plus terrain (5 x 1.2 x 2 x 1.5)');
+  assertClose(p.getAttackValue('barbarian').value, 5, 'unlisted damage type unchanged (blunt)');
+});
+
+test('getArmorValue returns one value per damage type, with armor and terrain multipliers', () => {
+  const p = twistPlayer();
+  // swordsman armor is { slashing: 2, blunt: 1 } in the manifest.
+  const armor = p.getArmorValue('swordsman');
+  assertClose(armor.slashing, 1, 'armor-type only (2 x 0.5)');
+  assertClose(armor.blunt, 1, 'unlisted armor type unchanged');
+  const desert = p.getArmorValue('swordsman', { terrainType: 'Desert' });
+  assertClose(desert.slashing, 1.5, 'plus terrain (2 x 0.5 x 1.5)');
+  assertClose(desert.blunt, 1.5, 'terrain applies to every type');
+  // A damage type the entity has no armor for still defends at base 1,
+  // scaled by its armor and terrain multipliers (poison is the only such
+  // type today).
+  assertClose(armor.poison, 1, 'missing type defends at 1');
+});
+
+test('getMovementCostMultiplier scales per-terrain, defaults to 1', () => {
+  const p = twistPlayer();
+  assert(p.getMovementCostMultiplier('Desert') === 0.5, 'Desert halved');
+  assert(p.getMovementCostMultiplier('Grasslands') === 1, 'unlisted terrain unchanged');
+});
+
+test('getAttackValue / getArmorValue return fresh objects (manifest never mutated)', () => {
+  const gs = mockGameState([TWIST_LEADER]);
+  const p = aiPlayer('Twisty', gs);
+  const cost = p.getSpawnCost('swordsman');
+  cost.food = 999;
+  assertDeepEqual(gs.manifestData.entities.swordsman.spawnCost, { food: 10, gold: 5 }, 'manifest spawnCost untouched');
+  const armor = p.getArmorValue('swordsman');
+  armor.slashing = 999;
+  assert(gs.manifestData.entities.swordsman.armor.slashing === 2, 'manifest armor untouched');
+});
+
+test('adjustedView returns an adjusted copy and never mutates the manifest meta', () => {
+  const gs = mockGameState([TWIST_LEADER]);
+  const p = aiPlayer('Twisty', gs);
+  // The adjusted values come from the Player functions (which read the
+  // manifest by name), so the meta passed in is the manifest swordsman
+  // definition itself; only the pass-through fields come from it.
+  const meta = { ...gs.manifestData.entities.swordsman };
+  const adjusted = adjustedView(p, meta, 'swordsman');
+  assertDeepEqual(adjusted.spawnCost, { food: 5, gold: 2.5 }, 'spawnCost adjusted');
+  assertDeepEqual(adjusted.yields, { gold: 8 }, 'yields adjusted');
+  assertDeepEqual(adjusted.maintenance, { gold: 3 }, 'maintenance adjusted');
+  assert(adjusted.attackCostScale === 8, 'attackCostScale adjusted');
+  assert(adjusted.damage.value === 6, 'damage value adjusted');
+  assertClose(adjusted.armor.slashing, 1, 'armor adjusted');
+  assertDeepEqual(meta.spawnCost, { food: 10, gold: 5 }, 'manifest meta untouched');
+  assert(meta.damage.value === 5, 'manifest damage untouched');
+});
+
+test('adjustedView with no twists returns equal values', () => {
+  const gs = mockGameState();
+  const p = humanPlayer('Human', gs);
+  const meta = { ...gs.manifestData.entities.swordsman };
+  const adjusted = adjustedView(p, meta, 'swordsman');
+  assertDeepEqual(adjusted.spawnCost, { food: 10, gold: 5 }, 'spawnCost unchanged');
+  assertDeepEqual(adjusted.yields, { gold: 4 }, 'yields unchanged');
+  assert(adjusted.attackCostScale === 10, 'attackCostScale unchanged');
 });
 
 console.log(`\nleaderAttributes: ${passed} passed, ${failed} failed`);

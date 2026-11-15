@@ -112,8 +112,8 @@ export class AiHelper {
     }
 
     /** Calculate the attack multiplier for a combat action. */
-    calculateAttackMultiplier(gameState, sourceCell, elevationAdjustment, targetEntity) {
-        return calculateAttackMultiplier(gameState, sourceCell, elevationAdjustment, targetEntity);
+    calculateAttackMultiplier(gameState, sourceCell, elevationAdjustment, targetEntity, attackerEntity) {
+        return calculateAttackMultiplier(gameState, sourceCell, elevationAdjustment, targetEntity, attackerEntity);
     }
 
     /** Apply the resource yield bonus for a construct on a cell. */
@@ -301,10 +301,21 @@ export class AiHelper {
     }
 
     getCombatPower(entity, meta) {
-        const dmg = entity?.damage?.value || meta?.damage?.value || 0;
+        // Leader twists (Phase 25): the owner's Player functions value the
+        // entity at what it actually hits and absorbs for. damageVs and
+        // terrain need a target and a terrain, so they stay out of this
+        // context-free estimate (getAttackValue with no conditions).
+        // Falls back to the entity's own damage/armor when it has no owner
+        // or the manifest has no entry for it.
+        const rawDmg = entity?.damage?.value || meta?.damage?.value || 0;
+        const dmg = entity?.owner?.getAttackValue
+            ? (entity.owner.getAttackValue(entity.name).value || rawDmg)
+            : rawDmg;
         const hp = entity?.health || meta?.health || 1;
         const rangeMult = (entity?.range?.maxCells || meta?.range?.maxCells) ? 1.5 : 1.0;
-        const armorSum = Object.values(entity?.armor || meta?.armor || {}).reduce((s, v) => s + v, 0);
+        const baseArmor = entity?.armor || meta?.armor || {};
+        const armorMap = entity?.owner?.getArmorValue ? entity.owner.getArmorValue(entity.name) : {};
+        const armorSum = Object.keys(baseArmor).reduce((s, t) => s + (armorMap[t] ?? baseArmor[t] ?? 1), 0);
         return (dmg * hp * rangeMult) + (armorSum * 10);
     }
 
@@ -528,7 +539,7 @@ export class AiHelper {
         const initialDist = this.distance(sourceEntity.cell || sourceEntity, targetEntity.cell || targetEntity);
 
         const attackMultiplier = (cell) => this.calculateAttackMultiplier(
-            gameState, cell, sourceEntity.damage.elevationAdjustment, targetEntity);
+            gameState, cell, sourceEntity.damage.elevationAdjustment, targetEntity, sourceEntity);
 
         this.aiLog(attackerPlayer, 'combat', `Engaging Target: ${sourceEntity.name}#${sourceEntity.id?.slice(-4)} (${attackerPlayer.name}) at (${sourceEntity.q},${sourceEntity.r}) [HP:${Math.round(sourceEntity.health)}/${sourceEntity.maxHealth}, AP:${sourceEntity.actionPoints}] attacking ${targetPlayer.name}'s ${targetEntity.name}#${targetEntity.id?.slice(-4)} at (${targetEntity.q},${targetEntity.r}) [HP:${Math.round(targetEntity.health)}/${targetEntity.maxHealth}, Dist:${initialDist} hexes, MaxOrders:${availableOrders}].`);
 
@@ -548,21 +559,22 @@ export class AiHelper {
             const costFunc = sourceEntity.getMovementCost.bind(sourceEntity);
             // Dry-run attack cost from a candidate cell (same formula as
             // entity.js Attack canDo, without moving there first).
-            // Leader twist (Phase 25): the attacker's attackCost multiplier
-            // for its own entity type scales the cost, matching canDo.
-            const attackCostMult = sourceEntity.owner?.attributes?.combatMultipliers?.attackCost?.[sourceEntity.name] ?? 1;
+            // Leader twist (Phase 25): the attacker's adjusted attack-cost
+            // scale, from the owning player's getAttackCost, matching canDo.
+            const attackCostScale = sourceEntity.owner
+                ? sourceEntity.owner.getAttackCost(sourceEntity.name)
+                : (sourceEntity.attackCostScale ?? 1);
             const attackCostFrom = (cell) => {
-                const scale = sourceEntity.attackCostScale ?? 1;
                 const exh = sourceEntity.state?.battleExhaustion ?? 1;
                 if (sourceEntity.range && typeof sourceEntity.range === 'object') {
-                    return Math.ceil(scale * exh * this.distance(cell, targetCell) * attackCostMult);
+                    return Math.ceil(attackCostScale * exh * this.distance(cell, targetCell));
                 }
                 const pathRes = this.movementCostTo(cell, targetCell, costFunc, { allowDetours: true });
                 // A best-effort path's cost is the cost to the closest
                 // reachable cell, NOT to the target — an unreachable target
                 // must look unaffordable, not cheap.
                 if (!pathRes || !pathRes.reached) return Infinity;
-                return Math.ceil(scale * exh * pathRes.cost * attackCostMult);
+                return Math.ceil(attackCostScale * exh * pathRes.cost);
             };
 
             if (isCurrentPossible && currentMult > 1.0) {

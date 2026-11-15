@@ -531,7 +531,10 @@ EVALUATION RULES:
             let best = null;
             for (const sm of ownSummaries) {
                 for (const b of sm.buildableNow || []) {
-                    const y = byName.get(b)?.yields?.[res];
+                    // Leader twists (Phase 25): the remedies are for the acting
+                    // player's own buildables, so the yield is the player's
+                    // twist-adjusted one, not the raw manifest yield.
+                    const y = this.player.getYields?.(b)?.[res] ?? byName.get(b)?.yields?.[res];
                     if (y > 0 && (!best || y > best.yield)) best = { producer: b, builderId: sm.id, yield: y };
                 }
             }
@@ -557,6 +560,16 @@ EVALUATION RULES:
 
     summarizeEntity(entity) {
         const helper = this.helper;
+        // Leader twists (Phase 25): own entities show twist-adjusted combat
+        // values from the acting player's functions (terrain = the cell the
+        // entity stands on, as in receiveDamage / the attack multiplier).
+        // Enemy twists are hidden by the proxy, so enemies stay at the raw
+        // manifest values — the acting player's functions must not be
+        // applied to them.
+        const own = entity.owner?.id === this.player.id;
+        const terrainType = entity.cell?.terrain?.name;
+        const attack = own ? this.player.getAttackValue?.(entity.name, { terrainType }) : null;
+        const armorMap = own ? this.player.getArmorValue?.(entity.name, { terrainType }) : null;
         const summary = {
             id: entity.id,
             name: entity.name,
@@ -569,8 +582,8 @@ EVALUATION RULES:
             maxHealth: entity.maxHealth,
             actionPoints: entity.actionPoints,
             active: entity.active,
-            damage: entity.damage,
-            armor: entity.armor
+            damage: entity.damage && attack ? { ...entity.damage, value: attack.value, type: attack.type } : entity.damage,
+            armor: armorMap || entity.armor
         };
 
         // State-dependent capabilities: what can this unit actually do right now?
@@ -592,7 +605,9 @@ EVALUATION RULES:
                         continue;
                     }
                     const bDef = manifestList.find(m => m.name === b);
-                    const cost = bDef?.spawnCost || {};
+                    // Leader twists (Phase 25): the cost the builder's owner
+                    // actually pays is the twist-adjusted spawn cost.
+                    const cost = this.player.getSpawnCost?.(b) || bDef?.spawnCost || {};
                     const missing = Object.entries(cost)
                         .filter(([, amt]) => amt > 0)
                         .map(([res, amt]) => ({ res, need: Math.round((amt - (this.player.resources?.[res] || 0)) * 10) / 10 }))

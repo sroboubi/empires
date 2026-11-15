@@ -1,4 +1,5 @@
 import { AdaptiveManager } from './adaptiveManager.js';
+import { adjustedView } from '../adjustedView.js';
 
 /**
  * BigPickleManager - an aggressive, deadlock-resistant tactical AI.
@@ -899,10 +900,16 @@ export class BigPickleManager extends AdaptiveManager {
                 if (this.getBuildCharges(builder) <= 0) continue;
                 if (asNumber(builder.actionPoints, 0) < 1) continue;
 
-                const meta = this.manifestEntities[step.targetName];
+                // Leader twists (Phase 25): value the build at what WE
+                // would pay and get — spawnCost, yields, maintenance and
+                // damage come from our own Player functions, via
+                // adjustedView. Everything downstream (the target
+                // predicates, isBuildSustainable, scoreBuildCandidate)
+                // reads this adjusted meta; the manifest is never mutated.
+                const meta = adjustedView(this.player, this.manifestEntities[step.targetName], step.targetName);
                 if (!meta) continue;
 
-                const finalMeta = this.manifestEntities[step.finalTarget] || meta;
+                const finalMeta = adjustedView(this.player, this.manifestEntities[step.finalTarget], step.finalTarget) || meta;
                 // A prerequisite may not itself be an economic/military entity
                 // but is still valid when it unlocks one.
                 if (category === 'economy'
@@ -912,7 +919,7 @@ export class BigPickleManager extends AdaptiveManager {
                     && !this.isMilitaryTarget(meta)
                     && !this.isMilitaryTarget(finalMeta)) continue;
 
-                const cost = meta.spawnCost || {};
+                const cost = this.player.getSpawnCost(step.targetName) || {};
                 if (!this.player.hasResources(cost)) continue;
                 if (this.wouldSpendReserved(cost)) continue;
                 if (!this.isBuildSustainable(meta, econ)) continue;
@@ -978,7 +985,7 @@ export class BigPickleManager extends AdaptiveManager {
 
             if (used > 0) {
                 if (candidate.finalTarget && candidate.finalTarget !== candidate.targetName) {
-                    const finalCost = this.manifestEntities[candidate.finalTarget]?.spawnCost || {};
+                    const finalCost = this.player.getSpawnCost(candidate.finalTarget) || {};
                     this.reserveCost(finalCost);
                     this.log(
                         'econ',
@@ -1001,7 +1008,12 @@ export class BigPickleManager extends AdaptiveManager {
      */
     collectProactiveTargets(econ, category, own) {
         const scored = [];
-        for (const [name, meta] of Object.entries(this.manifestEntities)) {
+        for (const [name, rawMeta] of Object.entries(this.manifestEntities)) {
+            // Leader twists (Phase 25): rank final targets at what WE
+            // would pay and get — isEconomicTarget/isMilitaryTarget and
+            // scoreBuildCandidate read yields, damage and maintenance
+            // from this adjusted meta.
+            const meta = adjustedView(this.player, rawMeta, name);
             if (!meta) continue;
             if (category === 'economy' && !this.isEconomicTarget(meta)) continue;
             if (category === 'military' && !this.isMilitaryTarget(meta)) continue;
@@ -1026,11 +1038,16 @@ export class BigPickleManager extends AdaptiveManager {
      * - the existing duplicate and surplus penalties still apply.
      */
     scoreBuildCandidate(builder, targetName, meta, econ, own, category = null, finalTarget = null) {
+        // Leader twists (Phase 25): callers pass raw manifest meta
+        // (including the inherited build code in AdaptiveManager), so
+        // value the candidate at what WE would pay and get here. The
+        // base implementation reads yields, damage and maintenance.
+        meta = adjustedView(this.player, meta, targetName);
         let value = super.scoreBuildCandidate(builder, targetName, meta, econ, own, category);
         if (!meta) return value;
 
         if (finalTarget && finalTarget !== targetName) {
-            const finalMeta = this.manifestEntities[finalTarget];
+            const finalMeta = adjustedView(this.player, this.manifestEntities[finalTarget], finalTarget);
             if (finalMeta) {
                 // Call the base implementation to avoid recursing through this
                 // override (chains can be cyclic in an arbitrary manifest).
@@ -1046,7 +1063,7 @@ export class BigPickleManager extends AdaptiveManager {
             let bestChild = 0;
             for (const rawName of meta.buildables) {
                 const childName = canonicalKey(this.manifestEntities, rawName);
-                const childMeta = childName ? this.manifestEntities[childName] : null;
+                const childMeta = childName ? adjustedView(this.player, this.manifestEntities[childName], childName) : null;
                 if (!childMeta) continue;
                 const childValue = super.scoreBuildCandidate(null, childName, childMeta, econ, own, null);
                 if (childValue > bestChild) bestChild = childValue;

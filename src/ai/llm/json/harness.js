@@ -265,7 +265,7 @@ export class JsonHarness extends LlmBaseManager {
         const filtered = (!manifestKey || manifestKey === '*')
             ? manifestList
             : manifestList.filter(m => manifestKey.split(',').includes(m.name));
-        const manifestMd = manifestToMarkdown(filtered);
+        const manifestMd = manifestToMarkdown(filtered, this.player);
         const absScoreToWin = this.gameState.settings?.winCondition?.absoluteScore;
         const relScoreToWin = this.gameState.settings?.winCondition?.relativeScore;
 

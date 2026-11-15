@@ -1,4 +1,5 @@
 import { AdaptiveManager } from './adaptiveManager.js';
+import { adjustedView } from '../adjustedView.js';
 
 /**
  * HarkManager - Hark's tactical AI, a subclass of AdaptiveManager.
@@ -251,7 +252,13 @@ export class HarkManager extends AdaptiveManager {
         const ranged = unit.range && typeof unit.range === 'object';
         const minD = ranged ? num(unit.range.minCells, 1) : 1;
         const maxD = ranged ? num(unit.range.maxCells, 1) : 1;
-        const scale = num(unit.attackCostScale, 1);
+        // Leader twists (Phase 25): the attack-cost scale is what the
+        // unit's owner actually pays — from its Player function, not the
+        // raw manifest. Ownerless units (barbarians) fall back to the
+        // manifest value.
+        const scale = typeof unit.owner?.getAttackCost === 'function'
+            ? num(unit.owner.getAttackCost(unit.name), 1)
+            : num(unit.attackCostScale, 1);
         const exhaustion = num(unit.state?.battleExhaustion, 1);
         const costFunc = typeof unit.getMovementCost === 'function'
             ? unit.getMovementCost.bind(unit)
@@ -529,6 +536,11 @@ export class HarkManager extends AdaptiveManager {
     // ==================== B10: surplus producers under deficit ====================
 
     scoreBuildCandidate(builder, targetName, meta, econ, own, category) {
+        // Leader twists (Phase 25): the caller passes raw manifest meta,
+        // so value the build at what WE would pay and get — the B10 loop
+        // below and the base implementation both read yields, damage and
+        // maintenance from this adjusted meta.
+        meta = adjustedView(this.player, meta, targetName);
         if (econ.urgent.length > 0) {
             let producesSomething = false;
             let onlySurplus = true;
