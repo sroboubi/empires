@@ -1,11 +1,11 @@
 /**
  * Node-based tests for the LLM Markdown serializers.
- * Run with: node --input-type=module -e "import('./src/ai/llm/markdown.test.js')"
+ * Run with: node --input-type=module -e "import('./src/ai/tests/markdown.test.js')"
  *
  * These use mocked game states to validate the *ToMarkdown() output
  * across various scenarios without needing a browser.
  */
-import { manifestToMarkdown, serializeStateToMarkdown, summarizeTerrain } from './markdown.js';
+import { manifestToMarkdown, serializeStateToMarkdown, summarizeTerrain } from '../llm/markdown.js';
 import { readFileSync } from 'fs';
 
 const entities = JSON.parse(readFileSync('definitions/entities.json', 'utf8'));

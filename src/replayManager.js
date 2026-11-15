@@ -159,7 +159,8 @@ export class ReplayRecorder {
         visibleCells: Array.from(e.visibleCells || [])
       })),
       removedResources,
-      playerFog
+      playerFog,
+      trades: (gameState.trades || []).map(t => ({ ...t }))
     };
 
     this.replayData.snapshots.push(snapshot);
@@ -436,6 +437,9 @@ export class ReplayPlayer {
         }
       }
     }
+
+    // 4b. Restore Ongoing Trades
+    this.gameState.trades = (snapshot.trades || []).map(t => ({ ...t }));
 
     // 5. Update 3D Visuals
     if (resourcesChanged) {

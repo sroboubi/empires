@@ -30,6 +30,11 @@ export class Player {
     this.gameState = gameState;
     this.description = description || '';
     this.controller = controller || null;
+    // Leader twist attributes (Phase 25): resolved once at setup and
+    // carried on the controller (buildController), so the Player owns a
+    // plain copy — no manifest lookup by name. Human players (no
+    // controller) and non-leader AIs get {}. Never mutated after this.
+    this.attributes = controller?.attributes ? { ...controller.attributes } : {};
     this.resources = { ...startingResources };
     this.startCoord = { q: 0, r: 0 };
     this.score = {
@@ -83,6 +88,122 @@ export class Player {
    */
   get isAI() {
     return !!this.controller;
+  }
+
+  /**
+   * The manifest entity definition for an entity type, or null if the
+   * manifest has no such type. The adjustment functions below read their
+   * base values from here.
+   */
+  getEntityDefinition(entityName) {
+    return this.gameState?.manifestData?.entities?.[entityName] || null;
+  }
+
+  /**
+   * Leader-twist adjusted values (Phase 25) — THE single place in the game
+   * code that implements the adjustments. The engine (Entity, aiHelper,
+   * calculateAttackMultiplier) and the AI (through the proxy, read-only)
+   * all get their numbers from these methods; the adjustment logic lives
+   * nowhere else. Every multiplier defaults to 1, so a player with no
+   * twists (the human, or an unmatched leader) gets the manifest base
+   * values. All return fresh objects — the manifest is never mutated.
+   */
+
+  getSpawnCost(entityName) {
+    const base = this.getEntityDefinition(entityName)?.spawnCost || {};
+    const mult = this.attributes?.economyMultipliers?.spawnCost?.[entityName] ?? 1;
+    if (mult === 1) return { ...base };
+    const adjusted = {};
+    for (const [res, amt] of Object.entries(base)) adjusted[res] = amt * mult;
+    return adjusted;
+  }
+
+  getMaintenanceCost(entityName) {
+    const base = this.getEntityDefinition(entityName)?.maintenance || {};
+    const mult = this.attributes?.economyMultipliers?.maintenanceCost?.[entityName] ?? 1;
+    if (mult === 1) return { ...base };
+    const adjusted = {};
+    for (const [res, amt] of Object.entries(base)) adjusted[res] = amt * mult;
+    return adjusted;
+  }
+
+  getYields(entityName) {
+    const base = this.getEntityDefinition(entityName)?.yields || {};
+    const income = this.attributes?.economyMultipliers?.income;
+    if (!income) return { ...base };
+    const adjusted = { ...base };
+    for (const res of Object.keys(adjusted)) {
+      const mult = income[res] ?? 1;
+      if (mult !== 1) adjusted[res] = adjusted[res] * mult;
+    }
+    return adjusted;
+  }
+
+  /**
+   * Adjusted attack-cost scale for an entity type (the AP cost factor).
+   * @returns {number}
+   */
+  getAttackCost(entityName) {
+    const scale = this.getEntityDefinition(entityName)?.attackCostScale ?? 1;
+    const mult = this.attributes?.combatMultipliers?.attackCost?.[entityName] ?? 1;
+    return scale * mult;
+  }
+
+  /**
+   * Adjusted attack value for an entity type.
+   * @param {string} entityName
+   * @param {Object} [conditions] - optional: { targetType, terrainType }
+   *   Each condition given adds its multiplier; each omitted contributes 1.
+   *   The damage-type multiplier always applies (it is intrinsic to the
+   *   entity's damage type). With no conditions this is the generic
+   *   "what does this unit hit for" — for build/evaluation decisions.
+   * @returns {{value: number, type: string}}
+   */
+  getAttackValue(entityName, conditions = {}) {
+    const damage = this.getEntityDefinition(entityName)?.damage || { value: 0, type: 'blunt' };
+    const combat = this.attributes?.combatMultipliers || {};
+    const dmgMult = combat.damage?.[damage.type] ?? 1;
+    const vsMult = conditions.targetType ? (combat.damageVs?.[conditions.targetType] ?? 1) : 1;
+    const terrainMult = conditions.terrainType ? (combat.terrain?.[conditions.terrainType] ?? 1) : 1;
+    return { value: damage.value * dmgMult * vsMult * terrainMult, type: damage.type };
+  }
+
+  /**
+   * Adjusted armor, one value per damage type.
+   * @param {string} entityName
+   * @param {Object} [conditions] - optional: { terrainType }
+   *   The terrain multiplier applies to every type when given.
+   *   Covers every damage type the game can deal, not just the ones this
+   *   entity has armor for — a missing type defends at base 1 (still
+   *   scaled by the armor and terrain multipliers, as receiveDamage does;
+   *   poison is the only such type today).
+   * @returns {Object} e.g. { slashing: 2, piercing: 1, blunt: 1, polearm: 1 }
+   */
+  getArmorValue(entityName, conditions = {}) {
+    const baseArmor = this.getEntityDefinition(entityName)?.armor || {};
+    const combat = this.attributes?.combatMultipliers || {};
+    const terrainMult = conditions.terrainType ? (combat.terrain?.[conditions.terrainType] ?? 1) : 1;
+    const types = new Set(Object.keys(baseArmor));
+    const allEntities = this.gameState?.manifestData?.entities;
+    if (allEntities) {
+      for (const other of Object.values(allEntities)) {
+        const t = other?.damage?.type;
+        if (t) types.add(t);
+      }
+    }
+    const adjusted = {};
+    for (const type of types) {
+      adjusted[type] = (baseArmor[type] || 1) * (combat.armor?.[type] ?? 1) * terrainMult;
+    }
+    return adjusted;
+  }
+
+  /**
+   * Adjusted movement-cost multiplier for a terrain (1 when the player has
+   * no twist for it). Used by Entity.getMovementCost.
+   */
+  getMovementCostMultiplier(terrainName) {
+    return this.attributes?.movementCostMultiplier?.[terrainName] ?? 1;
   }
 
   /**
@@ -168,6 +289,13 @@ export class Player {
     }
 
     this.score.exploration = Math.round(Math.pow(this.visibleCells.size * this.exploredCells.size, 1 / 3));
+    // Leader score multipliers (Phase 25 twists): apply per category — loop
+    // over the keys, so a future score category picks it up automatically —
+    // then the total is the geometric mean of the multiplied categories.
+    const sm = this.attributes?.scoreMultiplier || {};
+    for (const sKey of Object.keys(this.score)) {
+      this.score[sKey] *= (sm[sKey] ?? 1);
+    }
     this.score.total = Math.round(Math.pow(this.score.military * this.score.economic * this.score.exploration, 1 / 3));
   }
 
@@ -200,7 +328,21 @@ export class Player {
 
     try {
       const aiManager = await this.getAiManager();
-      if (aiManager) await aiManager.processTurn();
+      if (aiManager) {
+        // Let the AI re-evaluate ongoing per-turn deals before acting. A
+        // trade-review failure must never block the rest of the turn.
+        try {
+          if (typeof aiManager.reviewTrades === 'function') await aiManager.reviewTrades();
+        } catch (err) {
+          console.error(`Trade review failed for player ${this.name}:`, err);
+        }
+        try {
+          if (typeof aiManager.maybeInitiateTrade === 'function') await aiManager.maybeInitiateTrade();
+        } catch (err) {
+          console.error(`Trade proposal failed for player ${this.name}:`, err);
+        }
+        await aiManager.processTurn();
+      }
     } catch (err) {
       console.error(`Error during step for player ${this.name}:`, err);
       throw err;
@@ -261,11 +403,36 @@ export class Player {
     }
 
     let criticalResource = null;
+    const tradeIncome = {};
+    const tradeExpense = {};
+    const netTrade = {};
+    const activeTrades = (this.gameState?.trades || []).filter(t => t.active && t.type === 'per_turn' && (String(t.player1Id) === String(this.id) || String(t.player2Id) === String(this.id)));
+    for (const trade of activeTrades) {
+      const isP1 = String(trade.player1Id) === String(this.id);
+      const mySend = isP1 ? trade.bundle1 : trade.bundle2;
+      const myReceive = isP1 ? trade.bundle2 : trade.bundle1;
+      for (const [res, amt] of Object.entries(mySend || {})) {
+        if (amt > 0) {
+          resourceKeys.add(res);
+          tradeExpense[res] = (tradeExpense[res] || 0) + amt;
+        }
+      }
+      for (const [res, amt] of Object.entries(myReceive || {})) {
+        if (amt > 0) {
+          resourceKeys.add(res);
+          tradeIncome[res] = (tradeIncome[res] || 0) + amt;
+        }
+      }
+    }
+
     for (const resKey of resourceKeys) {
       if (totalUpkeep[resKey] == undefined) totalUpkeep[resKey] = 0;
       if (totalYields[resKey] == undefined) totalYields[resKey] = 0;
       if (maxTotalYields[resKey] == undefined) maxTotalYields[resKey] = 0;
-      netIncome[resKey] = totalYields[resKey] - totalUpkeep[resKey];
+      tradeIncome[resKey] = tradeIncome[resKey] || 0;
+      tradeExpense[resKey] = tradeExpense[resKey] || 0;
+      netTrade[resKey] = tradeIncome[resKey] - tradeExpense[resKey];
+      netIncome[resKey] = totalYields[resKey] - totalUpkeep[resKey] + netTrade[resKey];
       turnsRemaining[resKey] = netIncome[resKey] < 0 ? Math.floor((stock[resKey] || 0) / -netIncome[resKey]) : Infinity;
       if (turnsRemaining[resKey] < Infinity) {
         if (!criticalResource || turnsRemaining[resKey] < turnsRemaining[criticalResource]) {
@@ -279,9 +446,13 @@ export class Player {
       totalUpkeep,
       totalYields,
       maxTotalYields,
+      tradeIncome,
+      tradeExpense,
+      netTrade,
       netIncome,
       turnsRemaining,
-      criticalResource
+      criticalResource,
+      activeTrades
     }
   }
 
@@ -507,6 +678,7 @@ export class Player {
       color: this.color,
       description: this.description,
       controller: this.controller,
+      attributes: this.attributes,
       resources: this.resources,
       orders: this.orders,
       maxOrders: this.maxOrders,
@@ -535,6 +707,13 @@ export class Player {
       delete data.controller.config.apiKey;
     }
     const player = new Player(data.id, data.name, gameState, data.color, data.resources, data.description, data.controller, data.ordersConfig, isReplay);
+    // Leader twist attributes (Phase 25): they travel with the player in
+    // the save (see toJSON), so a loaded game keeps them without any
+    // re-resolution. The constructor already copied them from
+    // data.controller; this covers a save whose controller lacks them.
+    if (data.attributes) {
+      player.attributes = { ...data.attributes };
+    }
     player.maxOrders = data.maxOrders ?? 0;
     player.ordersPerTurn = data.ordersPerTurn ?? 0;
     player.orders = data.orders ?? 0;

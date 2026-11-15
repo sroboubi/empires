@@ -1,12 +1,238 @@
 [
     {
-        "name": "Anselm",        
-        "description": "A wise and strategic leader, known for his diplomatic skills and ability to maintain peace.",        
-        "focus": ["exploration", "diplomacy", "defense"]
+        "name": "Anselm",
+        "description": "A wise and strategic leader, known for his diplomatic skills and ability to maintain peace.",
+        "focus": [
+            "exploration",
+            "diplomacy",
+            "defense"
+        ],
+        "attributes": {
+            "barbarianAggressionMultiplier": 0.8,
+            "combatMultipliers": {
+                "attackCost": {
+                    "knight": 1.2,
+                    "swordsman": 1.2
+                }
+            },
+            "economyMultipliers": {
+                "maintenanceCost": {
+                    "settler": 0.8,
+                    "worker": 0.8
+                }
+            }
+        },
+        "mediaBaseUrl": "assets/leaders/Anselm"
     },
     {
-        "name": "Yrsa",        
-        "description": "A fierce and determined leader, known for her military prowess and unwavering loyalty.",        
-        "focus": ["exploration", "military", "expansion"]
+        "name": "Bramble",
+        "description": "An ancient warden of the wildwood, patient as the oak and slow to anger \u2014 but his roots run deep, and his people endure.",
+        "focus": [
+            "exploration",
+            "expansion",
+            "defense"
+        ],
+        "attributes": {
+            "economyMultipliers": {
+                "income": {
+                    "iron": 0.9,
+                    "wood": 1.5
+                }
+            },
+            "movementCostMultiplier": {
+                "Grasslands": 0.8,
+                "Swamp": 0.8
+            }
+        },
+        "mediaBaseUrl": "assets/leaders/Bramble"
+    },
+    {
+        "name": "Dagna",
+        "description": "A master smith who learned war at the forge. Her iron is honest, her temper is short, and her armies are well armed.",
+        "focus": [
+            "expansion",
+            "military",
+            "defense"
+        ],
+        "attributes": {
+            "economyMultipliers": {
+                "income": {
+                    "food": 0.9,
+                    "iron": 1.5
+                },
+                "spawnCost": {
+                    "forge": 0.8,
+                    "mine": 0.8
+                }
+            }
+        },
+        "mediaBaseUrl": "assets/leaders/Dagna"
+    },
+    {
+        "name": "Kaida",
+        "description": "A warlord of the dragon banners who strikes first and asks nothing. Her enemies learn her name from the field, not from envoys.",
+        "focus": [
+            "military",
+            "aggression",
+            "exploration"
+        ],
+        "attributes": {
+            "combatMultipliers": {
+                "armor": {
+                    "blunt": 0.9
+                },
+                "attackCost": {
+                    "knight": 0.8,
+                    "swordsman": 0.8
+                },
+                "damage": {
+                    "slashing": 1.2
+                }
+            }
+        },
+        "mediaBaseUrl": "assets/leaders/Kaida"
+    },
+    {
+        "name": "Meera",
+        "description": "A merchant queen draped in gold and gems. Every road into her cities pays, and every deal she makes pays twice.",
+        "focus": [
+            "expansion",
+            "diplomacy",
+            "economy"
+        ],
+        "attributes": {
+            "economyMultipliers": {
+                "income": {
+                    "gems": 1.5,
+                    "iron": 0.9
+                },
+                "spawnCost": {
+                    "worker": 0.8
+                }
+            },
+            "scoreMultiplier": {
+                "economic": 1.1
+            }
+        },
+        "mediaBaseUrl": "assets/leaders/Meera"
+    },
+    {
+        "name": "Rashid",
+        "description": "A caravan lord in silks and gold, whose coffers fund whatever his armies cannot win \u2014 and whose word, once bought, holds.",
+        "focus": [
+            "expansion",
+            "diplomacy",
+            "defense"
+        ],
+        "attributes": {
+            "economyMultipliers": {
+                "income": {
+                    "gold": 1.5,
+                    "wood": 0.9
+                }
+            },
+            "movementCostMultiplier": {
+                "Desert": 0.8
+            }
+        },
+        "mediaBaseUrl": "assets/leaders/Rashid"
+    },
+    {
+        "name": "Samara",
+        "description": "The eldest voice of the desert clans, wrapped in undyed linen. She has outlasted droughts, kings, and three empires \u2014 her people endure because she teaches them how.",
+        "focus": [
+            "defense",
+            "exploration",
+            "economy"
+        ],
+        "attributes": {
+            "economyMultipliers": {
+                "income": {
+                    "food": 1.5,
+                    "iron": 0.9
+                }
+            },
+            "movementCostMultiplier": {
+                "Desert": 0.5
+            }
+        },
+        "mediaBaseUrl": "assets/leaders/Samara"
+    },
+    {
+        "name": "Sefu",
+        "description": "A scarred veteran in dented plate who has held every line he was ever given. His soldiers do not break, because he never has.",
+        "focus": [
+            "defense",
+            "military",
+            "expansion"
+        ],
+        "attributes": {
+            "combatMultipliers": {
+                "armor": {
+                    "blunt": 0.9,
+                    "piercing": 1.2,
+                    "slashing": 1.2
+                }
+            },
+            "economyMultipliers": {
+                "maintenanceCost": {
+                    "knight": 0.8,
+                    "swordsman": 0.8
+                }
+            }
+        },
+        "mediaBaseUrl": "assets/leaders/Sefu"
+    },
+    {
+        "name": "Temur",
+        "description": "A hunter of the steppe who rides light and shoots far. His riders are never where you expect them, and always where it hurts.",
+        "focus": [
+            "exploration",
+            "military",
+            "aggression"
+        ],
+        "attributes": {
+            "combatMultipliers": {
+                "attackCost": {
+                    "bowman": 0.8,
+                    "longbowman": 0.8
+                },
+                "damage": {
+                    "blunt": 0.9,
+                    "piercing": 1.2
+                },
+                "damageVs": {
+                    "horseman": 1.2,
+                    "knight": 0.8
+                }
+            }
+        },
+        "mediaBaseUrl": "assets/leaders/Temur"
+    },
+    {
+        "name": "Yrsa",
+        "description": "A fierce and determined leader, known for her military prowess and unwavering loyalty.",
+        "focus": [
+            "exploration",
+            "military",
+            "expansion"
+        ],
+        "attributes": {
+            "combatMultipliers": {
+                "damage": {
+                    "blunt": 0.9,
+                    "polearm": 1.2
+                },
+                "terrain": {
+                    "SnowyHills": 1.1,
+                    "SnowyMountains": 1.2
+                }
+            },
+            "movementCostMultiplier": {
+                "SnowyHills": 0.8,
+                "SnowyMountains": 0.8
+            }
+        },
+        "mediaBaseUrl": "assets/leaders/Yrsa"
     }
 ]

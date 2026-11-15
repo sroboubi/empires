@@ -94,26 +94,34 @@ const PLAYER_METHODS = new Set([
   'getEntities', 'getOpponents', 'isExplored', 'isVisible', 'hasResources',
   'hasOrders', 'getResourceProfile', 'getHistory', 'getHistoryRange',
   'addHistoryEntry',
+  // Leader-twist adjusted values (Phase 25): read-only, own player only
+  // (foreign players get the restricted proxy, so their twists stay hidden).
+  'getSpawnCost', 'getMaintenanceCost', 'getYields', 'getAttackCost',
+  'getAttackValue', 'getArmorValue', 'getMovementCostMultiplier',
 ]);
 const GAMESTATE_METHODS = new Set([
   'getEntityAt', 'getEntityById', 'getChatHistory', 'getChatKey',
+  'getActiveTradesForPlayer', 'cancelTrade',
 ]);
 const ENTITY_METHODS = new Set([
   'getActions', 'canSpawnOn', 'getMovementCost', 'getCostToMaintain',
   'getCostToSpawn', 'getOrdersRequired', 'info', 'canYield',
+  // Phase 25: owner-adjusted properties of VISIBLE entities are public,
+  // including those of other players.
+  'getAttackValue', 'getArmorValue', 'getAttackCost',
 ]);
 const MAP_READ_METHODS = new Set(['get', 'has', 'keys', 'values', 'entries', 'forEach', Symbol.iterator]);
 const SET_READ_METHODS = new Set(['has', 'keys', 'values', 'entries', 'forEach', Symbol.iterator]);
 const HELPER_METHODS = new Set([
   'distance', 'getNeighbors', 'getCellsArray', 'getCell', 'getCellCount',
   'directionTo', 'movementCostTo', 'getSightAndTrajectory', 'getConfig',
-  'calculateAttackMultiplier', 'camelToTitle', 'aiLog', 'findReachableCells',
+  'calculateAttackMultiplier', 'camelToTitle', 'formatResourceBundle', 'aiLog', 'findReachableCells',
   'findBuildCandidates', 'isBuilder', 'isRepairer', 'isCombatCapable',
   'isMobile', 'getCombatPower', 'combatEffectiveness', 'isDedicatedMilitary',
   'isMilitary', 'getEntitiesByCapability', 'getEntitiesSortedByPower',
   'getEntitiesSortedByEffectiveness', 'findClosestEntity',
   'findPathTowardsUnexplored', 'selectCandidateCombatUnits',
-  'attack', 'build', 'support', 'explore', 'moveAlongPath', 'chat',
+  'attack', 'build', 'support', 'explore', 'moveAlongPath', 'chat', 'initiateTrade',
   'onActionDone', 'getDirections8',
 ]);
 
@@ -274,6 +282,23 @@ function deepWrap(obj, aiName, seen = new WeakMap(), ownPlayer = null) {
       // so intercept the property too — otherwise enemyUnit.actions[0].do() bypasses the guard.
       if (prop === 'actions' && Array.isArray(target.actions)) {
         return wrapActionsWithOwnership(target.actions, target, target.name, aiName, seen, ownPlayer);
+      }
+
+      // Phase 25: adjusted properties of VISIBLE entities are public, even
+      // for other players. The `yields` getter must run on the real entity
+      // (not the proxy) so the real owner's twist functions apply; otherwise
+      // the proxy owner would hide them and fall back to raw values.
+      if (isEntityObject(target) && (prop === 'yields' || prop === 'baseYields')) {
+        return deepWrap(Reflect.get(target, prop, target), aiName, seen, ownPlayer);
+      }
+
+      // getMovementCost is an own-entity calculation ("can MY unit move
+      // here?"). Hide it on foreign and ownerless entities; only the entity's
+      // owner may ask its own movement cost.
+      if (isEntityObject(target) && ownPlayer && prop === 'getMovementCost') {
+        const ownerId = target.ownerId ?? target.owner?.id;
+        const isOwned = ownerId !== undefined && String(ownerId) === String(ownPlayer.id);
+        if (!isOwned) return undefined;
       }
 
       // Reflect.get with receiver can throw for built-in accessors (e.g. Set.prototype.size
@@ -610,6 +635,39 @@ export function createGameStateProxy(gameState, ownPlayer, aiName, seen = new We
         return deepWrap(filtered, aiName, seen, ownPlayer);
       }
 
+      // Trades privacy: an AI may only inspect trade agreements involving its own empire.
+      if (prop === 'trades') {
+        const trades = target.trades || [];
+        const filtered = trades.filter(t => String(t.player1Id) === String(ownPlayerId) || String(t.player2Id) === String(ownPlayerId));
+        return deepWrap(filtered, aiName, seen, ownPlayer);
+      }
+
+      if (prop === 'getActiveTradesForPlayer') {
+        return (p) => {
+          const playerId = (p && typeof p === 'object') ? p.id : p;
+          if (String(playerId) !== String(ownPlayerId)) return [];
+          const list = target.getActiveTradesForPlayer(p);
+          return deepWrap(list, aiName, seen, ownPlayer);
+        };
+      }
+
+      // Trade cancellation: an AI may cancel an active agreement only if its
+      // own empire is a participant. The canceling player is forced to the
+      // AI's own player, so a caller cannot cancel or attribute on another
+      // player's behalf.
+      if (prop === 'cancelTrade') {
+        return (tradeId) => {
+          const trades = target.trades || [];
+          const trade = trades.find(t => String(t.id) === String(tradeId) && t.active);
+          if (!trade) return false;
+          if (String(trade.player1Id) !== String(ownPlayerId) &&
+            String(trade.player2Id) !== String(ownPlayerId)) {
+            return false;
+          }
+          return target.cancelTrade(trade.id, target.getPlayerById(ownPlayerId));
+        };
+      }
+
       // Reflect.get with receiver can throw for built-in accessors (e.g. Set.prototype.size
       // when target is a Set): the getter runs with `this` = proxy, which lacks the internal slots.
       // Fall back to target-bound lookup in that case.
@@ -725,6 +783,14 @@ function createHelperProxy(helper, ownPlayer, aiName, seen = new WeakMap(), prox
                 `[AI Interface] Illegal chat: AI '${aiName}' cannot chat as another player.`
               );
             }
+          }
+          // Trade: an AI can only initiate a trade as itself — the
+          // initiator is forced to the AI's own player (same pattern as
+          // the gameState proxy's cancelTrade). A caller cannot propose
+          // (or have accepted) a trade on another player's behalf,
+          // including the human.
+          if (prop === 'initiateTrade') {
+            args[0] = ownPlayer;
           }
           // P8: hand the helper the caller's FILTERED gameState, not the raw
           // one, so its algorithms (build candidates, paths, reachability)

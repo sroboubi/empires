@@ -148,16 +148,21 @@ function resolveProductionPath(player, gameState, targetName, manifest, helper, 
  * Finds all construct definitions yielding a given resource, ranked by yield efficiency.
  * @param {Object} manifest
  * @param {string} resKey
+ * @param {Object} player - the planning player (its Player functions give
+ *   the twist-adjusted yields and spawn cost it actually earns and pays)
  * @returns {Array<{name: string, meta: Object, yieldAmt: number, efficiency: number}>}
  */
-function findProducersForResource(manifest, resKey) {
+function findProducersForResource(manifest, resKey, player) {
     const producers = [];
     for (const [name, meta] of Object.entries(manifest?.entities || {})) {
         if (!meta || !meta.yields) continue;
-        const yieldAmt = meta.yields[resKey] || 0;
+        // Leader twists (Phase 25): rank by the yields and spawn cost this
+        // player actually earns and pays, not the raw manifest values.
+        const yieldAmt = player.getYields(name)[resKey] || 0;
         if (yieldAmt <= 0) continue;
 
-        const costSum = meta.spawnCost ? Object.values(meta.spawnCost).reduce((sum, v) => sum + v, 0) : 1;
+        const spawnCost = player.getSpawnCost(name);
+        const costSum = Object.values(spawnCost).reduce((sum, v) => sum + v, 0) || 1;
         const efficiency = yieldAmt / (costSum || 1);
         producers.push({ name, meta, yieldAmt, efficiency });
     }
@@ -175,7 +180,7 @@ async function handleCriticalDeficits(player, gameState, manifest, myEntities, e
     if (urgentNeeds.length === 0) return false;
 
     for (const need of urgentNeeds) {
-        const producers = findProducersForResource(manifest, need.res);
+        const producers = findProducersForResource(manifest, need.res, player);
         if (producers.length === 0) continue;
 
         helper.aiLog(player, 'econ', `Addressing ${need.res} deficit (net: ${need.net}, stock: ${need.stock}/${need.target}). Candidate producers: [${producers.map(p => `${p.name}(+${p.yieldAmt})`).join(', ')}]`);
@@ -187,7 +192,9 @@ async function handleCriticalDeficits(player, gameState, manifest, myEntities, e
             const builder = step.builderEntity;
             const target = step.targetName;
             const targetMeta = manifest.entities[target];
-            const spawnCost = targetMeta?.spawnCost || {};
+            // Leader twists (Phase 25): check affordability and reserve the
+            // spawn cost this player actually pays, not the raw manifest cost.
+            const spawnCost = player.getSpawnCost(target);
 
             // If we lack the spawn resources for this immediate step, record needed resources into reservedResources
             if (player.hasResources && !player.hasResources(spawnCost)) {
@@ -378,7 +385,9 @@ async function handleCombatAndThreats(player, gameState, manifest, myEntities, i
                 if (step) {
                     const builder = step.builderEntity;
                     const target = step.targetName;
-                    const cost = manifest.entities[target]?.spawnCost || {};
+                    // Leader twists (Phase 25): check affordability against
+                    // the spawn cost this player actually pays.
+                    const cost = player.getSpawnCost(target);
                     if (player.hasResources && player.hasResources(cost)) {
                         helper.aiLog(player, 'combat', `Threat Defense: Lack military to engage threats! Spawning military defender ${helper.camelToTitle(target)} via ${builder.name} at (${builder.q},${builder.r}).`);
                         const { ordersUsed } = helper.build(gameState, builder, target);
@@ -484,7 +493,12 @@ async function handleProactiveGrowth(player, gameState, manifest, myEntities, ev
         const meta = manifest.entities[cand.targetName];
         if (!meta) continue;
 
-        const spawnCost = meta.spawnCost || {};
+        // Leader twists (Phase 25): plan with the spawn cost, yields, and
+        // maintenance this player actually pays and earns, not the raw
+        // manifest values.
+        const spawnCost = player.getSpawnCost(cand.targetName);
+        const yields = player.getYields(cand.targetName);
+        const maintenance = player.getMaintenanceCost(cand.targetName);
         if (player.hasResources && !player.hasResources(spawnCost)) continue;
 
         // Check if building this candidate would spend resources reserved for pending deficit resolution
@@ -504,7 +518,7 @@ async function handleProactiveGrowth(player, gameState, manifest, myEntities, ev
 
         // Check maintenance sustainability (ensure building this will not cause an unrecoverable deficit)
         let canMaintain = true;
-        for (const [res, amt] of Object.entries(meta.maintenance || {})) {
+        for (const [res, amt] of Object.entries(maintenance)) {
             const projectedNet = (profile.netIncome[res] || 0) - amt;
             const currentStock = stock[res] || 0;
             if (projectedNet < 0 && currentStock < Math.abs(projectedNet) * 5) {
@@ -517,12 +531,12 @@ async function handleProactiveGrowth(player, gameState, manifest, myEntities, ev
         // Calculate score value & utility
         const milScore = meta.score?.military || 0;
         const ecoScore = meta.score?.economic || 0;
-        const isSettlement = meta.spawnConditions?.minSeparation >= 3 || (meta.yields?.orders || 0) > 0;
-        const yieldsOrders = (meta.yields?.orders || 0) > 0;
+        const isSettlement = meta.spawnConditions?.minSeparation >= 3 || (yields.orders || 0) > 0;
+        const yieldsOrders = (yields.orders || 0) > 0;
         const combatVal = meta.damage?.value || 0;
 
         let resourceUtility = 0;
-        for (const [res, yieldAmt] of Object.entries(meta.yields || {})) {
+        for (const [res, yieldAmt] of Object.entries(yields)) {
             if (res === 'orders') continue;
             const net = profile.netIncome[res] || 0;
             const currentStock = stock[res] || 0;
@@ -680,6 +694,13 @@ export class SmartManager extends BaseManager {
         return {
             content: "There is no time for words!",
             ended: true
+        };
+    }
+
+    async handleTradeOffer(proposer, offer) {
+        return {
+            action: 'reject',
+            message: "Our economy does not support foreign resource trading at this time."
         };
     }
 }

@@ -24,7 +24,10 @@ import FableAi from './fableAi.js';
  *   last resort only for custom configurations.
  *
  * The only hardcoded resource is "orders" (spec hint 20). Entity capabilities
- * come from getActions(), and all values come from the manifest.
+ * come from getActions(), and all values come from the manifest as adjusted
+ * for this AI's own leader twists — the type catalog (FableAi.loadCatalog)
+ * runs each manifest type through adjustedView, so every t.yields / t.cost /
+ * t.maint / t.dmg / t.scale / t.armor read below is already twist-adjusted.
  */
 
 const ORDERS = 'orders';

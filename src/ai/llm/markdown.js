@@ -9,9 +9,11 @@
  *   warnings, relative positions, per-unit capabilities) are inlined so the
  *   model never does relational lookups or game math.
  *
- * Dependency-free: no imports from the game engine (hexGrid.js pulls in URL
- * imports). Hex distance is inlined below.
+ * No imports from the game engine (hexGrid.js pulls in URL imports) — the
+ * only import is the twist-adjusted-view adapter inside src/ai.
+ * Hex distance is inlined below.
  */
+import { adjustedView } from '../adjustedView.js';
 
 const IMPASSABLE = 1e1000;
 const WATER_TERRAINS = ['ShallowWater', 'DeepWater', 'Ocean'];
@@ -19,21 +21,27 @@ const WATER_TERRAINS = ['ShallowWater', 'DeepWater', 'Ocean'];
 /**
  * Converts the entity manifest to high-density Markdown for the system prompt.
  * @param {Array<Object>} entities - Raw entity definitions (definitions/entities.json).
+ * @param {Object} [player] - the acting (proxied) player, when the catalog is
+ *   for that player's LLM. With it, costs / upkeep / yields / damage / armor
+ *   are the player's twist-adjusted values (via adjustedView); without it
+ *   the raw manifest values are rendered (existing behavior, e.g. tests).
  * @returns {string} Markdown catalog.
  */
-export function manifestToMarkdown(entities) {
+export function manifestToMarkdown(entities, player = null) {
   // Units move, structures don't. Data-driven split on movement presence.
   const units = entities.filter(e => e.movement);
   const structures = entities.filter(e => !e.movement);
 
+  const view = player ? (e) => adjustedView(player, e, e.name) : (e) => e;
+
   const lines = [];
   if (units.length) {
     lines.push('## UNITS');
-    for (const e of units) lines.push(entityToMarkdown(e));
+    for (const e of units) lines.push(entityToMarkdown(view(e)));
   }
   if (structures.length) {
     lines.push('## STRUCTURES');
-    for (const e of structures) lines.push(entityToMarkdown(e));
+    for (const e of structures) lines.push(entityToMarkdown(view(e)));
   }
   return lines.join('\n');
 }

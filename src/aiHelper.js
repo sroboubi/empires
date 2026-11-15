@@ -10,7 +10,7 @@
  * `helper.attack(...)`, `helper.findReachableCells(...)`, etc. directly.
  */
 import { HexGrid, DIRECTIONS_8 } from './hexGrid.js';
-import { camelToTitle, sleep, calculateAttackMultiplier } from './utils.js';
+import { camelToTitle, sleep, calculateAttackMultiplier, formatResourceBundle } from './utils.js';
 import { applyResourceYieldBonus } from './resources.js';
 import Entity from './entity.js';
 import { CONFIG } from './config.js';
@@ -112,8 +112,8 @@ export class AiHelper {
     }
 
     /** Calculate the attack multiplier for a combat action. */
-    calculateAttackMultiplier(gameState, sourceCell, elevationAdjustment, targetEntity) {
-        return calculateAttackMultiplier(gameState, sourceCell, elevationAdjustment, targetEntity);
+    calculateAttackMultiplier(gameState, sourceCell, elevationAdjustment, targetEntity, attackerEntity) {
+        return calculateAttackMultiplier(gameState, sourceCell, elevationAdjustment, targetEntity, attackerEntity);
     }
 
     /** Apply the resource yield bonus for a construct on a cell. */
@@ -124,6 +124,11 @@ export class AiHelper {
     /** Convert camelCase to Title Case. */
     camelToTitle(text) {
         return camelToTitle(text);
+    }
+
+    /** Format a resource bundle map (e.g. { gold: 5 }) for prompts/logs. */
+    formatResourceBundle(bundle) {
+        return formatResourceBundle(bundle);
     }
 
     /** Create a new entity instance. */
@@ -296,10 +301,21 @@ export class AiHelper {
     }
 
     getCombatPower(entity, meta) {
-        const dmg = entity?.damage?.value || meta?.damage?.value || 0;
+        // Leader twists (Phase 25): the owner's Player functions value the
+        // entity at what it actually hits and absorbs for. Visible entity
+        // properties are public, so this applies for other players' visible
+        // entities too. damageVs and terrain need a target and a terrain, so
+        // they stay out of this context-free estimate (getAttackValue with
+        // no conditions). Falls back to the entity's own damage/armor when
+        // it has no owner or the manifest has no entry for it.
+        const owner = entity?.owner;
+        const rawDmg = entity?.damage?.value || meta?.damage?.value || 0;
+        const dmg = owner ? (owner.getAttackValue(entity.name).value || rawDmg) : rawDmg;
         const hp = entity?.health || meta?.health || 1;
         const rangeMult = (entity?.range?.maxCells || meta?.range?.maxCells) ? 1.5 : 1.0;
-        const armorSum = Object.values(entity?.armor || meta?.armor || {}).reduce((s, v) => s + v, 0);
+        const baseArmor = entity?.armor || meta?.armor || {};
+        const armorMap = owner ? owner.getArmorValue(entity.name) : {};
+        const armorSum = Object.keys(baseArmor).reduce((s, t) => s + (armorMap[t] ?? baseArmor[t] ?? 1), 0);
         return (dmg * hp * rangeMult) + (armorSum * 10);
     }
 
@@ -523,7 +539,7 @@ export class AiHelper {
         const initialDist = this.distance(sourceEntity.cell || sourceEntity, targetEntity.cell || targetEntity);
 
         const attackMultiplier = (cell) => this.calculateAttackMultiplier(
-            gameState, cell, sourceEntity.damage.elevationAdjustment, targetEntity);
+            gameState, cell, sourceEntity.damage.elevationAdjustment, targetEntity, sourceEntity);
 
         this.aiLog(attackerPlayer, 'combat', `Engaging Target: ${sourceEntity.name}#${sourceEntity.id?.slice(-4)} (${attackerPlayer.name}) at (${sourceEntity.q},${sourceEntity.r}) [HP:${Math.round(sourceEntity.health)}/${sourceEntity.maxHealth}, AP:${sourceEntity.actionPoints}] attacking ${targetPlayer.name}'s ${targetEntity.name}#${targetEntity.id?.slice(-4)} at (${targetEntity.q},${targetEntity.r}) [HP:${Math.round(targetEntity.health)}/${targetEntity.maxHealth}, Dist:${initialDist} hexes, MaxOrders:${availableOrders}].`);
 
@@ -543,18 +559,22 @@ export class AiHelper {
             const costFunc = sourceEntity.getMovementCost.bind(sourceEntity);
             // Dry-run attack cost from a candidate cell (same formula as
             // entity.js Attack canDo, without moving there first).
+            // Leader twist (Phase 25): the attacker's adjusted attack-cost
+            // scale, from the owning player's getAttackCost, matching canDo.
+            const attackCostScale = sourceEntity.owner
+                ? sourceEntity.owner.getAttackCost(sourceEntity.name)
+                : (sourceEntity.attackCostScale ?? 1);
             const attackCostFrom = (cell) => {
-                const scale = sourceEntity.attackCostScale ?? 1;
                 const exh = sourceEntity.state?.battleExhaustion ?? 1;
                 if (sourceEntity.range && typeof sourceEntity.range === 'object') {
-                    return Math.ceil(scale * exh * this.distance(cell, targetCell));
+                    return Math.ceil(attackCostScale * exh * this.distance(cell, targetCell));
                 }
                 const pathRes = this.movementCostTo(cell, targetCell, costFunc, { allowDetours: true });
                 // A best-effort path's cost is the cost to the closest
                 // reachable cell, NOT to the target — an unreachable target
                 // must look unaffordable, not cheap.
                 if (!pathRes || !pathRes.reached) return Infinity;
-                return Math.ceil(scale * exh * pathRes.cost);
+                return Math.ceil(attackCostScale * exh * pathRes.cost);
             };
 
             if (isCurrentPossible && currentMult > 1.0) {
@@ -1015,11 +1035,13 @@ export class AiHelper {
         // Case 1: Both players are AI -> background chat loop (invisible to human)
         if (initiatorHarness && receiverHarness) {
             let firstMsg = initialMessage;
+            let firstEmote = null;
             if (!firstMsg) {
                 const opening = await initiatorHarness.generateChatReply(viewOf(initiatorHarness, receiver), "Open diplomatic dialogue with an initial statement or proposal.");
                 firstMsg = opening.content;
+                firstEmote = opening.emote;
             }
-            this.gameState.addChatMessage(initiator, receiver, firstMsg);
+            this.gameState.addChatMessage(initiator, receiver, firstMsg, false, firstEmote);
 
             let currentSpeaker = receiver;
             let currentHarness = receiverHarness;
@@ -1027,7 +1049,7 @@ export class AiHelper {
 
             for (let i = 0; i < maxEx; i++) {
                 const reply = await currentHarness.generateChatReply(viewOf(currentHarness, otherPlayer));
-                this.gameState.addChatMessage(currentSpeaker, otherPlayer, reply.content);
+                this.gameState.addChatMessage(currentSpeaker, otherPlayer, reply.content, reply.ended, reply.emote);
 
                 if (reply.ended) {
                     console.log(`[AiHelper] AI-to-AI chat terminated by ${currentSpeaker.name} at exchange ${i + 1}`);
@@ -1055,9 +1077,12 @@ export class AiHelper {
         const aiHarness = initiatorHarness || receiverHarness;
 
         if (initiator.isAI) {
-            // AI opening statement
-            const opening = initialMessage || (await aiHarness.generateChatReply(humanPlayer, "Open diplomatic dialogue with an initial statement or proposition to the human leader.")).content;
-            this.gameState.addChatMessage(aiPlayer, humanPlayer, opening);
+            // AI opening statement — keep its emote and ended flag so the
+            // first message renders with the chosen portrait.
+            const opening = initialMessage
+                ? { content: initialMessage, emote: null, ended: false }
+                : await aiHarness.generateChatReply(humanPlayer, "Open diplomatic dialogue with an initial statement or proposition to the human leader.");
+            this.gameState.addChatMessage(aiPlayer, humanPlayer, opening.content, !!opening.ended, opening.emote);
         }
 
         // Bring up chat window and await until closed/ended.
@@ -1067,6 +1092,174 @@ export class AiHelper {
         // No-op in headless mode where no callback is registered.
         await this.gameState?.onOpenChatModal?.(humanPlayer, aiPlayer);
         return true;
+    }
+
+    /**
+     * Resolve a player reference (Player, proxy, id, name-less object) to the
+     * engine's real Player instance.
+     * @param {Player|string|number} player
+     * @returns {Player|null}
+     */
+    _resolveTradePlayer(player) {
+        if (!player) return null;
+        const id = (typeof player === 'object') ? player.id : player;
+        return this.gameState?.getPlayerById?.(id) || null;
+    }
+
+    /**
+     * P5: each manager must see the other party through its own filtered
+     * gameState, never the raw Player (which would leak resources/history).
+     */
+    _viewOfPlayer(harness, player) {
+        const gs = harness?.gameState;
+        if (gs && Array.isArray(gs.players)) {
+            return gs.players.find(p => String(p.id) === String(player.id)) || player;
+        }
+        return player;
+    }
+
+    /**
+     * Applies an accepted trade offer to the game state.
+     * @param {Player} proposer
+     * @param {Player} receiver
+     * @param {Object} offer
+     * @returns {{ok: boolean, reason?: string, trade?: Object}}
+     */
+    _applyAcceptedTrade(proposer, receiver, offer) {
+        if (offer.type === 'one_time') {
+            const result = this.gameState.executeOneTimeTrade(
+                proposer, receiver, offer.proposerGives, offer.proposerAsks
+            );
+            return result.success ? { ok: true } : { ok: false, reason: result.reason };
+        }
+        const trade = this.gameState.createPerTurnTrade(
+            proposer, receiver, offer.proposerGives, offer.proposerAsks
+        );
+        return trade
+            ? { ok: true, trade }
+            : { ok: false, reason: 'Invalid per-turn agreement.' };
+    }
+
+    /**
+     * Initiates a trade proposal from `initiator` to `receiver`.
+     *
+     * - AI receiver: its manager evaluates the offer (accept / counter / reject)
+     *   and the accepted exchange is applied immediately. Counter-offers get
+     *   one bounded round of evaluation by the original proposer.
+     * - Human receiver: opens the trade UI through `gameState.onOpenTradeModal`
+     *   and waits for the human's decision (the modal close also ends the wait).
+     *
+     * @param {Player|string|number} initiator
+     * @param {Player|string|number} receiver
+     * @param {Object} offer - { type: 'one_time'|'per_turn', proposerGives, proposerAsks }
+     * @returns {Promise<{status: 'accepted'|'countered'|'rejected'|'invalid'|'failed', reason?: string, trade?: Object}>}
+     */
+    async initiateTrade(initiator, receiver, offer) {
+        const proposer = this._resolveTradePlayer(initiator);
+        const target = this._resolveTradePlayer(receiver);
+        const check = this.gameState?.validateTradeOffer?.(proposer, target, offer, {
+            requireAffordable: offer?.type === 'one_time'
+        });
+        if (!check?.ok) {
+            return { status: 'invalid', reason: check?.reason || 'Invalid trade offer.' };
+        }
+
+        const typeLabel = offer.type === 'per_turn' ? 'per-turn agreement' : 'one-time trade';
+        this.gameState.addChatMessage(
+            proposer,
+            target,
+            `*[Trade Proposal: Proposing ${typeLabel} — Offering ${formatResourceBundle(offer.proposerGives)} for ${formatResourceBundle(offer.proposerAsks)}]*`
+        );
+
+        // Human receiver: hand the offer to the UI and wait for the decision.
+        if (!target.isAI) {
+            if (typeof this.gameState.onOpenTradeModal !== 'function') {
+                return { status: 'failed', reason: 'Trade UI is unavailable.' };
+            }
+            const decision = await this.gameState.onOpenTradeModal(target, proposer, offer);
+            if (decision?.action === 'accept') {
+                if (!decision.applied) {
+                    const applied = this._applyAcceptedTrade(proposer, target, offer);
+                    if (!applied.ok) return { status: 'failed', reason: applied.reason };
+                }
+                await this.onActionDone(this.gameState, null, 'Trade agreement accepted');
+                return { status: 'accepted' };
+            }
+            if (decision?.action === 'counter') return { status: 'countered' };
+            return { status: 'rejected', reason: decision?.reason };
+        }
+
+        const receiverHarness = await target.getAiManager();
+        if (!receiverHarness) {
+            return { status: 'failed', reason: `${target.name} cannot negotiate trade right now.` };
+        }
+
+        const decision = await receiverHarness.handleTradeOffer(
+            this._viewOfPlayer(receiverHarness, proposer), offer
+        );
+        if (decision?.message) this.gameState.addChatMessage(target, proposer, decision.message);
+
+        if (decision?.action === 'accept') {
+            const applied = this._applyAcceptedTrade(proposer, target, offer);
+            if (!applied.ok) {
+                this.gameState.addChatMessage(target, proposer, `*[Trade failed: ${applied.reason}]*`);
+                return { status: 'failed', reason: applied.reason };
+            }
+            this.gameState.addChatMessage(
+                target, proposer,
+                `*[Trade accepted: ${formatResourceBundle(offer.proposerGives)} for ${formatResourceBundle(offer.proposerAsks)}]*`
+            );
+            await this.onActionDone(this.gameState, null, 'Trade agreement accepted');
+            return { status: 'accepted', trade: applied.trade };
+        }
+
+        if (decision?.action === 'counter') {
+            // Bounded counter-exchange: the original proposer evaluates once.
+            const counterOffer = {
+                type: offer.type,
+                proposerGives: decision.counterOffer?.proposerGives,
+                proposerAsks: decision.counterOffer?.proposerAsks
+            };
+            const counterCheck = this.gameState.validateTradeOffer(proposer, target, counterOffer, {
+                requireAffordable: offer.type === 'one_time'
+            });
+            if (!counterCheck.ok) {
+                return { status: 'rejected', reason: `Invalid counter-offer: ${counterCheck.reason}` };
+            }
+
+            const initiatorHarness = await proposer.getAiManager();
+            if (!initiatorHarness) {
+                return { status: 'rejected', reason: 'Counter-offer cannot be evaluated.' };
+            }
+            // The counterOffer is in the ORIGINAL proposer's frame (proposerGives
+            // = what the proposer sends, proposerAsks = what the target sends),
+            // but the proposer's handleTradeOffer reads it in the OFFERING
+            // player's frame (proposer = the target). Swap the bundles for the
+            // evaluation so the proposer judges the deal the right way round.
+            // Execution below still uses the original counterOffer (proposer frame).
+            const offerForProposer = {
+                type: counterOffer.type,
+                proposerGives: counterOffer.proposerAsks,
+                proposerAsks: counterOffer.proposerGives
+            };
+            const reply = await initiatorHarness.handleTradeOffer(
+                this._viewOfPlayer(initiatorHarness, target), offerForProposer
+            );
+            if (reply?.message) this.gameState.addChatMessage(proposer, target, reply.message);
+            if (reply?.action === 'accept') {
+                const applied = this._applyAcceptedTrade(proposer, target, counterOffer);
+                if (!applied.ok) return { status: 'failed', reason: applied.reason };
+                this.gameState.addChatMessage(
+                    proposer, target,
+                    `*[Counter-offer accepted: ${formatResourceBundle(counterOffer.proposerGives)} for ${formatResourceBundle(counterOffer.proposerAsks)}]*`
+                );
+                await this.onActionDone(this.gameState, null, 'Trade agreement accepted');
+                return { status: 'accepted', trade: applied.trade };
+            }
+            return { status: 'rejected', reason: 'Counter-offer declined.' };
+        }
+
+        return { status: 'rejected' };
     }
 
     /**

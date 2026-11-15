@@ -1073,3 +1073,200 @@
 .chat-thinking { display: inline-block; animation: pulse 1.5s infinite; }
 .chat-concluded { color: #f1c40f; }
 .chat-error { color: #e74c3c; }
+
+/* --- chat trade slide-out drawer --- */
+.chat-card-expanded {
+  width: 1040px !important;
+  max-width: 96vw !important;
+  transition: width 0.25s ease;
+}
+
+.chat-modal-body {
+  display: flex;
+  flex-direction: row;
+  flex: 1;
+  min-height: 0;
+  gap: 12px;
+  overflow: hidden;
+}
+
+.chat-messages-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 320px;
+  min-height: 0;
+}
+
+.chat-trade-drawer {
+  width: 380px;
+  display: none;
+  flex-direction: column;
+  background: rgba(13, 17, 23, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 14px;
+  overflow-y: auto;
+  gap: 12px;
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.3);
+  animation: tradeSlideIn 0.2s ease;
+}
+
+.chat-trade-drawer.active {
+  display: flex;
+}
+
+@keyframes tradeSlideIn {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.trade-pill-group {
+  display: flex;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.trade-pill {
+  flex: 1;
+  padding: 6px 8px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.trade-pill.active {
+  background: var(--accent-color);
+  color: #fff;
+}
+
+.trade-bundle-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.trade-bundle-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.trade-resource-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.trade-resource-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 90px;
+}
+
+.trade-qty-control {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.trade-qty-btn {
+  width: 22px;
+  height: 22px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #fff;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.trade-qty-btn:hover {
+  background: rgba(52, 152, 219, 0.3);
+  border-color: var(--accent-color);
+}
+
+.trade-qty-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.modal-card input[type="number"].trade-qty-input,
+.trade-qty-input {
+  width: 58px;
+  height: 24px;
+  padding: 0 4px !important;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  color: #fff;
+  text-align: center;
+  font-size: 12px;
+  -moz-appearance: textfield;
+  -webkit-appearance: none;
+  appearance: textfield;
+}
+
+.modal-card input[type="number"].trade-qty-input::-webkit-outer-spin-button,
+.modal-card input[type="number"].trade-qty-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.trade-qty-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.trade-offer-box {
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.trade-offer-counter {
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.trade-ongoing-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  font-size: 11px;
+}
