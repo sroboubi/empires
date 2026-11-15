@@ -185,12 +185,13 @@ export class Player {
     }
 
     this.score.exploration = Math.round(Math.pow(this.visibleCells.size * this.exploredCells.size, 1 / 3));
-    // Leader score multipliers (Phase 25 twists): apply per category, then
-    // the total is the geometric mean of the multiplied categories.
+    // Leader score multipliers (Phase 25 twists): apply per category — loop
+    // over the keys, so a future score category picks it up automatically —
+    // then the total is the geometric mean of the multiplied categories.
     const sm = this.attributes?.scoreMultiplier || {};
-    this.score.military *= (sm.military ?? 1);
-    this.score.economic *= (sm.economic ?? 1);
-    this.score.exploration *= (sm.exploration ?? 1);
+    for (const sKey of Object.keys(this.score)) {
+      this.score[sKey] *= (sm[sKey] ?? 1);
+    }
     this.score.total = Math.round(Math.pow(this.score.military * this.score.economic * this.score.exploration, 1 / 3));
   }
 
