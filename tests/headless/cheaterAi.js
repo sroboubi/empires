@@ -6,8 +6,6 @@
  * Each probe records PASS (blocked as expected) or FAIL (hole!).
  * Throws if any probe fails. Results reset every turn.
  */
-import { BaseManager } from '../../src/ai/baseManager.js';
-
 function probe(results, name, fn, expectBlocked) {
   try {
     const val = fn();
@@ -29,7 +27,19 @@ function probe(results, name, fn, expectBlocked) {
   }
 }
 
-export default class CheaterAi extends BaseManager {
+export default class CheaterAi {
+  // Local base: this red-team controller lives outside src/ai, and the
+  // boundary rule forbids importing BaseManager (inside src/ai) from here.
+  constructor(player, helper) {
+    this.player = player;
+    this.helper = helper;
+    this.gameState = helper.getGameState();
+  }
+
+  async handleTradeOffer() {
+    return { action: 'reject', message: 'No time for trade.' };
+  }
+
   async processTurn() {
     const results = [];
     const gs = this.gameState;

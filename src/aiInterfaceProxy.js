@@ -106,6 +106,9 @@ const GAMESTATE_METHODS = new Set([
 const ENTITY_METHODS = new Set([
   'getActions', 'canSpawnOn', 'getMovementCost', 'getCostToMaintain',
   'getCostToSpawn', 'getOrdersRequired', 'info', 'canYield',
+  // Phase 25: owner-adjusted properties of VISIBLE entities are public,
+  // including those of other players.
+  'getAttackValue', 'getArmorValue', 'getAttackCost',
 ]);
 const MAP_READ_METHODS = new Set(['get', 'has', 'keys', 'values', 'entries', 'forEach', Symbol.iterator]);
 const SET_READ_METHODS = new Set(['has', 'keys', 'values', 'entries', 'forEach', Symbol.iterator]);
@@ -279,6 +282,23 @@ function deepWrap(obj, aiName, seen = new WeakMap(), ownPlayer = null) {
       // so intercept the property too — otherwise enemyUnit.actions[0].do() bypasses the guard.
       if (prop === 'actions' && Array.isArray(target.actions)) {
         return wrapActionsWithOwnership(target.actions, target, target.name, aiName, seen, ownPlayer);
+      }
+
+      // Phase 25: adjusted properties of VISIBLE entities are public, even
+      // for other players. The `yields` getter must run on the real entity
+      // (not the proxy) so the real owner's twist functions apply; otherwise
+      // the proxy owner would hide them and fall back to raw values.
+      if (isEntityObject(target) && (prop === 'yields' || prop === 'baseYields')) {
+        return deepWrap(Reflect.get(target, prop, target), aiName, seen, ownPlayer);
+      }
+
+      // getMovementCost is an own-entity calculation ("can MY unit move
+      // here?"). Hide it on foreign and ownerless entities; only the entity's
+      // owner may ask its own movement cost.
+      if (isEntityObject(target) && ownPlayer && prop === 'getMovementCost') {
+        const ownerId = target.ownerId ?? target.owner?.id;
+        const isOwned = ownerId !== undefined && String(ownerId) === String(ownPlayer.id);
+        if (!isOwned) return undefined;
       }
 
       // Reflect.get with receiver can throw for built-in accessors (e.g. Set.prototype.size

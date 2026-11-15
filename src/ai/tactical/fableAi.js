@@ -1,5 +1,5 @@
 import { BaseManager } from '../baseManager.js';
-import { adjustedView } from '../adjustedView.js';
+import { adjustedView, adjustedEntityView } from '../adjustedView.js';
 
 /**
  * FableAi - a utility-driven tactical AI (see src/ai/spec.md and addenda).
@@ -387,10 +387,11 @@ export default class FableAi extends BaseManager {
         if (!entity.owner || entity.owner.id === this.player.id) {
             return this.types[entity.name] || (this.types[entity.name] = Object.assign(describeType(entity.name, plain(entity.data), this.player), { power: 0 }));
         }
-        // An enemy is evaluated with ITS owner's leader twists, not ours.
-        // (The proxy hides a foreign player's twists, so an enemy is in
-        // practice viewed at the raw manifest values.)
-        const t = describeType(entity.name, plain(entity.data), entity.owner);
+        // An enemy's VISIBLE entity properties are public: use the entity's
+        // own adjusted meta (real-owner methods), not our leader's twists.
+        // (The foreign *player* object's value functions and empire profile
+        // remain hidden; only this visible instance's properties are shown.)
+        const t = describeType(entity.name, adjustedEntityView(entity, plain(entity.data)), null);
         t.power = combatPower(t, this.refHp || 1);
         return t;
     }

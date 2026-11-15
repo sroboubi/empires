@@ -1,5 +1,5 @@
 import { BaseManager } from '../baseManager.js';
-import { adjustedView } from '../adjustedView.js';
+import { adjustedView, adjustedEntityView } from '../adjustedView.js';
 
 /**
  * OpusAI — a utility-driven tactical AI (spec: src/ai/spec.md + addendum,
@@ -204,12 +204,11 @@ export default class OpusAI extends BaseManager {
     // =====================================================================
     view(e, own) {
         // Leader twists (Phase 25): the twist fields (spawnCost, yields,
-        // maintenance, attackCostScale, damage, armor) come from the owner's
-        // Player functions, via adjustedView — never from the raw manifest.
-        // A foreign owner's functions are hidden by the proxy, so enemies
-        // (and ownerless entities) stay at raw manifest values. The
-        // manifest is never mutated: adjustedView returns a copy.
-        const def = adjustedView(e.owner, this.defs[e.name] || plainCopy(e.data || {}), e.name);
+        // maintenance, attackCostScale, damage, armor) come from the entity
+        // itself (real-owner methods), so VISIBLE entities — including
+        // other players' — show their adjusted properties. Only the empire
+        // resource profile is private. The manifest is never mutated.
+        const def = adjustedEntityView(e, this.defs[e.name] || plainCopy(e.data || {}));
         const v = {
             e, own, def, id: e.id, name: e.name, q: e.q, r: e.r,
             hp: e.health, maxHp: e.maxHealth, active: e.active,
@@ -634,10 +633,12 @@ export default class OpusAI extends BaseManager {
     // hidden by the proxy, so adjustedView falls back to raw manifest
     // values for it. A type valued for a foreign owner is never cached
     // under our own name-keyed cache.
-    typeValue(name, siteYields = null, owner = null) {
-        const cache = !siteYields && !this._partial && !owner;
+    typeValue(name, siteYields = null, owner = null, entity = null) {
+        const cache = !siteYields && !this._partial && !owner && !entity;
         if (cache && this.valueCache.has(name)) return this.valueCache.get(name);
-        const d = adjustedView(owner || this.player, this.defs[name], name);
+        const d = entity
+            ? adjustedEntityView(entity, this.defs[name] || plainCopy(entity.data || {}))
+            : adjustedView(owner || this.player, this.defs[name], name);
         if (!d) return 0;
         let v = this.directValue(d);
         v += this.yieldValue(siteYields || d.yields);
@@ -769,7 +770,7 @@ export default class OpusAI extends BaseManager {
             targets.forEach((u, i) => {
                 const dmg = h.hits * this.hitDamage(h.def, u.def, u.hp);
                 const now = h.zone.has(K(u.q, u.r)) ? 1 : this.cfg.partialDamageCredit; // next turn vs. the turn after
-                const worth = u.own ? this.assetValue(u) : this.cfg.enemyScoreWeight * this.typeValue(u.name, null, u.e.owner);
+                const worth = u.own ? this.assetValue(u) : this.cfg.enemyScoreWeight * this.typeValue(u.name, null, u.e.owner, u.e);
                 risk += now / (i + 1) * Math.min(1, dmg / Math.max(1, u.hp)) * worth;
             });
             h.risk = risk;

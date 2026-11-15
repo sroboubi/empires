@@ -2,17 +2,23 @@
  * Node-based tests for leader attributes (twists, Phase 25) and the
  * barbarian encounter mechanic.
  * Run from the repo root with:
- *   node --import ./tests/headless/stubs.mjs --loader ./tests/headless/loader.mjs --input-type=module -e "import('./src/leaderAttributes.test.js')"
+ *   node --import ./tests/headless/stubs.mjs --loader ./tests/headless/loader.mjs --input-type=module -e "import('./tests/leaderAttributes.test.js')"
  *
  * Uses mocked game states and a small inline leaders list — no browser,
  * no live game. One test also reads the real definitions/leaders.json to
  * pin Meera's score multiplier.
+ *
+ * This tests GAME code (Player/Entity/barbarians/AI proxy), so it lives in
+ * the root tests dir, not under src/ai. The src/ai boundary is strict in
+ * both directions.
  */
 import { readFileSync } from 'fs';
-import Entity from './entity.js';
-import { Player } from './player.js';
-import { barbarianTargetProbability, clearDecisionsIfDamaged } from './barbarians/manager.js';
-import { adjustedView } from './ai/adjustedView.js';
+import Entity from '../src/entity.js';
+import { Player } from '../src/player.js';
+import { barbarianTargetProbability, clearDecisionsIfDamaged } from '../src/barbarians/manager.js';
+import { createGameStateProxy, createAiManager } from '../src/aiInterfaceProxy.js';
+import { AiHelper } from '../src/aiHelper.js';
+import { calculateAttackMultiplier } from '../src/utils.js';
 
 let passed = 0, failed = 0;
 function test(name, fn) {
@@ -63,6 +69,7 @@ const TEST_ENTITIES = {
   scout: { movement: { terrainCostScale: { Desert: 2 } } },
   barbarian: { movement: { terrainCostScale: { Desert: 2 } }, armor: {}, damage: { value: 5, type: 'blunt' } },
   swordsman: {
+    movement: {},
     armor: { slashing: 2, blunt: 1 },
     damage: { value: 5, type: 'slashing' },
     attackCostScale: 10,
@@ -432,32 +439,123 @@ test('getAttackValue / getArmorValue return fresh objects (manifest never mutate
   assert(gs.manifestData.entities.swordsman.armor.slashing === 2, 'manifest armor untouched');
 });
 
-test('adjustedView returns an adjusted copy and never mutates the manifest meta', () => {
-  const gs = mockGameState([TWIST_LEADER]);
-  const p = aiPlayer('Twisty', gs);
-  // The adjusted values come from the Player functions (which read the
-  // manifest by name), so the meta passed in is the manifest swordsman
-  // definition itself; only the pass-through fields come from it.
-  const meta = { ...gs.manifestData.entities.swordsman };
-  const adjusted = adjustedView(p, meta, 'swordsman');
-  assertDeepEqual(adjusted.spawnCost, { food: 5, gold: 2.5 }, 'spawnCost adjusted');
-  assertDeepEqual(adjusted.yields, { gold: 8 }, 'yields adjusted');
-  assertDeepEqual(adjusted.maintenance, { gold: 3 }, 'maintenance adjusted');
-  assert(adjusted.attackCostScale === 8, 'attackCostScale adjusted');
-  assert(adjusted.damage.value === 6, 'damage value adjusted');
-  assertClose(adjusted.armor.slashing, 1, 'armor adjusted');
-  assertDeepEqual(meta.spawnCost, { food: 10, gold: 5 }, 'manifest meta untouched');
-  assert(meta.damage.value === 5, 'manifest damage untouched');
+// --- AI proxy isolation: visible entity properties and empire privacy --------
+
+class NoopManager {
+  constructor(player, helper) {
+    this.player = player;
+    this.helper = helper;
+  }
+}
+
+function proxyFixture() {
+  const gs = mockGameState();
+  const p1 = aiPlayer('Meera', gs); // own twists: income gems 1.5, desert move 0.5
+  const p2 = new Player(2, 'Anselm', gs, 'blue', {}, '', {
+    url: 'test://anselm',
+    attributes: {
+      economyMultipliers: {
+        income: { gold: 2 },
+        maintenanceCost: { farm: 0.5 },
+        spawnCost: { worker: 0.5 },
+      },
+      movementCostMultiplier: { Grasslands: 0.5, Desert: 0.5 },
+      combatMultipliers: { damage: { slashing: 2 }, armor: { slashing: 2 } },
+    },
+  });
+  const ownFarm = makeEntity('farm', TEST_ENTITIES.farm, p1, gs);
+  const ownMine = makeEntity('mine', TEST_ENTITIES.mine, p1, gs);
+  const ownSword = makeEntity('swordsman', TEST_ENTITIES.swordsman, p1, gs);
+  const ownScout = makeEntity('scout', TEST_ENTITIES.scout, p1, gs);
+  const foreignFarm = makeEntity('farm', TEST_ENTITIES.farm, p2, gs);
+  const foreignWorker = makeEntity('worker', TEST_ENTITIES.worker, p2, gs);
+  const foreignSword = makeEntity('swordsman', TEST_ENTITIES.swordsman, p2, gs);
+  const foreignScout = makeEntity('scout', TEST_ENTITIES.scout, p2, gs);
+
+  gs.players = [p1, p2];
+  gs.entities = [ownFarm, ownMine, ownSword, ownScout, foreignFarm, foreignWorker, foreignSword, foreignScout];
+  gs.hexGrid = { getNeighbors: () => [], getCell: () => null };
+  gs.getEntityAt = () => null;
+  p1.visibleCells = new Set(['0,0']);
+  p1.exploredCells = new Set(['0,0']);
+
+  const proxy = createGameStateProxy(gs, p1, 'test');
+  const find = (name, owner) => proxy.entities.find(e => e.name === name && e.owner?.id === owner.id);
+  return {
+    gs, p1, p2, proxy,
+    ownFarm, ownMine, ownSword, ownScout,
+    foreignFarm, foreignWorker, foreignSword, foreignScout,
+    ownFarmP: find('farm', p1), ownMineP: find('mine', p1),
+    ownSwordP: find('swordsman', p1), ownScoutP: find('scout', p1),
+    foreignFarmP: find('farm', p2), foreignWorkerP: find('worker', p2),
+    foreignSwordP: find('swordsman', p2), foreignScoutP: find('scout', p2),
+  };
+}
+
+test('AI proxy: visible foreign entity properties are adjusted; empire profile is hidden', () => {
+  const f = proxyFixture();
+  // Adjusted instance properties of a VISIBLE foreign entity are public.
+  assertDeepEqual(f.foreignFarmP.getCostToMaintain(), { food: 2.5, gold: 1 }, 'foreign farm maintenance adjusted');
+  assertDeepEqual(f.foreignWorkerP.getCostToSpawn(), { food: 5, wood: 2 }, 'foreign worker spawn adjusted');
+  assert(
+    typeof f.foreignScoutP.getMovementCost === 'undefined',
+    'foreign movement cost hidden'
+  );
+  assertClose(f.foreignFarmP.yields.gold, 8, 'foreign visible yields adjusted');
+  assertClose(f.foreignFarmP.baseYields.gold, 4, 'base yields stay the public base');
+  assert(/8 gold/.test(f.foreignFarmP.info()), 'foreign info shows adjusted yields');
+  assert(/Atk: 10/.test(f.foreignSwordP.info()), 'foreign info shows adjusted attack (5 x 2)');
+  assertClose(f.foreignFarm.getCostToMaintain().food, 2.5, 'direct foreign maintenance adjusted');
+
+  // Own twists still apply.
+  assertDeepEqual(f.ownFarmP.getCostToMaintain(), { food: 4, gold: 1.6 }, 'own farm maintenance twisted');
+  assertClose(f.ownMineP.yields.gems, 3, 'own mine yields twisted');
+  assertClose(
+    f.ownScoutP.getMovementCost({ terrain: { name: 'Desert', movementCost: 1 } }),
+    1,
+    'own movement: Desert scale 2 x 0.5 twist'
+  );
+
+  // The total empire resource profile of another player stays private.
+  const foreignPlayer = f.proxy.players.find(p => p.id === f.p2.id);
+  assert(foreignPlayer.resources === undefined, 'foreign resources hidden');
+  assert(foreignPlayer.history === undefined, 'foreign history hidden');
+  assert(foreignPlayer.orders === undefined, 'foreign orders hidden');
+  assert(foreignPlayer.attributes === undefined, 'foreign twist map hidden');
+  assert(foreignPlayer.getResourceProfile() === undefined, 'foreign resource profile hidden');
+  // The AI's own profile is available.
+  const ownPlayer = f.proxy.players.find(p => p.id === f.p1.id);
+  assert(ownPlayer.getResourceProfile()?.stock, 'own resource profile visible');
 });
 
-test('adjustedView with no twists returns equal values', () => {
-  const gs = mockGameState();
-  const p = humanPlayer('Human', gs);
-  const meta = { ...gs.manifestData.entities.swordsman };
-  const adjusted = adjustedView(p, meta, 'swordsman');
-  assertDeepEqual(adjusted.spawnCost, { food: 10, gold: 5 }, 'spawnCost unchanged');
-  assertDeepEqual(adjusted.yields, { gold: 4 }, 'yields unchanged');
-  assert(adjusted.attackCostScale === 10, 'attackCostScale unchanged');
+test('AI proxy: visible foreign entity combat properties are adjusted', () => {
+  const f = proxyFixture();
+  const mgr = createAiManager(NoopManager, f.p1, new AiHelper(f.gs));
+
+  // Foreign visible swordsman: 5 x 2 dmg * 100 hp + (2 x 2 slashing + 1 blunt) * 10 = 1050.
+  assertClose(mgr.helper.getCombatPower(f.foreignSwordP), 1050, 'foreign visible power adjusted');
+  // Own (Meera): 5 x 1.2 dmg * 100 + (2 x 1.5 + 1) * 10 = 640.
+  assertClose(mgr.helper.getCombatPower(f.ownSwordP), 640, 'own power twisted');
+
+  const sorted = mgr.helper.getEntitiesSortedByPower(
+    [f.foreignSword, f.ownSword], { entities: TEST_ENTITIES }, false
+  );
+  assert(sorted[0].id === f.foreignSword.id, 'adjusted foreign unit ranks above own');
+
+  // Visible entity properties are public in BOTH engine and AI views.
+  // A construct target isolates the leader-twist factor without needing the
+  // hex direction lookup from the mock grid.
+  const target = f.ownFarm;
+  const base = calculateAttackMultiplier(f.gs, null, 0, target, null);
+  const engineForeign = calculateAttackMultiplier(f.gs, null, 0, target, f.foreignSword);
+  const aiForeign = mgr.helper.calculateAttackMultiplier(f.gs, null, 0, target, f.foreignSwordP);
+  assertClose(engineForeign.total / base.total, 2, 'foreign damage twist in engine view');
+  assertClose(aiForeign.total / base.total, 2, 'foreign damage twist visible to the AI');
+
+  const engineOwn = calculateAttackMultiplier(f.gs, null, 0, target, f.ownSword);
+  const aiOwn = mgr.helper.calculateAttackMultiplier(f.gs, null, 0, target, f.ownSwordP);
+  assertClose(engineOwn.total / base.total, 1.2, 'own damage twist in engine view');
+  assertClose(aiOwn.total / base.total, 1.2, 'own damage twist visible to the AI');
 });
 
 console.log(`\nleaderAttributes: ${passed} passed, ${failed} failed`);

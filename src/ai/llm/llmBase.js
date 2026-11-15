@@ -598,16 +598,14 @@ EVALUATION RULES:
 
     summarizeEntity(entity) {
         const helper = this.helper;
-        // Leader twists (Phase 25): own entities show twist-adjusted combat
-        // values from the acting player's functions (terrain = the cell the
-        // entity stands on, as in receiveDamage / the attack multiplier).
-        // Enemy twists are hidden by the proxy, so enemies stay at the raw
-        // manifest values — the acting player's functions must not be
-        // applied to them.
-        const own = entity.owner?.id === this.player.id;
+        // Leader twists (Phase 25): VISIBLE entity properties are public,
+        // including other players' entities, so use the entity's own
+        // real-owner methods for adjusted combat values (terrain = the cell
+        // the entity stands on, as in receiveDamage / the attack multiplier).
+        // Only the owner's empire resource profile stays private.
         const terrainType = entity.cell?.terrain?.name;
-        const attack = own ? this.player.getAttackValue?.(entity.name, { terrainType }) : null;
-        const armorMap = own ? this.player.getArmorValue?.(entity.name, { terrainType }) : null;
+        const attack = entity.getAttackValue({ terrainType });
+        const armorMap = entity.getArmorValue({ terrainType });
         const summary = {
             id: entity.id,
             name: entity.name,

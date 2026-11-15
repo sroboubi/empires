@@ -302,19 +302,19 @@ export class AiHelper {
 
     getCombatPower(entity, meta) {
         // Leader twists (Phase 25): the owner's Player functions value the
-        // entity at what it actually hits and absorbs for. damageVs and
-        // terrain need a target and a terrain, so they stay out of this
-        // context-free estimate (getAttackValue with no conditions).
-        // Falls back to the entity's own damage/armor when it has no owner
-        // or the manifest has no entry for it.
+        // entity at what it actually hits and absorbs for. Visible entity
+        // properties are public, so this applies for other players' visible
+        // entities too. damageVs and terrain need a target and a terrain, so
+        // they stay out of this context-free estimate (getAttackValue with
+        // no conditions). Falls back to the entity's own damage/armor when
+        // it has no owner or the manifest has no entry for it.
+        const owner = entity?.owner;
         const rawDmg = entity?.damage?.value || meta?.damage?.value || 0;
-        const dmg = entity?.owner?.getAttackValue
-            ? (entity.owner.getAttackValue(entity.name).value || rawDmg)
-            : rawDmg;
+        const dmg = owner ? (owner.getAttackValue(entity.name).value || rawDmg) : rawDmg;
         const hp = entity?.health || meta?.health || 1;
         const rangeMult = (entity?.range?.maxCells || meta?.range?.maxCells) ? 1.5 : 1.0;
         const baseArmor = entity?.armor || meta?.armor || {};
-        const armorMap = entity?.owner?.getArmorValue ? entity.owner.getArmorValue(entity.name) : {};
+        const armorMap = owner ? owner.getArmorValue(entity.name) : {};
         const armorSum = Object.keys(baseArmor).reduce((s, t) => s + (armorMap[t] ?? baseArmor[t] ?? 1), 0);
         return (dmg * hp * rangeMult) + (armorSum * 10);
     }
@@ -1035,11 +1035,13 @@ export class AiHelper {
         // Case 1: Both players are AI -> background chat loop (invisible to human)
         if (initiatorHarness && receiverHarness) {
             let firstMsg = initialMessage;
+            let firstEmote = null;
             if (!firstMsg) {
                 const opening = await initiatorHarness.generateChatReply(viewOf(initiatorHarness, receiver), "Open diplomatic dialogue with an initial statement or proposal.");
                 firstMsg = opening.content;
+                firstEmote = opening.emote;
             }
-            this.gameState.addChatMessage(initiator, receiver, firstMsg);
+            this.gameState.addChatMessage(initiator, receiver, firstMsg, false, firstEmote);
 
             let currentSpeaker = receiver;
             let currentHarness = receiverHarness;
@@ -1047,7 +1049,7 @@ export class AiHelper {
 
             for (let i = 0; i < maxEx; i++) {
                 const reply = await currentHarness.generateChatReply(viewOf(currentHarness, otherPlayer));
-                this.gameState.addChatMessage(currentSpeaker, otherPlayer, reply.content);
+                this.gameState.addChatMessage(currentSpeaker, otherPlayer, reply.content, reply.ended, reply.emote);
 
                 if (reply.ended) {
                     console.log(`[AiHelper] AI-to-AI chat terminated by ${currentSpeaker.name} at exchange ${i + 1}`);
@@ -1075,9 +1077,12 @@ export class AiHelper {
         const aiHarness = initiatorHarness || receiverHarness;
 
         if (initiator.isAI) {
-            // AI opening statement
-            const opening = initialMessage || (await aiHarness.generateChatReply(humanPlayer, "Open diplomatic dialogue with an initial statement or proposition to the human leader.")).content;
-            this.gameState.addChatMessage(aiPlayer, humanPlayer, opening);
+            // AI opening statement — keep its emote and ended flag so the
+            // first message renders with the chosen portrait.
+            const opening = initialMessage
+                ? { content: initialMessage, emote: null, ended: false }
+                : await aiHarness.generateChatReply(humanPlayer, "Open diplomatic dialogue with an initial statement or proposition to the human leader.");
+            this.gameState.addChatMessage(aiPlayer, humanPlayer, opening.content, !!opening.ended, opening.emote);
         }
 
         // Bring up chat window and await until closed/ended.

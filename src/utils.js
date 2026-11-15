@@ -74,6 +74,8 @@ export function showToast(message, isError = false, timeout = 2500) {
  * @param {Object} [attackerEntity] - the attacking entity (has the damage
  *   and the owner whose twists apply). Optional for backward compatibility:
  *   when omitted the factor is 1 and the result is positional only.
+ *   Visible entity properties are public, so a visible enemy attacker's
+ *   adjusted damage applies here too.
  * @returns {{direction: number, elevation: number, total: number}}
  */
 export function calculateAttackMultiplier(gameState, sourceCell, elevationAdjustment, targetEntity, attackerEntity) {
@@ -113,8 +115,9 @@ export function calculateAttackMultiplier(gameState, sourceCell, elevationAdjust
     // value over the raw damage value (exact, since getAttackValue is
     // defined as base x factor).
     let playerFactor = 1;
-    if (attackerEntity?.owner?.getAttackValue && attackerEntity.damage?.value) {
-        const adjusted = attackerEntity.owner.getAttackValue(attackerEntity.name, {
+    const attackerOwner = attackerEntity?.owner;
+    if (attackerOwner && attackerEntity.damage?.value) {
+        const adjusted = attackerOwner.getAttackValue(attackerEntity.name, {
             targetType: targetEntity?.name,
             terrainType: attackerEntity.cell?.terrain?.name,
         });

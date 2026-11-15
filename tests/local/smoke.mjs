@@ -145,6 +145,24 @@ for (let i = 0; i < rows; i++) {
 }
 log('all players set to AI');
 
+// Phase 25: player names must be unique. Switching a row to AI re-renders it
+// as a leader picker; any non-leader name defaults to the same first leader,
+// which setup now correctly rejects. Pick a distinct leader per row (or a
+// unique text name for a row that still has the human name input).
+for (let i = 0; i < rows; i++) {
+  const row = page.locator('#setup-players-container .dynamic-row').nth(i);
+  const leaderSel = row.locator('.leader-select');
+  if (await leaderSel.count()) {
+    const leaders = await leaderSel.locator('option').evaluateAll((opts) =>
+      opts.map((o) => o.value).filter(Boolean));
+    if (leaders.length) await leaderSel.selectOption(leaders[i % leaders.length]);
+  } else {
+    const nameInput = row.locator('input[name="player-name"]');
+    if (await nameInput.count()) await nameInput.fill(`Player ${i + 1}`);
+  }
+}
+log('unique player names/leaders selected');
+
 await page.click('#btn-start-game');
 await page.waitForSelector('#setup-modal-overlay:not(.active)', { timeout: 60000 });
 

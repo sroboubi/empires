@@ -1,5 +1,5 @@
 import { BaseManager } from '../baseManager.js';
-import { adjustedView } from '../adjustedView.js';
+import { adjustedView, adjustedEntityView } from '../adjustedView.js';
 
 /**
  * AdaptiveManager - configuration-driven tactical AI.
@@ -457,7 +457,10 @@ export class AdaptiveManager extends BaseManager {
 
     findProducersForResource(res, econ) {
         const producers = [];
-        for (const [name, meta] of Object.entries(this.manifestEntities)) {
+        for (const [name, rawMeta] of Object.entries(this.manifestEntities)) {
+            // Leader twists (Phase 25): rank by the yields/maintenance/cost
+            // this player actually gets and pays, not the raw manifest values.
+            const meta = adjustedView(this.player, rawMeta, name);
             const gross = asNumber(meta?.yields?.[res]);
             if (gross <= 0) continue;
             const ownMaintenance = asNumber(meta?.maintenance?.[res]);
@@ -557,8 +560,8 @@ export class AdaptiveManager extends BaseManager {
         const steps = Array.from(unique.values());
         steps.sort((a, b) => {
             if (a.depth !== b.depth) return a.depth - b.depth;
-            const costA = this.weightedCost(manifestEntities[a.targetName]?.spawnCost, econ);
-            const costB = this.weightedCost(manifestEntities[b.targetName]?.spawnCost, econ);
+            const costA = this.weightedCost(this.player.getSpawnCost(a.targetName), econ);
+            const costB = this.weightedCost(this.player.getSpawnCost(b.targetName), econ);
             return costA - costB;
         });
         return steps.slice(0, this.config.maxProductionSteps);
@@ -632,8 +635,8 @@ export class AdaptiveManager extends BaseManager {
         if (!builder || !builder.active) return 0;
         if (this.getBuildCharges(builder) <= 0) return 0;
 
-        const meta = this.manifestEntities[targetName];
-        const cost = meta?.spawnCost || {};
+        // Leader twists (Phase 25): log the cost this player actually pays.
+        const cost = this.player.getSpawnCost(targetName);
         const costText = Object.entries(stripOrders(cost)).map(([res, amount]) => `${amount} ${res}`).join(', ') || 'free';
         const start = { q: builder.q, r: builder.r };
         // Snapshot entity IDs so we can find the newly built entity's cell.
@@ -698,7 +701,9 @@ export class AdaptiveManager extends BaseManager {
             for (const producer of producers) {
                 const steps = this.findProductionSteps(producer.name, econ);
                 for (const step of steps) {
-                    const meta = this.manifestEntities[step.targetName];
+                    // Leader twists (Phase 25): affordability and ranking use
+                    // the spawn cost this player actually pays.
+                    const meta = adjustedView(this.player, this.manifestEntities[step.targetName], step.targetName);
                     if (!meta) continue;
                     const cost = meta.spawnCost || {};
                     if (!this.player.hasResources(cost)) continue;
@@ -716,7 +721,7 @@ export class AdaptiveManager extends BaseManager {
                 const topProducer = producers[0];
                 const topSteps = this.findProductionSteps(topProducer.name, econ);
                 if (topSteps.length > 0) {
-                    const pendingCost = this.manifestEntities[topSteps[0].targetName]?.spawnCost || {};
+                    const pendingCost = this.player.getSpawnCost(topSteps[0].targetName);
                     this.reserveCost(pendingCost);
                     this.helper.aiLog(
                         this.player,
@@ -751,7 +756,7 @@ export class AdaptiveManager extends BaseManager {
                     // producer's cost so proactive growth doesn't spend it
                     // before the chain completes.
                     if (step.finalTarget && step.finalTarget !== step.targetName) {
-                        const finalCost = this.manifestEntities[step.finalTarget]?.spawnCost || {};
+                        const finalCost = this.player.getSpawnCost(step.finalTarget);
                         this.reserveCost(finalCost);
                     }
                     return true;
@@ -779,16 +784,16 @@ export class AdaptiveManager extends BaseManager {
     }
 
     /**
-     * Manifest meta for an entity, with the twist-adjusted values from the
-     * entity owner's Player functions (via adjustedView) — spawnCost,
-     * yields, maintenance, damage and armor are what the owner actually
-     * pays, yields and hits for. Safe to pass to getCombatPower: it reads
-     * the owner's Player functions itself, so the meta's adjusted values
-     * are never applied twice there.
+     * Manifest meta for a VISIBLE entity, with its owner's twist-adjusted
+     * values. Entity methods run with the real owner, so this is also
+     * correct for other players' visible entities (visible entity
+     * properties are public; only the empire profile is private).
+     * Safe to pass to getCombatPower: it reads the owner's Player functions
+     * itself, so the meta's adjusted values are never applied twice there.
      */
     getEntityMeta(entity) {
         const raw = this.manifestEntities[entity?.name];
-        if (raw) return adjustedView(entity?.owner, raw, entity.name);
+        if (raw) return adjustedEntityView(entity, raw);
         return entity?.state || entity?.data || {};
     }
 
@@ -1726,7 +1731,9 @@ export class AdaptiveManager extends BaseManager {
             for (const rawTarget of this.getBuilderBuildables(builder)) {
                 const targetName = canonicalKey(this.manifestEntities, rawTarget);
                 if (!targetName) continue;
-                const meta = this.manifestEntities[targetName];
+                // Leader twists (Phase 25): value and price the build with
+                // this player's own adjusted spawnCost/yields/maintenance.
+                const meta = adjustedView(this.player, this.manifestEntities[targetName], targetName);
                 if (!meta) continue;
 
                 if (category === 'economy' && !this.isEconomicTarget(meta)) continue;

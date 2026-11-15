@@ -6,10 +6,29 @@
  * filtering, the 0-orders collapse, and response parsing — without a browser.
  */
 import { buildMenu, parseMenuResponse, renderMenuPrompt } from '../llm/menu/menu.js';
-import { AiHelper } from '../../aiHelper.js';
 
-// buildMenu only needs distance/directions/capability helpers, not a live game.
-const helper = new AiHelper({});
+// Local mock: buildMenu only needs distance/directions/capability helpers.
+// Importing the engine AiHelper here would violate the src/ai boundary.
+const helper = {
+    distance: (a, b) => {
+        const ac = a.cell || a;
+        const bc = b.cell || b;
+        return Math.max(
+            Math.abs(ac.q - bc.q),
+            Math.abs(ac.r - bc.r),
+            Math.abs((ac.q + ac.r) - (bc.q + bc.r))
+        );
+    },
+    isCombatCapable: (entity) => !!entity?.getActions && entity.getActions().some(a => a.name === 'Attack'),
+    isMobile: (entity) => !!entity && !entity.isConstruct && !!entity.getActions && entity.getActions().some(a => a.name === 'Move'),
+    // The fixture manifest is an array (not keyed by name), so the real
+    // helper also returns false; Attack-capable units still get chat options
+    // through isCombatCapable.
+    isDedicatedMilitary: () => false,
+    getDirections8: () => ['E', 'NE', 'N', 'NW', 'W', 'SW', 'S', 'SE'],
+    findReachableCells: () => new Map(),
+    aiLog: () => {},
+};
 
 let passed = 0, failed = 0;
 function test(name, fn) {

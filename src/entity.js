@@ -252,6 +252,23 @@ export default class Entity {
     return applyResourceYieldBonus(this, base, this.gameState);
   }
 
+  /** Owner-adjusted AP cost factor for this entity's attack. */
+  getAttackCost() {
+    return this.owner ? this.owner.getAttackCost(this.name) : (this.attackCostScale ?? 1);
+  }
+
+  /** Owner-adjusted attack value for this entity (visible entity info). */
+  getAttackValue(conditions = {}) {
+    return this.owner
+      ? this.owner.getAttackValue(this.name, conditions)
+      : { value: this.damage?.value ?? 0, type: this.damage?.type ?? 'blunt' };
+  }
+
+  /** Owner-adjusted armor map for this entity (visible entity info). */
+  getArmorValue(conditions = {}) {
+    return this.owner ? this.owner.getArmorValue(this.name, conditions) : { ...(this.armor || {}) };
+  }
+
   /**
    * Checks whether the entity can afford an action, including orders.
    * @param {number} [apCost=0] - Action points required; skipped when entity has no AP.
@@ -327,7 +344,8 @@ export default class Entity {
   }
 
   /**
-   * Gets the movement cost for a given cell.
+   * Gets the movement cost for a given cell. This is an own-entity
+   * calculation; the AI interface hides it on foreign/ownerless entities.
    * @param {Object} target - Cell object or Terrain object
    * @returns {number}
    */
@@ -783,7 +801,7 @@ export default class Entity {
           // Leader twist (Phase 25): the attacker's adjusted attack-cost
           // scale, from the owning player's getAttackCost. Ownerless
           // attackers (barbarians) use the manifest scale.
-          const attackCostScale = this.owner ? this.owner.getAttackCost(this.name) : (this.attackCostScale ?? 1);
+          const attackCostScale = this.getAttackCost();
           if (this.range && typeof this.range === 'object') {
             const minD = this.range.minCells || 1;
             const maxD = this.range.maxCells || 1;
@@ -1171,7 +1189,10 @@ export default class Entity {
     }
 
     const rangeStr = this.range ? `Rng:${this.range.minCells}-${this.range.maxCells}` : 'Melee';
-    const atkStr = this.damage && this.damage.value > 0 ? ` Atk: ${displayNum(this.damage.value)} (${this.damage.type}, ${rangeStr}).` : '';
+    const attack = this.getAttackValue();
+    const atkValue = attack?.value ?? this.damage?.value;
+    const atkType = attack?.type ?? this.damage?.type;
+    const atkStr = this.damage && atkValue > 0 ? ` Atk: ${displayNum(atkValue)} (${atkType}, ${rangeStr}).` : '';
     return `${base}${atkStr} Facing: ${this.facing}`;
   }
 
