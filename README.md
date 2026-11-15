@@ -293,7 +293,7 @@ Zone of control:
 5. Show zone of control highlight in render when non-own entity is highlighted, similar to entity.minSeparation but only for non-own entities.
 6. Verify all AIs use move.canDo to determine possible moves. Audit 2026-11-08: they all do — adaptive and entity check canDo directly, smart moves via helper.explore → moveAlongPath (which checks canDo), menu.js via moveAlongPath, barbarians directly; llmBase's movementCostTo is only a reachability summary, not a move order. AI can "plan" routes without ZoC consideration, but move.canDo should always be used to determine what movement orders are actually possible. Note: planning ignores ZoC, so an AI may plan through a controlled cell and have canDo reject it — moveAlongPath falls back to the furthest reachable cell that passes canDo, so it advances as far as it can rather than failing; it will not detour around ZoC (follow-up, not this phase).
 
-## Task: Phase 25 (TODO) - Enhance AI leaders and interactions ##
+## Task: Phase 25 - Enhance AI leaders and interactions ##
 
 1. add trade to chat screen (or as slide out panel) [COMPLETED]:
    - one time offer: build a resource bundle offering (a set of resource amounts: e.g. {iron: 50, gold: 10}) and ask for a bundle in return. Allow other player to adjust bundle and offer it back to you. This can be done until one player rejects the process, or both players accept the exchange bundles.
@@ -304,3 +304,13 @@ Zone of control:
    - the player resource profile panel should be enhanced to include ongoing trades.
 2. leader portraits and emotes or videos + add all leaders
 3. faction description and special abilities (Asymmetric faction twists. The most praised engagement mechanic in modern 4X (Endless Legend's rule-breaking factions). 2–3 JSON-authored twists per faction)
+
+## Task: Phase 26 (TODO) - LLM Director ##
+
+1. Add ability to select strategic AI and tactical AI controllers in game setup (tactical must be selected, strategic is optional)
+   - Note: ALL existing AI controllers are tactical, although some of the older ones like standard/smartManager.js and the LLM AIs don't inspect or act on player.controller.directive which is set by the strategic AI
+2. if strategic AI is selected then it handles general empire direction and diplomacy and is called once per turn
+   - player will call it first, before calling tactical AI
+   - it can initiate chat/trade and set player.controller.directive based on game state
+3. Create a base class for strategic AIs in ai/strategic/base.js
+4. Create an implementation that uses an LLM harness to implement strategic ai (should be model independent, similar to tactical LLM harness)

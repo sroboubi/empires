@@ -23,7 +23,6 @@
 
 ## AI ##
 
-- LLM director harness (called once per turn and handles general empire direction and diplomacy)
 - test frontier models as players (just as a benchmark)
 
 ## BUGS ##
