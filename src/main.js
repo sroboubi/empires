@@ -880,6 +880,10 @@ function buildController(key, playerName) {
   if (leader) {
     controller.description = leader.description;
     controller.focus = [...leader.focus];
+    // Phase 25: the leader's twist attributes ride on the controller with
+    // description/focus. The Player copies them into player.attributes at
+    // construction — no manifest lookup by name at runtime.
+    controller.attributes = leader.attributes ? { ...leader.attributes } : {};
   } else if (def.description) {
     controller.description = def.description;
     controller.focus = def.focus ? [...def.focus] : undefined;

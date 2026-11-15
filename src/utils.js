@@ -61,7 +61,22 @@ export function showToast(message, isError = false, timeout = 2500) {
 /**
  * Calculates the directional and elevation damage multiplier from an attacker against a target entity.
  */
-export function calculateAttackMultiplier(gameState, sourceCell, elevationAdjustment, targetEntity) {
+/**
+ * Attack multiplier for a combat action: positional (direction, elevation)
+ * times the attacker's leader-twist factor (damage type, damageVs against
+ * the target, terrain the attacker stands on). The twist factor comes from
+ * the attacking player's getAttackValue, so the engine and the AI see the
+ * same multiplier — this is the single place the two agree.
+ * @param {Object} gameState
+ * @param {Object} sourceCell - the attacker's cell
+ * @param {number} elevationAdjustment - the attacker's damage elevationAdjustment
+ * @param {Object} targetEntity - the entity being attacked
+ * @param {Object} [attackerEntity] - the attacking entity (has the damage
+ *   and the owner whose twists apply). Optional for backward compatibility:
+ *   when omitted the factor is 1 and the result is positional only.
+ * @returns {{direction: number, elevation: number, total: number}}
+ */
+export function calculateAttackMultiplier(gameState, sourceCell, elevationAdjustment, targetEntity, attackerEntity) {
     const multiplier = { direction: 1.0, elevation: 1.0, total: 1.0 };
 
     // Directional damage only applies to things that can move (units).
@@ -92,6 +107,20 @@ export function calculateAttackMultiplier(gameState, sourceCell, elevationAdjust
         }
     }
 
-    multiplier.total = multiplier.direction * multiplier.elevation;
+    // Leader twists (Phase 25): the attacker's damage-type, damageVs and
+    // terrain multipliers, via the attacking player's getAttackValue — the
+    // same number the AI gets when it asks. The factor is the adjusted
+    // value over the raw damage value (exact, since getAttackValue is
+    // defined as base x factor).
+    let playerFactor = 1;
+    if (attackerEntity?.owner?.getAttackValue && attackerEntity.damage?.value) {
+        const adjusted = attackerEntity.owner.getAttackValue(attackerEntity.name, {
+            targetType: targetEntity?.name,
+            terrainType: attackerEntity.cell?.terrain?.name,
+        });
+        playerFactor = adjusted.value / attackerEntity.damage.value;
+    }
+
+    multiplier.total = multiplier.direction * multiplier.elevation * playerFactor;
     return multiplier;
 }

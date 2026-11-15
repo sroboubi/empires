@@ -207,18 +207,28 @@ export default class Entity {
 
   /**
    * Returns object e.g. {food: 2, wood: 3} with maintenance cost deducted on each step().
+   * Leader twist (Phase 25): the owner's maintenanceCost multiplier for
+   * this entity type scales each resource (default 1).
    * @returns {Object}
    */
   getCostToMaintain() {
-    return { ...(this.state.maintenance || {}) };
+    // Leader twists (Phase 25): the owner's Player function. Ownerless
+    // entities (barbarians) pay the manifest cost.
+    return this.owner ? this.owner.getMaintenanceCost(this.name) : { ...(this.state.maintenance || {}) };
   }
 
   /**
    * Returns object e.g. {food: 20, gold: 10} with cost to create the entity.
+   * Leader twist (Phase 25): the owner's spawnCost multiplier for this
+   * entity type scales each resource (default 1). This is the cost the
+   * owner actually pays; the Build action applies the same multiplier to
+   * the target's manifest cost.
    * @returns {Object}
    */
   getCostToSpawn() {
-    return { ...(this.state.spawnCost || {}) };
+    // Leader twists (Phase 25): the owner's Player function. Ownerless
+    // entities pay the manifest cost.
+    return this.owner ? this.owner.getSpawnCost(this.name) : { ...(this.state.spawnCost || {}) };
   }
 
   /**
@@ -234,7 +244,12 @@ export default class Entity {
   }
 
   get yields() {
-    return applyResourceYieldBonus(this, this.baseYields, this.gameState);
+    // Leader twist (Phase 25): the owner's Player function gives the
+    // twist-adjusted base yields; the natural-resource bonus for the cell
+    // is layered on top by the engine (both are plain multiplications, so
+    // the order does not matter). Ownerless entities use the manifest base.
+    const base = this.owner ? this.owner.getYields(this.name) : this.baseYields;
+    return applyResourceYieldBonus(this, base, this.gameState);
   }
 
   /**
@@ -334,7 +349,10 @@ export default class Entity {
     // A null scale is a JSON-corrupted Infinity (see constructor): fail
     // closed — impassable, never free (null would multiply to a cost of 0).
     if (scale === null) scale = Infinity;
-    return (terrain.movementCost || 1) * scale;
+    // Leader twist (Phase 25): the owner's movementCostMultiplier for this
+    // terrain scales the cost. Ownerless entities (barbarians) get 1.
+    const moveMult = this.owner ? this.owner.getMovementCostMultiplier(terrain.name) : 1;
+    return (terrain.movementCost || 1) * scale * moveMult;
   }
 
   /**
@@ -470,7 +488,12 @@ export default class Entity {
       rawValue += this.health * damage.lifeFraction;
     }
 
-    const armor = this.armor[damageType] || 1;
+    // Leader twists (Phase 25): the defender's armor for this damage type,
+    // from the owning player's getArmorValue (terrain multiplier included
+    // when the defender's terrain is known). Ownerless entities use the
+    // manifest armor.
+    const armorMap = this.owner ? this.owner.getArmorValue(this.name, { terrainType: this.cell?.terrain?.name }) : null;
+    const armor = armorMap ? (armorMap[damageType] ?? 1) : (this.armor[damageType] || 1);
     let effectiveDamage = rawValue / armor;
 
     // Round to 1 decimal place for clean stats
@@ -757,6 +780,10 @@ export default class Entity {
           let cost = 0;
 
           // Ranged vs Melee evaluation
+          // Leader twist (Phase 25): the attacker's adjusted attack-cost
+          // scale, from the owning player's getAttackCost. Ownerless
+          // attackers (barbarians) use the manifest scale.
+          const attackCostScale = this.owner ? this.owner.getAttackCost(this.name) : (this.attackCostScale ?? 1);
           if (this.range && typeof this.range === 'object') {
             const minD = this.range.minCells || 1;
             const maxD = this.range.maxCells || 1;
@@ -771,7 +798,7 @@ export default class Entity {
                 return { possible: false, reason: "Ranged trajectory blocked by terrain height." };
               }
             }
-            cost = Math.ceil(this.attackCostScale * this.state.battleExhaustion * dist);
+            cost = Math.ceil(attackCostScale * this.state.battleExhaustion * dist);
           } else {
             // Melee attack
             const pathRes = this.gameState && this.gameState.hexGrid ? this.gameState.hexGrid.movementCostTo(this.cell, targetCell, this.getMovementCost.bind(this)) : null;
@@ -780,7 +807,7 @@ export default class Entity {
             } else if (pathRes.path.length > 2) {
               return { possible: false, reason: "Can only melee attack adjacent targets." };
             }
-            cost = Math.ceil(this.attackCostScale * this.state.battleExhaustion * pathRes.cost);
+            cost = Math.ceil(attackCostScale * this.state.battleExhaustion * pathRes.cost);
           }
 
           const affordability = this.checkActionAffordability(cost);
@@ -788,7 +815,11 @@ export default class Entity {
             return affordability;
           }
 
-          const multiplier = calculateAttackMultiplier(this.gameState, this.cell, this.damage.elevationAdjustment, entity);
+          const multiplier = calculateAttackMultiplier(this.gameState, this.cell, this.damage.elevationAdjustment, entity, this);
+          // The player twists (damage type, damageVs, terrain) are inside
+          // the multiplier's total — calculateAttackMultiplier gets them
+          // from the attacking player's getAttackValue, so the AI sees the
+          // same number when it calls it through the helper.
           const rawDamage = this.damage.value * multiplier.total;
           const lifeFractionStr = this.damage.lifeFraction ? ` + ${this.damage.lifeFraction} of current health` : '';
 
@@ -978,7 +1009,9 @@ export default class Entity {
           const affordability = this.checkActionAffordability(apCost);
           if (!affordability.possible) return affordability;
 
-          const cost = (meta && meta.spawnCost) || {};
+          // Leader twist (Phase 25): the owner's spawnCost multiplier for
+          // the entity being built, from the owning player's getSpawnCost.
+          const cost = this.owner ? this.owner.getSpawnCost(buildable) : { ...(meta && meta.spawnCost) };
           const costStr = Object.entries(cost).map(([k, v]) => `${v} ${k}`).join(', ');
           if (this.owner && !this.owner.hasResources(cost)) {
             return { possible: false, reason: `Insufficient resources to build ${targetName} (${costStr} required).` };

@@ -1,4 +1,5 @@
 import { BaseManager } from '../baseManager.js';
+import { adjustedView } from '../adjustedView.js';
 
 /**
  * FableAi - a utility-driven tactical AI (see src/ai/spec.md and addenda).
@@ -132,8 +133,20 @@ function attacksWithin(ap, scale, baseCost, exhaustion = 1) {
     }
 }
 
+/** Combat power = sqrt(damage per turn * effective health), from a type description and the mean fighter HP. */
+function combatPower(t, refHp) {
+    const armor = Object.values(t.armor);
+    const perTurn = (t.dmg + t.lifeFraction * refHp) * t.attacks;
+    return Math.sqrt(perTurn * t.hp * (armor.length ? mean(armor) : 1));
+}
+
 /** Everything the AI needs to know about an entity type, read from its manifest attributes. */
-function describeType(name, meta) {
+function describeType(name, meta, owner) {
+    // Leader twists (Phase 25): the twist fields (spawnCost, yields,
+    // maintenance, attackCostScale, damage, armor) come from the owner's
+    // Player functions, via adjustedView. All other fields pass through
+    // unchanged; the manifest is never mutated.
+    meta = adjustedView(owner, meta, name);
     const dmg = meta.damage?.value > 0 ? meta.damage.value : 0;
     const ap = meta.maxActionPoints || 0;
     const t = {
@@ -339,7 +352,9 @@ export default class FableAi extends BaseManager {
         const manifest = this.gameState.manifestData;
         const metas = plain(manifest.entities);
         this.types = {};
-        for (const [name, meta] of Object.entries(metas)) this.types[name] = describeType(name, meta);
+        // The catalog is this AI's own planning view: every type adjusted
+        // for the AI's own player's leader twists.
+        for (const [name, meta] of Object.entries(metas)) this.types[name] = describeType(name, meta, this.player);
         const all = Object.values(this.types);
 
         // Typical purchase size of each resource: the mean amount entities cost in it.
@@ -353,11 +368,7 @@ export default class FableAi extends BaseManager {
         // Combat power = sqrt(damage per turn * effective health), from attributes only.
         const fighters = all.filter(t => t.dmg > 0);
         this.refHp = mean(fighters.map(t => t.hp)) || 1;
-        for (const t of all) {
-            const armor = Object.values(t.armor);
-            const perTurn = (t.dmg + t.lifeFraction * this.refHp) * t.attacks;
-            t.power = Math.sqrt(perTurn * t.hp * (armor.length ? mean(armor) : 1));
-        }
+        for (const t of all) t.power = combatPower(t, this.refHp);
 
         // Mean reward of each treasure kind, per pick.
         this.treasures = {};
@@ -371,7 +382,17 @@ export default class FableAi extends BaseManager {
     }
 
     typeOf(entity) {
-        return this.types[entity.name] || (this.types[entity.name] = Object.assign(describeType(entity.name, plain(entity.data)), { power: 0 }));
+        // Own entities (and ownerless ones) use the catalog, adjusted for
+        // this AI's own leader twists in loadCatalog.
+        if (!entity.owner || entity.owner.id === this.player.id) {
+            return this.types[entity.name] || (this.types[entity.name] = Object.assign(describeType(entity.name, plain(entity.data), this.player), { power: 0 }));
+        }
+        // An enemy is evaluated with ITS owner's leader twists, not ours.
+        // (The proxy hides a foreign player's twists, so an enemy is in
+        // practice viewed at the raw manifest values.)
+        const t = describeType(entity.name, plain(entity.data), entity.owner);
+        t.power = combatPower(t, this.refHp || 1);
+        return t;
     }
 
     view(e) {

@@ -1,4 +1,5 @@
 import { BaseManager } from '../baseManager.js';
+import { adjustedView } from '../adjustedView.js';
 
 /**
  * AdaptiveManager - configuration-driven tactical AI.
@@ -777,8 +778,18 @@ export class AdaptiveManager extends BaseManager {
         return entities.filter(entity => entity && entity.active && !entity.destroyed);
     }
 
+    /**
+     * Manifest meta for an entity, with the twist-adjusted values from the
+     * entity owner's Player functions (via adjustedView) — spawnCost,
+     * yields, maintenance, damage and armor are what the owner actually
+     * pays, yields and hits for. Safe to pass to getCombatPower: it reads
+     * the owner's Player functions itself, so the meta's adjusted values
+     * are never applied twice there.
+     */
     getEntityMeta(entity) {
-        return this.manifestEntities[entity?.name] || entity?.state || entity?.data || {};
+        const raw = this.manifestEntities[entity?.name];
+        if (raw) return adjustedView(entity?.owner, raw, entity.name);
+        return entity?.state || entity?.data || {};
     }
 
     getEntityValue(entity) {

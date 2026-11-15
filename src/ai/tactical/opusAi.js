@@ -1,4 +1,5 @@
 import { BaseManager } from '../baseManager.js';
+import { adjustedView } from '../adjustedView.js';
 
 /**
  * OpusAI — a utility-driven tactical AI (spec: src/ai/spec.md + addendum,
@@ -202,7 +203,13 @@ export default class OpusAI extends BaseManager {
     // Entity views (plain objects; the live proxy is kept in .e)
     // =====================================================================
     view(e, own) {
-        const def = this.defs[e.name] || plainCopy(e.data || {});
+        // Leader twists (Phase 25): the twist fields (spawnCost, yields,
+        // maintenance, attackCostScale, damage, armor) come from the owner's
+        // Player functions, via adjustedView — never from the raw manifest.
+        // A foreign owner's functions are hidden by the proxy, so enemies
+        // (and ownerless entities) stay at raw manifest values. The
+        // manifest is never mutated: adjustedView returns a copy.
+        const def = adjustedView(e.owner, this.defs[e.name] || plainCopy(e.data || {}), e.name);
         const v = {
             e, own, def, id: e.id, name: e.name, q: e.q, r: e.r,
             hp: e.health, maxHp: e.maxHealth, active: e.active,
@@ -228,12 +235,17 @@ export default class OpusAI extends BaseManager {
     }
 
     /** Same rule as Entity.getMovementCost (terrain cost x per-terrain scale; null scale = impassable). */
-    moveCost(def, cell) {
+    // Leader twist (Phase 25): the owner's movementCostMultiplier for the
+    // terrain scales the cost, matching the engine's getMovementCost. A
+    // foreign or ownerless unit falls back to the raw cost (the proxy hides
+    // a foreign player's functions, and ownerless units have no twists).
+    moveCost(def, cell, owner) {
         if (!cell || !def.movement) return Infinity;
         const tcs = def.movement.terrainCostScale;
         let s = (tcs && cell.t in tcs) ? tcs[cell.t] : 1;
         if (s === null) s = Infinity;
-        return (cell.mc || 1) * s;
+        const mult = owner?.getMovementCostMultiplier ? (owner.getMovementCostMultiplier(cell.t) ?? 1) : 1;
+        return (cell.mc || 1) * s * mult;
     }
 
     canStand(def, cell) {
@@ -243,7 +255,7 @@ export default class OpusAI extends BaseManager {
     }
 
     /** Dijkstra over explored cells; units may pass occupied cells but not stop on them. */
-    reach(q, r, def, budget) {
+    reach(q, r, def, budget, owner) {
         const start = K(q, r);
         const dist = new Map([[start, 0]]);
         const prev = new Map();
@@ -257,7 +269,7 @@ export default class OpusAI extends BaseManager {
                 const nk = K(cq + dq, cr + dr);
                 const nc = this.cells.get(nk);
                 if (!nc) continue;
-                const step = this.moveCost(def, nc);
+                const step = this.moveCost(def, nc, owner);
                 if (!Number.isFinite(step)) continue;
                 const c2 = c + step;
                 if (c2 > budget) continue;
@@ -275,12 +287,12 @@ export default class OpusAI extends BaseManager {
     }
 
     unitReach(u) {
-        if (!u._reach) u._reach = this.reach(u.q, u.r, u.def, u.mobile && u.move ? u.ap : 0);
+        if (!u._reach) u._reach = this.reach(u.q, u.r, u.def, u.mobile && u.move ? u.ap : 0, u.e?.owner);
         return u._reach;
     }
 
     unitReachFull(u) {
-        if (!u._reachFull) u._reachFull = this.reach(u.q, u.r, u.def, Infinity);
+        if (!u._reachFull) u._reachFull = this.reach(u.q, u.r, u.def, Infinity, u.e?.owner);
         return u._reachFull;
     }
 
@@ -536,7 +548,7 @@ export default class OpusAI extends BaseManager {
         // rho: score value of one whole horizon budget, from the best direct-score build available now
         let rho = 0;
         for (const t of this.directTypes()) {
-            const d = this.defs[t];
+            const d = adjustedView(this.player, this.defs[t], t);
             const direct = this.directValue(d), cost = this.costOf(d);
             if (direct > 0 && cost > 0) rho = Math.max(rho, direct / cost);
         }
@@ -617,10 +629,15 @@ export default class OpusAI extends BaseManager {
     }
 
     /** Value of an entity of this type (for building it, and as what we lose if it dies). */
-    typeValue(name, siteYields = null) {
-        const cache = !siteYields && !this._partial;
+    // `owner` defaults to our own player; pass the entity's owner for a
+    // foreign (e.g. ally) entity — a foreign player's value functions are
+    // hidden by the proxy, so adjustedView falls back to raw manifest
+    // values for it. A type valued for a foreign owner is never cached
+    // under our own name-keyed cache.
+    typeValue(name, siteYields = null, owner = null) {
+        const cache = !siteYields && !this._partial && !owner;
         if (cache && this.valueCache.has(name)) return this.valueCache.get(name);
-        const d = this.defs[name];
+        const d = adjustedView(owner || this.player, this.defs[name], name);
         if (!d) return 0;
         let v = this.directValue(d);
         v += this.yieldValue(siteYields || d.yields);
@@ -725,7 +742,7 @@ export default class OpusAI extends BaseManager {
             const lo = d.range ? (d.range.minCells || 1) : 1, hi = d.range ? (d.range.maxCells || 1) : 1;
             const first = Math.ceil(scale * lo);
             const maxAp = f.e.maxActionPoints ?? d.maxActionPoints ?? 0;
-            const rs = f.mobile ? this.reach(f.q, f.r, d, Math.max(0, maxAp - first)) : { dist: new Map([[K(f.q, f.r), 0]]) };
+            const rs = f.mobile ? this.reach(f.q, f.r, d, Math.max(0, maxAp - first), f.e?.owner) : { dist: new Map([[K(f.q, f.r), 0]]) };
             const zone = new Set();
             for (const k of rs.dist.keys()) {
                 const [cq, cr] = parseK(k);
@@ -752,7 +769,7 @@ export default class OpusAI extends BaseManager {
             targets.forEach((u, i) => {
                 const dmg = h.hits * this.hitDamage(h.def, u.def, u.hp);
                 const now = h.zone.has(K(u.q, u.r)) ? 1 : this.cfg.partialDamageCredit; // next turn vs. the turn after
-                const worth = u.own ? this.assetValue(u) : this.cfg.enemyScoreWeight * this.typeValue(u.name);
+                const worth = u.own ? this.assetValue(u) : this.cfg.enemyScoreWeight * this.typeValue(u.name, null, u.e.owner);
                 risk += now / (i + 1) * Math.min(1, dmg / Math.max(1, u.hp)) * worth;
             });
             h.risk = risk;
@@ -848,7 +865,7 @@ export default class OpusAI extends BaseManager {
 
     /** Yields of `type` at cell c with natural-resource bonuses (same rule as the engine's yield bonus). */
     siteYields(type, c) {
-        const base = { ...(this.defs[type]?.yields || {}) };
+        const base = { ...(this.player.getYields(type) || {}) };
         for (const nd of this.naturalDefs) {
             const imp = nd.improvement?.[type];
             if (!imp || typeof base[imp.type] !== 'number') continue;
@@ -880,13 +897,13 @@ export default class OpusAI extends BaseManager {
     siteRisk(type, k, value) {
         const hz = this.hazard(k);
         if (hz <= 0) return 0;
-        return Math.min(1, hz * this.cfg.horizon * this.cfg.yieldDiscount * this.typicalHostile(this.defs[type]).frac) * value;
+        return Math.min(1, hz * this.cfg.horizon * this.cfg.yieldDiscount * this.typicalHostile(adjustedView(this.player, this.defs[type], type)).frac) * value;
     }
 
     /** Best plan (builder chain) starting with building `type`: {value, cost, chain}. */
     planFor(type, depth = 0, seen = new Set()) {
         if (depth === 0 && !this._partial && this.planCache.has(type)) return this.planCache.get(type);
-        const d = this.defs[type];
+        const d = adjustedView(this.player, this.defs[type], type);
         const own = { value: this.typeValue(type), cost: this.costOf(d), chain: [type] };
         let best = own;
         if (depth + 1 < this.cfg.chainDepth && (d.buildables || []).length) {
@@ -965,7 +982,7 @@ export default class OpusAI extends BaseManager {
         const options = [];
         for (const b of builders) {
             for (const type of b.def.buildables || []) {
-                const d = this.defs[type];
+                const d = adjustedView(this.player, this.defs[type], type);
                 if (!d || !b.builds.has(this.buildActionName(type))) continue;
                 const plan = this.planFor(type);
                 const site = this.chooseSite(b, type);
@@ -1015,7 +1032,7 @@ export default class OpusAI extends BaseManager {
             if (produced.has(r)) continue;
             let best = null, bc = Infinity;
             for (const t of types) {
-                const d = this.defs[t];
+                const d = adjustedView(this.player, this.defs[t], t);
                 if (!(d.yields?.[r] > 0) || (d.spawnConditions && !this.hasAnySite(t))) continue;
                 const c = this.costOf({ spawnCost: d.spawnCost });
                 if (c < bc) { bc = c; best = t; }
@@ -1023,7 +1040,7 @@ export default class OpusAI extends BaseManager {
             if (!best) continue;
             const e = seed.find(x => x.type === best);
             if (e) e.res.push(r);
-            else seed.push({ type: best, res: [r], cost: this.defs[best].spawnCost || {} });
+            else seed.push({ type: best, res: [r], cost: this.player.getSpawnCost(best) || {} });
         }
         return seed;
     }
@@ -1031,7 +1048,7 @@ export default class OpusAI extends BaseManager {
     /** Reserved amounts plus the seed capital, except the seed entries that building `type` itself provides. */
     withSeed(reserved, seed, type) {
         const out = { ...reserved };
-        const y = this.defs[type]?.yields || {};
+        const y = this.player.getYields(type) || {};
         for (const s of seed) {
             if (s.type === type || s.res.some(r => y[r] > 0)) continue;
             for (const [r, v] of Object.entries(s.cost)) out[r] = (out[r] || 0) + v;
@@ -1059,7 +1076,7 @@ export default class OpusAI extends BaseManager {
 
     /** Best site for builder b to build `type`: {q, r, stage, orders, value}. */
     chooseSite(b, type) {
-        const d = this.defs[type];
+        const d = adjustedView(this.player, this.defs[type], type);
         const isUnit = !!d.movement;
         const here = K(b.q, b.r);
         const plan = this.mem.plans.get(b.id);
@@ -1199,7 +1216,7 @@ export default class OpusAI extends BaseManager {
             }
         } else {
             const tc = this.cells.get(K(t.q, t.r));
-            const unitCost = this.moveCost(d, tc);
+            const unitCost = this.moveCost(d, tc, u.e?.owner);
             if (!Number.isFinite(unitCost)) return null;
             for (const [dq, dr] of NB) {
                 const k = K(t.q + dq, t.r + dr);
@@ -1497,7 +1514,7 @@ export default class OpusAI extends BaseManager {
 
     /** Does this type yield, or (through builder chains) lead to a type that yields, one of the resources? */
     leadsToProducer(type, resources, depth = 0, seen = new Set()) {
-        const d = this.defs[type];
+        const d = adjustedView(this.player, this.defs[type], type);
         if (!d || seen.has(type)) return false;
         seen.add(type);
         if (resources.some(r => (d.yields?.[r] || 0) > 0)) return true;
