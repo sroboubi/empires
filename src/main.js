@@ -975,6 +975,21 @@ function handleStartGameClicked() {
     return;
   }
 
+  // Phase 25: player names must be unique (case-insensitive). A human
+  // sharing an AI leader's name would inherit that leader's portrait in
+  // chat and break sender identity. Use the same effective name as the
+  // settings below (trimmed, falling back to "Player N").
+  const seenNames = new Set();
+  for (let i = 0; i < setupPlayers.length; i++) {
+    const name = (setupPlayers[i].name || '').trim() || `Player ${i + 1}`;
+    const key = name.toLowerCase();
+    if (seenNames.has(key)) {
+      showToast(`Two players are named "${name}". Player names must be unique.`, true);
+      return;
+    }
+    seenNames.add(key);
+  }
+
   const startingResources = {};
   for (const [res, val] of Object.entries(defaultSettings?.initialization?.startingResources || {})) {
     const el = document.getElementById(`res-val-${res}`);
@@ -2286,24 +2301,25 @@ function leaderPortraitUrl(playerName, emote) {
 }
 
 /**
- * Phase 25: the chat modal header shows the AI leader's latest emote
- * portrait (neutral until they have spoken). Hidden for non-leader AIs.
+ * Phase 25: the chat modal header shows the latest emote portrait of
+ * whoever last spoke with a portrait (neutral until they have spoken).
+ * Every message is treated the same — a sender without a portrait (the
+ * human) simply has none, so the search walks back to the last message
+ * that does. Hidden when the conversation partner is not a leader.
  */
 function updateChatModalPortrait() {
   const img = document.getElementById('chat-modal-portrait');
   if (!img || !currentChatSession.aiPlayer) return;
   const history = gameState.getChatHistory(currentChatSession.humanPlayer, currentChatSession.aiPlayer);
-  let emote = 'neutral';
+  let url = null;
   if (history) {
     for (let i = history.length - 1; i >= 0; i--) {
       const m = history[i];
-      const isHuman = m.senderId != null
-        ? m.senderId === currentChatSession.humanPlayer.id
-        : m.sender === currentChatSession.humanPlayer.name;
-      if (!isHuman) { emote = m.emote || 'neutral'; break; }
+      url = leaderPortraitUrl(m.sender, m.emote || 'neutral');
+      if (url) break;
     }
   }
-  const url = leaderPortraitUrl(currentChatSession.aiPlayer.name, emote);
+  if (!url) url = leaderPortraitUrl(currentChatSession.aiPlayer.name, 'neutral');
   if (url) { img.src = url; img.style.display = ''; }
   else { img.style.display = 'none'; }
 }
@@ -2347,11 +2363,12 @@ function renderChatMessages() {
         <div class="chat-msg-body">${escapeHTML(msg.content)}</div>
       </div>
     `;
-    // Phase 25: the AI leader's emote portrait sits beside their message.
-    // Human messages get no portrait; a message without an emote (system
-    // lines, coded AIs, old saves) shows the neutral portrait.
-    if (isHuman) return bubble;
-    const portrait = leaderPortraitUrl(currentChatSession.aiPlayer.name, msg.emote || 'neutral');
+    // Phase 25: every message is treated the same — show the sender's
+    // emote portrait if one exists for that name, otherwise no portrait.
+    // A human sender has no portrait, so theirs simply don't show one;
+    // a message without an emote (system lines, coded AIs, old saves)
+    // shows the neutral portrait.
+    const portrait = leaderPortraitUrl(msg.sender, msg.emote || 'neutral');
     if (!portrait) return bubble;
     return `
       <div style="display: flex; gap: 10px; align-items: flex-start;">
