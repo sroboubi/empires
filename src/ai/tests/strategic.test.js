@@ -5,12 +5,15 @@
  *
  * Covers: directive validation (validateDirective), JSON extraction
  * (extractJsonObject), the dummy strategic AI, the LLM strategic harness
- * (two-phase turn with a stubbed client), the tactical trade-phase gating
+ * (three-phase turn with a stubbed client: LLM trade review, chats with
+ * trade proposals, directive), the tactical trade-phase gating
  * (runTradePhase), the directive in LLM tactical prompts (directiveBlock),
  * getChatManager() routing, the step() fallback (strategic throw → tactical
  * still runs, directive untouched), and the trade hooks on the helper
  * (AiHelper.reviewTrades / maybeInitiateTrade, including the proxy
- * allow-list end-to-end).
+ * allow-list end-to-end). The final section proves, with the real AiHelper,
+ * that a strategic trade proposal made inline with a chat is negotiated
+ * in the chat thread (Part 2 probe).
  *
  * The LLM client and the system prompt are stubbed — no live model is
  * needed. The directive-validation and trade-hook logic are exercised
@@ -152,33 +155,35 @@ function mockDummyPlayer(directive) {
         },
     };
 }
-function mockDummyHelper() {
+function mockDummyHelper(spies) {
     return {
         getGameState: () => ({ currentRound: 3, players: GS2.players }),
-        reviewTrades: async () => {},
+        reviewTrades: async () => { spies.reviewed++; },
     };
 }
 
 await asyncTest('dummy returns its config directive, stamped', async () => {
-    const mgr = new DummyStrategicAi(mockDummyPlayer({ focus: 'economy', stance: {}, goals: [{ type: 'explore', direction: 'NE' }] }), mockDummyHelper());
+    const spies = { reviewed: 0 };
+    const mgr = new DummyStrategicAi(mockDummyPlayer({ focus: 'economy', stance: {}, goals: [{ type: 'explore', direction: 'NE' }] }), mockDummyHelper(spies));
     const d = await mgr.runStrategicTurn();
+    assertEqual(spies.reviewed, 1, 'dummy uses helper.reviewTrades as its stand-in (it has no LLM to ask)');
     assertEqual(d.focus, 'economy', 'focus');
     assertEqual(d.setAtTurn, 3, 'setAtTurn is the current round');
     assertEqual(d.setBy, 'strategic-dummy', 'setBy is the controller key');
 });
 
 await asyncTest('dummy with no directive in config returns null', async () => {
-    const mgr = new DummyStrategicAi(mockDummyPlayer(undefined), mockDummyHelper());
+    const mgr = new DummyStrategicAi(mockDummyPlayer(undefined), mockDummyHelper({ reviewed: 0 }));
     assertEqual(await mgr.runStrategicTurn(), null, 'no directive');
 });
 
 await asyncTest('dummy with an invalid directive in config returns null', async () => {
-    const mgr = new DummyStrategicAi(mockDummyPlayer({ focus: 'conquer' }), mockDummyHelper());
+    const mgr = new DummyStrategicAi(mockDummyPlayer({ focus: 'conquer' }), mockDummyHelper({ reviewed: 0 }));
     assertEqual(await mgr.runStrategicTurn(), null, 'invalid directive');
 });
 
 await asyncTest('dummy chat reply is canned and ends the chat', async () => {
-    const mgr = new DummyStrategicAi(mockDummyPlayer({ focus: 'balanced' }), mockDummyHelper());
+    const mgr = new DummyStrategicAi(mockDummyPlayer({ focus: 'balanced' }), mockDummyHelper({ reviewed: 0 }));
     const reply = await mgr.generateChatReply({ name: 'Red' });
     assert(reply.ended === true, 'ended');
     assert(typeof reply.content === 'string' && reply.content.length > 0, 'has content');
@@ -216,8 +221,16 @@ function mockStrategicHelper(spies) {
                 { id: 1, name: 'Blue', score: { total: 10 } },
                 { id: 2, name: 'Red', score: { total: 5 } },
             ],
+            getActiveTradesForPlayer: () => spies.activeTrades || [],
+            cancelTrade: (id) => { spies.canceled.push(id); return true; },
         }),
         reviewTrades: async () => { spies.reviewed++; },
+        maybeInitiateTrade: async () => { spies.initiated++; },
+        initiateTrade: async (player, target, offer) => {
+            // Mirrors the real signature: the receiver is a player, not an id.
+            spies.tradeProposals.push({ targetId: target?.id ?? target, offer });
+            return { status: 'accepted' };
+        },
         // Mirrors AiHelper.chat: each chat deducts 1 order from the initiator,
         // which is what bounds the strategic chat loop.
         chat: async (initiator, target) => {
@@ -252,13 +265,15 @@ function strategicManager(spies, responses) {
 }
 
 await asyncTest('strategic turn: no chats, valid directive returned stamped', async () => {
-    const spies = { reviewed: 0, chats: [] };
+    const spies = { reviewed: 0, initiated: 0, chats: [], tradeProposals: [], canceled: [], activeTrades: [] };
     const mgr = strategicManager(spies, [
         '{"targetPlayerId": null}',
         '{"focus": "military", "stance": {"2": "defensive"}, "goals": [{"type": "reinforce", "target": {"q": 1, "r": 0}}]}',
     ]);
     const d = await mgr.runStrategicTurn();
-    assertEqual(spies.reviewed, 1, 'reviewTrades called once');
+    assertEqual(spies.reviewed, 0, 'LLM harness never calls helper.reviewTrades');
+    assertEqual(spies.initiated, 0, 'LLM harness never calls helper.maybeInitiateTrade');
+    assertEqual(spies.tradeProposals, [], 'no trade proposals');
     assertEqual(spies.chats, [], 'no chats');
     assertEqual(d.focus, 'military', 'focus');
     assertEqual(d.stance, { '2': 'defensive' }, 'stance');
@@ -267,7 +282,7 @@ await asyncTest('strategic turn: no chats, valid directive returned stamped', as
 });
 
 await asyncTest('strategic turn: chat loop chats once, then stops on null', async () => {
-    const spies = { reviewed: 0, chats: [] };
+    const spies = { reviewed: 0, initiated: 0, chats: [], tradeProposals: [], canceled: [], activeTrades: [] };
     const mgr = strategicManager(spies, [
         '{"targetPlayerId": 2}',
         '{"targetPlayerId": null}',
@@ -275,11 +290,12 @@ await asyncTest('strategic turn: chat loop chats once, then stops on null', asyn
     ]);
     const d = await mgr.runStrategicTurn();
     assertEqual(spies.chats, [2], 'one chat with player 2');
+    assertEqual(spies.tradeProposals, [], 'no proposal without a tradeProposal field');
     assert(d && d.focus === 'balanced', 'directive still produced');
 });
 
 await asyncTest('strategic turn: invalid directive returns null (keep last valid)', async () => {
-    const spies = { reviewed: 0, chats: [] };
+    const spies = { reviewed: 0, initiated: 0, chats: [], tradeProposals: [], canceled: [], activeTrades: [] };
     const mgr = strategicManager(spies, [
         '{"targetPlayerId": null}',
         '{"focus": "conquer"}',
@@ -288,7 +304,7 @@ await asyncTest('strategic turn: invalid directive returns null (keep last valid
 });
 
 await asyncTest('strategic turn: a failed chat stops the loop, directive still produced', async () => {
-    const spies = { reviewed: 0, chats: [] };
+    const spies = { reviewed: 0, initiated: 0, chats: [], tradeProposals: [], canceled: [], activeTrades: [] };
     const helper = mockStrategicHelper(spies);
     helper.chat = async (initiator, target) => { spies.chats.push(target.id); return false; };
     const mgr = new LlmStrategicManager(mockStrategicPlayer(), helper);
@@ -300,11 +316,12 @@ await asyncTest('strategic turn: a failed chat stops the loop, directive still p
     mgr.getStrategicSystemPrompt = async () => 'TEST STRATEGIC PROMPT';
     const d = await mgr.runStrategicTurn();
     assertEqual(spies.chats, [2], 'one chat attempt');
+    assertEqual(spies.tradeProposals, [], 'failed chat proposes no trade');
     assert(d && d.focus === 'economy', 'directive still produced after failed chat');
 });
 
 await asyncTest('strategic turn: chat loop stops when orders run out', async () => {
-    const spies = { reviewed: 0, chats: [] };
+    const spies = { reviewed: 0, initiated: 0, chats: [], tradeProposals: [], canceled: [], activeTrades: [] };
     const player = mockStrategicPlayer();
     player.orders = 0;
     const mgr = new LlmStrategicManager(player, mockStrategicHelper(spies));
@@ -314,6 +331,76 @@ await asyncTest('strategic turn: chat loop stops when orders run out', async () 
     const d = await mgr.runStrategicTurn();
     assertEqual(spies.chats, [], 'no chats with 0 orders');
     assert(d && d.focus === 'balanced', 'directive still produced');
+});
+
+await asyncTest('strategic turn: review phase cancels only the ids the LLM names (bogus ignored)', async () => {
+    const spies = { reviewed: 0, initiated: 0, chats: [], tradeProposals: [], canceled: [], activeTrades: [
+        { id: 't1', type: 'per_turn', player1Id: 1, player2Id: 2, bundle1: { gold: 5 }, bundle2: { food: 5 } },
+        { id: 't2', type: 'per_turn', player1Id: 1, player2Id: 2, bundle1: { food: 5 }, bundle2: { gold: 5 } },
+    ] };
+    const mgr = strategicManager(spies, [
+        '{"cancelTradeIds": ["t1", "bogus"]}',
+        '{"targetPlayerId": null}',
+        '{"focus": "balanced"}',
+    ]);
+    const d = await mgr.runStrategicTurn();
+    assertEqual(spies.canceled, ['t1'], 'only the real, named deal canceled');
+    assertEqual(spies.reviewed, 0, 'deterministic helper.reviewTrades never used');
+    assert(d && d.focus === 'balanced', 'directive still produced');
+});
+
+await asyncTest('strategic turn: review phase keeps everything when the LLM cancels nothing', async () => {
+    const spies = { reviewed: 0, initiated: 0, chats: [], tradeProposals: [], canceled: [], activeTrades: [
+        { id: 't1', type: 'per_turn', player1Id: 1, player2Id: 2, bundle1: { gold: 5 }, bundle2: { food: 5 } },
+    ] };
+    const mgr = strategicManager(spies, [
+        '{"cancelTradeIds": []}',
+        '{"targetPlayerId": null}',
+        '{"focus": "economy"}',
+    ]);
+    const d = await mgr.runStrategicTurn();
+    assertEqual(spies.canceled, [], 'nothing canceled');
+    assert(d && d.focus === 'economy', 'directive still produced');
+});
+
+await asyncTest('strategic turn: trade proposal rides the chat-target reply into initiateTrade', async () => {
+    const spies = { reviewed: 0, initiated: 0, chats: [], tradeProposals: [], canceled: [], activeTrades: [] };
+    const mgr = strategicManager(spies, [
+        '{"targetPlayerId": 2, "tradeProposal": {"type": "one_time", "gives": {"wood": 5}, "asks": {"gold": 5}}}',
+        '{"targetPlayerId": null}',
+        '{"focus": "balanced"}',
+    ]);
+    const d = await mgr.runStrategicTurn();
+    assertEqual(spies.chats, [2], 'chat opened first');
+    assertEqual(spies.tradeProposals, [
+        { targetId: 2, offer: { type: 'one_time', proposerGives: { wood: 5 }, proposerAsks: { gold: 5 } } },
+    ], 'proposal mapped into initiateTrade frame');
+    assert(d && d.focus === 'balanced', 'directive still produced');
+});
+
+await asyncTest('strategic turn: malformed trade proposal is ignored, chat still happens', async () => {
+    const spies = { reviewed: 0, initiated: 0, chats: [], tradeProposals: [], canceled: [], activeTrades: [] };
+    const mgr = strategicManager(spies, [
+        '{"targetPlayerId": 2, "tradeProposal": {"type": "barter", "gives": {"wood": 5}, "asks": {"gold": 5}}}',
+        '{"targetPlayerId": null}',
+        '{"focus": "balanced"}',
+    ]);
+    const d = await mgr.runStrategicTurn();
+    assertEqual(spies.chats, [2], 'chat still happens');
+    assertEqual(spies.tradeProposals, [], 'bad proposal never sent');
+    assert(d && d.focus === 'balanced', 'directive still produced');
+});
+
+await asyncTest('strategic turn: proposal with a null target is ignored', async () => {
+    const spies = { reviewed: 0, initiated: 0, chats: [], tradeProposals: [], canceled: [], activeTrades: [] };
+    const mgr = strategicManager(spies, [
+        '{"targetPlayerId": null, "tradeProposal": {"type": "one_time", "gives": {"wood": 5}, "asks": {"gold": 5}}}',
+        '{"focus": "economy"}',
+    ]);
+    const d = await mgr.runStrategicTurn();
+    assertEqual(spies.chats, [], 'no chat without a target');
+    assertEqual(spies.tradeProposals, [], 'no proposal without a target');
+    assert(d && d.focus === 'economy', 'directive still produced');
 });
 
 console.log('\n## Tactical trade phase + directive prompt');
@@ -396,6 +483,13 @@ test('strategic system prompt states the per-chat order cost', () => {
     const md = readFileSync('src/ai/llm/strategic/systemPrompt.strategic.md', 'utf8');
     assert(/each chat costs 1 order/i.test(md), 'order cost stated');
     assert(md.includes('targetPlayerId'), 'chat-target JSON described');
+});
+
+test('strategic system prompt covers all three phases', () => {
+    const md = readFileSync('src/ai/llm/strategic/systemPrompt.strategic.md', 'utf8');
+    assert(md.includes('Phase 0'), 'trade-review phase present');
+    assert(md.includes('cancelTradeIds'), 'review reply shape described');
+    assert(md.includes('tradeProposal'), 'chat trade proposal described');
 });
 
 console.log('\n## getChatManager routing + step() fallback');
@@ -631,6 +725,134 @@ await asyncTest('helper.reviewTrades is reachable through the proxy (dummy via c
     const directive = await mgr.runStrategicTurn();
     assert(!trades[0].active, 'unaffordable deal canceled through the proxied helper');
     assert(directive && directive.focus === 'balanced', 'directive returned');
+});
+
+console.log('\n## Strategic trade initiation inline with chat (real AiHelper)');
+
+// Part 2 probe: the strategic harness's chat-phase trade proposal, driven
+// end to end through the REAL AiHelper.chat + AiHelper.initiateTrade, with
+// scripted LLM clients on both sides. The only calls the test itself makes
+// are runStrategicTurn() on Blue's manager — the chat, the proposal, the
+// target's evaluation, and the recording in the thread all happen through
+// the production machinery. The fake gameState implements exactly the
+// surface initiateTrade/chat need (validateTradeOffer, addChatMessage /
+// getChatHistory, executeOneTimeTrade, getPlayerById, onActionDone).
+function inlineTradeSetup() {
+    const threads = new Map();
+    const keyFor = (a, b) => [a.id, b.id].sort((x, y) => x - y).join(':');
+    const trades = [];
+    const stock = () => ({ gold: 100, wood: 100, food: 100, iron: 100, gems: 10 });
+    let blueMgr, redMgr;
+    const notes = [];
+    const bluePlayer = {
+        id: 1, name: 'Blue', description: '', orders: 6, maxOrders: 6, isAI: true,
+        resources: stock(), score: { military: 10, economic: 20, exploration: 5, total: 10 },
+        exploredCells: new Set(['0,0']),
+        controller: { key: 'entity', config: {} },
+        strategicController: { key: 'strategic-llm', config: { provider: 'local', model: 'x' } },
+        getResourceProfile: () => ({ stock: { ...bluePlayer.resources }, netIncome: { gold: 1, wood: 1, food: 1, iron: 1, gems: 0 }, turnsRemaining: {}, criticalResource: null, activeTrades: [] }),
+        getEntities: () => [],
+        getOpponents: () => ({ 2: { id: 2, name: 'Red', score: { total: 5 }, entities: [] } }),
+        getHistory: () => [],
+        hasResources: (bundle) => Object.entries(bundle || {}).every(([r, a]) => (bluePlayer.resources[r] || 0) >= a),
+        consumeOrders: (n) => { if (bluePlayer.orders < n) return false; bluePlayer.orders -= n; return true; },
+        addHistoryEntry: (round, entry) => notes.push(entry),
+        getChatManager: async () => blueMgr,
+    };
+    const redPlayer = {
+        id: 2, name: 'Red', description: '', orders: 6, maxOrders: 6, isAI: true,
+        resources: stock(), score: { military: 8, economic: 12, exploration: 4, total: 8 },
+        exploredCells: new Set(['1,1']),
+        controller: { key: 'llm-menu', config: {} },
+        getResourceProfile: () => ({ stock: { ...redPlayer.resources }, netIncome: { gold: 1, wood: 1, food: 1, iron: 1, gems: 0 }, turnsRemaining: {}, criticalResource: null, activeTrades: [] }),
+        getEntities: () => [],
+        getOpponents: () => ({ 1: { id: 1, name: 'Blue', score: { total: 10 }, entities: [] } }),
+        getHistory: () => [],
+        hasResources: (bundle) => Object.entries(bundle || {}).every(([r, a]) => (redPlayer.resources[r] || 0) >= a),
+        consumeOrders: (n) => { if (redPlayer.orders < n) return false; redPlayer.orders -= n; return true; },
+        addHistoryEntry: (round, entry) => notes.push(entry),
+        getChatManager: async () => redMgr,
+    };
+    const gs = {
+        entities: [], players: [bluePlayer, redPlayer], currentRound: 3, settings: {},
+        getPlayerById: (id) => gs.players.find(p => String(p.id) === String(id)) || null,
+        addChatMessage: (sender, receiver, content, ended = false, emote = null) => {
+            const key = keyFor(sender, receiver);
+            if (!threads.has(key)) threads.set(key, []);
+            threads.get(key).push({ sender: sender.name, senderId: sender.id, content, ended, emote, round: gs.currentRound });
+        },
+        getChatHistory: (a, b) => [...(threads.get(keyFor(a, b)) || [])],
+        getActiveTradesForPlayer: () => [],
+        cancelTrade: () => true,
+        validateTradeOffer: (proposer, target, offer) => {
+            if (!proposer || !target || String(proposer.id) === String(target.id)) return { ok: false, reason: 'bad players' };
+            const okBundle = (b) => b && typeof b === 'object' && Object.keys(b).length > 0
+                && Object.values(b).every(v => typeof v === 'number' && v > 0);
+            if (!okBundle(offer?.proposerGives) || !okBundle(offer?.proposerAsks)) return { ok: false, reason: 'bad bundles' };
+            if (offer.type === 'one_time' && !proposer.hasResources(offer.proposerGives)) return { ok: false, reason: 'cannot afford' };
+            return { ok: true };
+        },
+        executeOneTimeTrade: (proposer, receiver, gives, asks) => {
+            for (const [r, a] of Object.entries(gives)) { proposer.resources[r] -= a; receiver.resources[r] = (receiver.resources[r] || 0) + a; }
+            for (const [r, a] of Object.entries(asks)) { receiver.resources[r] -= a; proposer.resources[r] = (proposer.resources[r] || 0) + a; }
+            return { success: true };
+        },
+        createPerTurnTrade: (p1, p2, b1, b2) => {
+            const t = { id: `trade-${trades.length + 1}`, type: 'per_turn', player1Id: p1.id, player2Id: p2.id, bundle1: b1, bundle2: b2 };
+            trades.push(t);
+            return t;
+        },
+        onActionDone: async () => {},
+    };
+    const helper = new AiHelper(gs);
+    helper.aiLog = () => {};
+    blueMgr = new LlmStrategicManager(bluePlayer, helper);
+    redMgr = new MenuHarness(redPlayer, helper);
+    return { gs, threads, bluePlayer, redPlayer, blueMgr, redMgr, helper };
+}
+
+await asyncTest('strategic chat-phase trade proposal is negotiated in the chat thread (real AiHelper)', async () => {
+    const { threads, bluePlayer, redPlayer, blueMgr, redMgr } = inlineTradeSetup();
+    let handleCalls = 0;
+    const origHandle = redMgr.handleTradeOffer.bind(redMgr);
+    redMgr.handleTradeOffer = async (...args) => { handleCalls++; return origHandle(...args); };
+    // Blue's client, in call order: chat target (+ proposal), chat opening,
+    // chat summary, next chat target (null), directive. (No trade-review
+    // call: no active trades, so the review phase spends no LLM call.)
+    const blueClient = scriptedClient([
+        '{"targetPlayerId": 2, "tradeProposal": {"type": "one_time", "gives": {"wood": 5}, "asks": {"gold": 5}}}',
+        'Greetings, Red. Shall we talk trade? [END_CHAT]',
+        'Chatted with Red about trade.',
+        '{"targetPlayerId": null}',
+        '{"focus": "balanced"}',
+    ]);
+    blueMgr.getLLMClient = () => blueClient;
+    blueMgr.getStrategicSystemPrompt = async () => 'TEST STRATEGIC PROMPT';
+    // Red's client, in call order: chat reply (ends the loop), chat
+    // summary, trade-offer evaluation (accept).
+    const redClient = scriptedClient([
+        'Red here — I am listening. [END_CHAT]',
+        'Chatted with Blue.',
+        '{"action": "accept", "message": "Agreed, Blue — a fair exchange."}',
+    ]);
+    redMgr.getLLMClient = () => redClient;
+
+    const d = await blueMgr.runStrategicTurn();
+    assert(d && d.focus === 'balanced', 'directive still produced');
+    assertEqual(bluePlayer.orders, 5, 'one chat deducted exactly 1 order');
+    assertEqual(handleCalls, 1, 'target handleTradeOffer invoked once');
+    const thread = threads.get('1:2') || [];
+    assertEqual(thread.length, 5, 'thread holds opening, reply, proposal, decision, acceptance');
+    assert(thread[0].sender === 'Blue' && thread[0].content.includes('Greetings'), 'opening first');
+    assert(thread[1].sender === 'Red', 'reply second');
+    assert(thread[2].sender === 'Blue' && /Trade Proposal/.test(thread[2].content)
+        && thread[2].content.includes('5 wood') && thread[2].content.includes('5 gold'), 'proposal recorded in thread');
+    assert(thread[3].sender === 'Red' && thread[3].content.includes('Agreed, Blue'), 'decision message in thread');
+    assert(thread[4].sender === 'Red' && /Trade accepted/.test(thread[4].content), 'acceptance recorded in thread');
+    assertEqual(bluePlayer.resources.wood, 95, 'Blue sent 5 wood');
+    assertEqual(bluePlayer.resources.gold, 105, 'Blue received 5 gold');
+    assertEqual(redPlayer.resources.wood, 105, 'Red received 5 wood');
+    assertEqual(redPlayer.resources.gold, 95, 'Red sent 5 gold');
 });
 
 console.log(`\nstrategic.test.js: ${passed} passed, ${failed} failed`);

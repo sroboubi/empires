@@ -6,8 +6,11 @@
  * Exists to exercise: setting the directive, trade housekeeping, orders
  * accounting, and the strategic-failure fallback — without any LLM.
  *
- * Trade housekeeping: like the LLM strategic harness, it reviews per-turn
- * deals at the start of its turn (the strategic AI owns trade now).
+ * Trade housekeeping: the dummy has no LLM to ask, so it stands in for the
+ * LLM trade review with the deterministic helper.reviewTrades() — the LLM
+ * strategic harness does NOT call that helper (it asks the LLM which deals
+ * to cancel instead). The dummy keeps the helper call so the trade-review
+ * path through the proxied helper is still exercised in headless runs.
  */
 import { StrategicBaseManager } from './base.js';
 import { validateDirective } from './directive.js';
