@@ -20,6 +20,7 @@
  * directly; the headless strategic-dummy run covers the real turn flow.
  */
 import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
 import { validateDirective } from '../strategic/directive.js';
 import { extractJsonObject, LlmStrategicManager } from '../llm/strategic/harness.js';
 import { DummyStrategicAi } from '../strategic/dummyStrategicAi.js';
@@ -57,6 +58,11 @@ function assertEqual(a, b, msg) {
 }
 
 const GS2 = { players: [{ id: 1, name: 'Blue' }, { id: 2, name: 'Red' }] };
+
+// Prompt files are resolved from this test file, not the CWD, so the suite
+// gives the same result run from the repo root or from tests/headless.
+const repoFile = (rel) => readFileSync(
+    fileURLToPath(new URL(`../../../${rel}`, import.meta.url)), 'utf8');
 
 console.log('\n## validateDirective');
 
@@ -483,20 +489,20 @@ await asyncTest('menu system prompt renders the directive fresh each turn', asyn
 });
 
 test('json system prompt file carries the {DIRECTIVE} placeholder', () => {
-    const md = readFileSync('src/ai/llm/json/systemPrompt.command.md', 'utf8');
+    const md = repoFile('src/ai/llm/json/systemPrompt.command.md');
     assert(md.includes('{DIRECTIVE}'), 'placeholder present in command prompt');
-    const menuMd = readFileSync('src/ai/llm/menu/systemPrompt.menu.md', 'utf8');
+    const menuMd = repoFile('src/ai/llm/menu/systemPrompt.menu.md');
     assert(menuMd.includes('{DIRECTIVE}'), 'placeholder present in menu prompt');
 });
 
 test('strategic system prompt states the per-chat order cost', () => {
-    const md = readFileSync('src/ai/llm/strategic/systemPrompt.strategic.md', 'utf8');
+    const md = repoFile('src/ai/llm/strategic/systemPrompt.strategic.md');
     assert(/each chat costs 1 order/i.test(md), 'order cost stated');
     assert(md.includes('targetPlayerId'), 'chat-target JSON described');
 });
 
 test('strategic system prompt covers all three phases', () => {
-    const md = readFileSync('src/ai/llm/strategic/systemPrompt.strategic.md', 'utf8');
+    const md = repoFile('src/ai/llm/strategic/systemPrompt.strategic.md');
     assert(md.includes('Phase 0'), 'trade-review phase present');
     assert(md.includes('cancelTradeIds'), 'review reply shape described');
     assert(md.includes('tradeProposal'), 'chat trade proposal described');
@@ -544,6 +550,17 @@ await asyncTest('getChatManager returns null for a human player', async () => {
     const player = new Player(3, 'Human', gs, '#00ff00', RES, '', null, ORDERS);
     gs.players = [player];
     assertEqual(await player.getChatManager(), null, 'human has no chat manager');
+});
+
+await asyncTest('a human player never keeps a strategic controller', async () => {
+    const gs = mockPlayerGameState();
+    // A stale setup selection must not turn a human into a chat/trade AI: with
+    // no tactical controller, the Player drops the strategic one.
+    const player = new Player(4, 'Human', gs, '#00ff00', RES, '', null, ORDERS, false,
+        { key: 'strategic-dummy', url: './ai/strategic/dummyStrategicAi.js', config: {} });
+    assertEqual(player.strategicController, null, 'strategic controller dropped');
+    gs.players = [player];
+    assertEqual(await player.getChatManager(), null, 'still no chat manager');
 });
 
 await asyncTest('step(): strategic throw still runs the tactical turn, directive untouched', async () => {

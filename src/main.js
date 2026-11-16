@@ -564,6 +564,9 @@ function renderSetupPlayers() {
     ctrlSelect.addEventListener('change', (e) => {
       const key = e.target.value;
       p.controllerKey = key;
+      // Phase 26: a human has no strategic controller — drop a selection made
+      // while the row was an AI, so switching back to AI starts from "none".
+      if (key === 'human') p.strategicControllerKey = 'none';
       if (key !== 'human') {
         // Default to first leader if current name isn't a leader
         const leader = leadersJson.find(l => l.name === p.name) || leadersJson[0];
@@ -1035,13 +1038,18 @@ function handleStartGameClicked() {
     // the config value only, no hardcoded number.
     mapSize: parseInt(document.getElementById('setup-map-size').value, 10) || defaultSettings.mapSize,
     players: setupPlayers.map((p, i) => {
+      const controller = buildController(p.controllerKey, p.name);
       return {
         id: i + 1,
         name: p.name.trim() || `Player ${i + 1}`,
         color: p.color,
-        controller: buildController(p.controllerKey, p.name),
+        controller,
         // Phase 26: strategic controller (null when "Strategic: none").
-        strategicController: buildController(p.strategicControllerKey, p.name, 'strategicControllers')
+        // A human has no tactical controller, so it must not get a strategic
+        // one either — both are null (enforced again in the Player ctor).
+        strategicController: controller
+          ? buildController(p.strategicControllerKey, p.name, 'strategicControllers')
+          : null
       };
     }),
     initialization: {

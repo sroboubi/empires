@@ -33,7 +33,9 @@ export class Player {
     // Phase 26: the strategic controller (optional; tactical is required).
     // Same shape as controller: {key, url, config, description?, focus?}.
     // Built by buildController from ai.json's strategicControllers map.
-    this.strategicController = strategicController || null;
+    // A human (no tactical controller) never gets one: both stay null, so a
+    // stale strategic selection can't turn a human into a chat/trade AI.
+    this.strategicController = this.controller ? (strategicController || null) : null;
     // Leader twist attributes (Phase 25): resolved once at setup and
     // carried on the controller (buildController), so the Player owns a
     // plain copy — no manifest lookup by name. Human players (no

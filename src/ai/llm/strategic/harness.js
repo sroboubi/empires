@@ -36,22 +36,22 @@ import {
 } from '../../strategic/directive.js';
 
 /**
- * The chat-target reply is a single field; the schema pins it to an integer
- * so the model cannot ramble, while the code below still accepts null
- * (the "no more chats" answer). If a provider enforces the integer strictly
- * and the model wants to stop, generation fails instead — which the loop
- * treats as "stop chatting", the same safe outcome.
+ * The chat-target reply: an integer id to chat with, or null to stop
+ * ("no more chats"). tradeProposal is nullable — set only when the model
+ * wants to open a trade in that chat. Both fields are listed as required
+ * (strict providers want every property in `required`) but accept null, so
+ * the stop reply is legal instead of a schema violation.
  */
 const CHAT_TARGET_SCHEMA = {
     type: 'object',
     properties: {
-        targetPlayerId: { type: 'integer' },
+        targetPlayerId: { type: ['integer', 'null'] },
         // Optional trade proposal for the chat target — trade is built
         // into chat: the harness opens the chat, then calls
         // helper.initiateTrade with this offer, so the negotiation happens
         // inside the chat thread.
         tradeProposal: {
-            type: 'object',
+            type: ['object', 'null'],
             properties: {
                 type: { type: 'string', enum: ['one_time', 'per_turn'] },
                 gives: { type: 'object' },
@@ -60,7 +60,7 @@ const CHAT_TARGET_SCHEMA = {
             required: ['type', 'gives', 'asks']
         }
     },
-    required: ['targetPlayerId']
+    required: ['targetPlayerId', 'tradeProposal']
 };
 
 /**
@@ -241,7 +241,11 @@ export class LlmStrategicManager extends LlmBaseManager {
     async runTradeReviewPhase() {
         const gs = this.gameState;
         if (!gs || typeof gs.getActiveTradesForPlayer !== 'function') return;
-        const trades = gs.getActiveTradesForPlayer(this.player) || [];
+        // Only per-turn agreements can be canceled here: a one-time trade is
+        // settled immediately and is never active. (The deterministic policy
+        // skips other types too — see AiHelper.reviewTrades.)
+        const trades = (gs.getActiveTradesForPlayer(this.player) || [])
+            .filter(t => t.type === 'per_turn');
         if (!trades.length) return;
 
         const client = this.getLLMClient();
@@ -355,7 +359,7 @@ export class LlmStrategicManager extends LlmBaseManager {
             + `Each chat costs 1 order, shared with your tactical general.\n\n`
             + `Who, if anyone, do you want to chat with this turn? Reply with a JSON object `
             + `{"targetPlayerId": <player id>, "tradeProposal": {"type": "one_time" | "per_turn", "gives": {"<resource>": <amount>}, "asks": {"<resource>": <amount>}} | null} `
-            + `or {"targetPlayerId": null} when you want no more chats. Include a tradeProposal only `
+            + `or {"targetPlayerId": null, "tradeProposal": null} when you want no more chats. Include a tradeProposal only `
             + `when you want to open a trade with that player in this chat; otherwise use null.`;
         let raw = null;
         try {

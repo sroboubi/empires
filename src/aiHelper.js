@@ -1027,8 +1027,14 @@ export class AiHelper {
 
         console.log(`[AiHelper] chat() started between ${initiator.name} and ${receiver.name}`);
 
-        // Max back-and-forth exchanges per chat, from controller config (default 6).
-        const maxEx = maxExchanges ?? initiator.controller?.config?.maxChatExchanges ?? 6;
+        // Max back-and-forth exchanges per chat (default 6). The chat manager's
+        // own config wins when it has one (Phase 26: diplomacy belongs to the
+        // strategic AI, so maxChatExchanges set there is honoured); the
+        // tactical controller's config remains the fallback.
+        const maxEx = maxExchanges
+            ?? initiatorHarness?.controller?.config?.maxChatExchanges
+            ?? initiator.controller?.config?.maxChatExchanges
+            ?? 6;
 
         // P5: each harness must see the other player through its OWN filtered
         // gameState — passing the raw Player handed the opponent's resources,
