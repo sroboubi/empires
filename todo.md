@@ -26,3 +26,7 @@
 - test frontier models as players (just as a benchmark)
 
 ## BUGS ##
+
+- EMOTE per player?
+- EMOTE not returned in response to trade deals?
+- EMOTE is too small
