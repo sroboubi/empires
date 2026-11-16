@@ -15,6 +15,9 @@ import { applyResourceYieldBonus } from './resources.js';
 import Entity from './entity.js';
 import { CONFIG } from './config.js';
 
+/** Minimum rounds between AI-initiated trade proposals by the same player. */
+const TRADE_PROPOSAL_COOLDOWN_ROUNDS = 4;
+
 const LOG_STYLES = {
     turn: 'color: #3498db; font-weight: bold;',
     econ: 'color: #f39c12;',
@@ -31,6 +34,10 @@ export class AiHelper {
      */
     constructor(gameState) {
         this.gameState = gameState;
+        // Phase 26: round of the last AI-initiated trade proposal, per
+        // player id (see maybeInitiateTrade). Lives on the helper because
+        // the policy does — one helper serves every manager in the game.
+        this._tradeProposalRoundByPlayer = new Map();
     }
 
     // ==================== Engine bridge: hex grid ====================
@@ -1005,8 +1012,10 @@ export class AiHelper {
         // L6: resolve the harnesses BEFORE deducting the order — the old
         // code consumed 1 order first, then discovered the other side
         // couldn't reply (no harness, no modal) and the order was gone.
-        const initiatorHarness = await initiator.getAiManager();
-        const receiverHarness = await receiver.getAiManager();
+        // Phase 26: resolve the CHAT manager (strategic when present, else
+        // tactical) — the strategic AI is the chat partner when it exists.
+        const initiatorHarness = await initiator.getChatManager();
+        const receiverHarness = await receiver.getChatManager();
         const canProceed = initiatorHarness || receiverHarness
             || typeof this.gameState?.onOpenChatModal === 'function';
         if (!canProceed) return false;
@@ -1018,8 +1027,14 @@ export class AiHelper {
 
         console.log(`[AiHelper] chat() started between ${initiator.name} and ${receiver.name}`);
 
-        // Max back-and-forth exchanges per chat, from controller config (default 6).
-        const maxEx = maxExchanges ?? initiator.controller?.config?.maxChatExchanges ?? 6;
+        // Max back-and-forth exchanges per chat (default 6). The chat manager's
+        // own config wins when it has one (Phase 26: diplomacy belongs to the
+        // strategic AI, so maxChatExchanges set there is honoured); the
+        // tactical controller's config remains the fallback.
+        const maxEx = maxExchanges
+            ?? initiatorHarness?.controller?.config?.maxChatExchanges
+            ?? initiator.controller?.config?.maxChatExchanges
+            ?? 6;
 
         // P5: each harness must see the other player through its OWN filtered
         // gameState — passing the raw Player handed the opponent's resources,
@@ -1141,6 +1156,146 @@ export class AiHelper {
     }
 
     /**
+     * Reviews a player's active per-turn trade agreements and cancels the
+     * ones it can no longer honour. (Phase 26: moved here from
+     * BaseManager — trade mechanics live on the helper now, so any AI,
+     * tactical or strategic, coded or LLM, may call them. The engine no
+     * longer calls this; the strategic AI owns it, and a tactical AI only
+     * calls it when no directive is set — convention, not enforcement.)
+     *
+     * The default policy is objective: keep a deal while the outgoing bundle
+     * is affordable, cancel it otherwise (a permanently unaffordable deal
+     * would otherwise be skipped every round forever).
+     * @param {Player} player
+     * @returns {Promise<void>}
+     */
+    async reviewTrades(player) {
+        const gs = this.gameState;
+        if (!gs || typeof gs.getActiveTradesForPlayer !== 'function') return;
+
+        const trades = gs.getActiveTradesForPlayer(player) || [];
+        let canceled = 0;
+        for (const trade of trades) {
+            if (trade.type !== 'per_turn') continue;
+            // Give an agreement at least one round-end exchange before the
+            // affordability check can cancel it — it may have just been signed.
+            if (trade.createdRound >= gs.currentRound) continue;
+
+            const isP1 = String(trade.player1Id) === String(player.id);
+            const outgoing = isP1 ? trade.bundle1 : trade.bundle2;
+            if (player.hasResources(outgoing)) continue;
+
+            if (gs.cancelTrade(trade.id)) {
+                canceled++;
+                this.aiLog?.(
+                    player,
+                    'trade',
+                    `Canceled per-turn agreement ${trade.id}: cannot afford to send ${this.formatResourceBundle(outgoing)}.`
+                );
+            }
+        }
+
+        if (canceled > 0) {
+            // Refresh the human UI and record a replay snapshot, matching the
+            // normal AI-action path. No-op in headless runs.
+            await this.onActionDone?.(gs, null, 'AI canceled a per-turn trade agreement');
+        }
+    }
+
+    /**
+     * Opportunistically proposes a trade to a known opponent when the empire
+     * is short of a resource but has a surplus of another.
+     *
+     * (Phase 26: moved here from LlmBaseManager. The policy is deterministic
+     * and cheap — no LLM call inside it — so it belongs with the other trade
+     * mechanics on the helper, callable by any AI. The old "LLM-manager
+     * capability only" framing mistook history for a rule: only the LLM
+     * harness happened to implement it. The axis is tactical vs strategic,
+     * not LLM vs JS: the strategic AI owns trade; a tactical AI only calls
+     * this when no directive is set — convention, not enforcement.
+     * Subclasses/managers may still override this with a model-driven
+     * policy by calling initiateTrade() directly.)
+     *
+     * Default policy:
+     * - only when a resource is projected to run out within 10 rounds;
+     * - give a resource with positive net income (or a large stock);
+     * - acute shortages (<= 3 rounds) become per-turn imports, otherwise a
+     *   one-time lump-sum exchange;
+     * - at most one proposal every few rounds, and never to an opponent that
+     *   already has an active per-turn agreement with us.
+     *
+     * The actual negotiation is delegated to `initiateTrade()`, which
+     * handles AI evaluation or the human trade UI.
+     * @param {Player} player
+     * @returns {Promise<void>}
+     */
+    async maybeInitiateTrade(player) {
+        const gs = this.gameState;
+        if (!gs || !player) return;
+        const lastRound = this._tradeProposalRoundByPlayer.get(String(player.id)) ?? -Infinity;
+        if (gs.currentRound - lastRound < TRADE_PROPOSAL_COOLDOWN_ROUNDS) return;
+
+        const profile = player.getResourceProfile();
+        const deficit = profile.criticalResource;
+        if (!deficit) return;
+
+        const turnsLeft = profile.turnsRemaining?.[deficit] ?? Infinity;
+        if (!Number.isFinite(turnsLeft) || turnsLeft > 10) return;
+        // Asking for a resource we already break even on makes no sense.
+        if ((profile.netIncome?.[deficit] ?? 0) >= 0) return;
+
+        const giveKey = Object.keys(profile.netIncome || {})
+            .filter(res => res !== deficit)
+            .map(res => ({
+                res,
+                net: profile.netIncome[res] || 0,
+                stock: profile.stock?.[res] || 0
+            }))
+            .filter(x => x.net > 0 || x.stock >= 30)
+            .sort((a, b) => (b.net - a.net) || (b.stock - a.stock))[0]?.res;
+        if (!giveKey) return;
+
+        const giveStock = profile.stock?.[giveKey] || 0;
+        const perTurn = turnsLeft <= 3;
+        let amount;
+        if (perTurn) {
+            const net = profile.netIncome?.[giveKey] || 0;
+            amount = Math.max(1, Math.min(3, Math.floor((net > 0 ? net : giveStock / 10) / 2)));
+        } else {
+            amount = Math.max(1, Math.min(10, Math.floor(giveStock / 4)));
+        }
+        amount = Math.min(amount, Math.floor(giveStock));
+        if (amount < 1) return;
+
+        // First visible opponent without an active per-turn deal with us.
+        const active = gs.getActiveTradesForPlayer(player) || [];
+        const busy = new Set(active.map(t =>
+            String(t.player1Id) === String(player.id)
+                ? String(t.player2Id)
+                : String(t.player1Id)
+        ));
+        const opponents = player.getOpponents?.() || {};
+        const targetId = Object.keys(opponents)
+            .filter(id => /^\d+$/.test(id) && !busy.has(id))
+            .sort((a, b) => Number(a) - Number(b))[0];
+        if (!targetId) return;
+
+        const offer = {
+            type: perTurn ? 'per_turn' : 'one_time',
+            proposerGives: { [giveKey]: amount },
+            proposerAsks: { [deficit]: amount }
+        };
+
+        this._tradeProposalRoundByPlayer.set(String(player.id), gs.currentRound);
+        const result = await this.initiateTrade(player, Number(targetId), offer);
+        this.aiLog?.(
+            player,
+            'trade',
+            `Proposed ${offer.type} to ${targetId}: ${this.formatResourceBundle(offer.proposerGives)} for ${this.formatResourceBundle(offer.proposerAsks)} -> ${result.status}${result.reason ? ` (${result.reason})` : ''}`
+        );
+    }
+
+    /**
      * Initiates a trade proposal from `initiator` to `receiver`.
      *
      * - AI receiver: its manager evaluates the offer (accept / counter / reject)
@@ -1189,7 +1344,9 @@ export class AiHelper {
             return { status: 'rejected', reason: decision?.reason };
         }
 
-        const receiverHarness = await target.getAiManager();
+        // Phase 26: the CHAT manager answers (strategic when present — it
+        // handled the chat — tactical falls back).
+        const receiverHarness = await target.getChatManager();
         if (!receiverHarness) {
             return { status: 'failed', reason: `${target.name} cannot negotiate trade right now.` };
         }
@@ -1227,7 +1384,7 @@ export class AiHelper {
                 return { status: 'rejected', reason: `Invalid counter-offer: ${counterCheck.reason}` };
             }
 
-            const initiatorHarness = await proposer.getAiManager();
+            const initiatorHarness = await proposer.getChatManager();
             if (!initiatorHarness) {
                 return { status: 'rejected', reason: 'Counter-offer cannot be evaluated.' };
             }

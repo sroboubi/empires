@@ -95,12 +95,14 @@ const SCRIPTED_LLM_HARNESS = `
 import { LlmBaseManager } from '../llmBase.js';
 // Real base class: getLLMClient() and handleTradeOffer() are inherited unchanged.
 // Only WHEN the AI proposes is forced, so the test can run in a fresh game.
+// Phase 26: the engine no longer calls the trade hooks from Player.step() —
+// this manager's own processTurn() drives the forced proposal.
 export default class E2ELlmHarness extends LlmBaseManager {
   constructor(player, helper) {
     super(player, helper);
     this._lastProposedRound = null;
   }
-  async processTurn() {}
+  async processTurn() { await this.maybeInitiateTrade(); }
   async summarizeChatAndAddNote() {}
   async maybeInitiateTrade() {
     if (this.player.id !== 2) return;

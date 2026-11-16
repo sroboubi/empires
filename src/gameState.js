@@ -484,7 +484,9 @@ export class GameState {
         startingResources,
         pDef.description || '',
         pDef.controller,
-        ordersConfig
+        ordersConfig,
+        false,
+        pDef.strategicController
       ));
     } else {
       this.players = [];

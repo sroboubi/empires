@@ -35,11 +35,15 @@ Game configuration comes from an optional JSON config file (see `config.example.
 | `turns` | Number of turns to simulate |
 | `mapSize` | Hex map size (default 12; Small is 32) |
 | `seed` | Game seed (number or string); `--seed N` on the command line overrides it. The same seed and `mapSize` give the same map, and the in-game randomness (barbarian hordes, treasure rewards, the overflow-resource pick) is seeded too, so a game between AI players replays exactly. Omitted = random, as before. LLM players are not deterministic. |
-| `players` | Array of `{id, name, color, controller}` — `controller` is `'ai'` (SmartManager) or `'llm'` (LLM harness) |
+| `players` | Array of `{id, name, color, controller, strategicController?}` — `controller` is `'ai'` (SmartManager), `'llm'` (LLM harness), or an object `{url, config}` used as-is. `strategicController` is optional (Phase 26): `'dummy'` (coded strategic AI with a fixed directive) or an object `{url, config}` used as-is |
 | `barbarians` | Barbarian settings object, or null to disable |
 | `llm` | `{apiKey, baseUrl, orderedModels}` — required for `'llm'` players |
 
 Without a config file, defaults to 2 SmartManager AI players on a radius-12 map.
+
+`strategic-dummy.json` exercises Phase 26: Blue has the coded strategic AI, which
+sets its directive once per turn; the run asserts the directive is set and still
+matches after the save/load round-trip.
 
 ## Checkpoint / resume
 

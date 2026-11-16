@@ -16,6 +16,8 @@ export class JsonHarness extends LlmBaseManager {
     }
 
     async processTurn() {
+        // Phase 26: trade housekeeping first, only when no directive is set.
+        await this.runTradePhase();
         const client = this.getLLMClient();
         const commandSystemPrompt = await this.getCommandSystemPrompt();
 
@@ -221,7 +223,12 @@ export class JsonHarness extends LlmBaseManager {
             this.cachedCommandSystemPrompt = await this.buildCommandSystemPrompt(key);
             this.cachedManifestKey = key;
         }
-        return this.cachedCommandSystemPrompt;
+        // Phase 26: the directive changes every turn, so {DIRECTIVE} is
+        // replaced fresh on each call — the cached prompt keeps the
+        // placeholder (buildCommandSystemPrompt leaves it in place).
+        // Function replacement: a string replacement interprets $ patterns
+        // in the directive text (same B15 pitfall as the chat summarizer).
+        return this.cachedCommandSystemPrompt.replace('{DIRECTIVE}', () => this.directiveBlock());
     }
 
     /**

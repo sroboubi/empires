@@ -299,18 +299,24 @@ Zone of control:
    - one time offer: build a resource bundle offering (a set of resource amounts: e.g. {iron: 50, gold: 10}) and ask for a bundle in return. Allow other player to adjust bundle and offer it back to you. This can be done until one player rejects the process, or both players accept the exchange bundles.
    - similar to above, but the bundle is per turn. Every turn the bundles are exchanged (resources transferred between players) until one player cancels the exchange. Keep track of these exchanges in game state. If a player does not have the required resources to build the bundle on a turn, then the exchange does that happen on that turn.
    - a history entry is added for every successful and failed exchange.
-   - trade-capable AIs (the LLM managers) may initiate offers: `LlmBaseManager.maybeInitiateTrade()` delegates to `helper.initiateTrade()`, which either asks another AI's manager or opens the human trade UI. Standard and tactical AIs only respond (they reject).
-   - AI players review their ongoing per-turn agreements at the start of their turn and cancel any they can no longer afford (`BaseManager.reviewTrades()`); cancellations are recorded in history.
+   - trade mechanics live on `AiHelper`: `initiateTrade()` negotiates an offer (another AI's chat manager, or the human trade UI) and `maybeInitiateTrade(player)` is the deterministic deficit-driven proposal policy. The strategic AI (Phase 26) owns trade and diplomacy; the LLM tactical harness initiates and housekeeps only when no directive is set, and coded tactical AIs do neither (their `handleTradeOffer()` still answers incoming offers, rejecting by default).
+   - `AiHelper.reviewTrades(player)` cancels per-turn agreements the player can no longer afford. The strategic AI owns the review — the LLM director asks the model which deals to cancel, the dummy strategic AI uses the deterministic policy — and a tactical AI runs the deterministic review only when no directive is set. Cancellations are recorded in history.
    - the player resource profile panel should be enhanced to include ongoing trades.
 2. leader portraits and emotes or videos + add all leaders
 3. faction description and special abilities (Asymmetric faction twists. The most praised engagement mechanic in modern 4X (Endless Legend's rule-breaking factions). 2–3 JSON-authored twists per faction)
 
-## Task: Phase 26 (TODO) - LLM Director ##
+## Task: Phase 26 - LLM Director [COMPLETED] ##
 
-1. Add ability to select strategic AI and tactical AI controllers in game setup (tactical must be selected, strategic is optional)
+1. Add ability to select strategic AI and tactical AI controllers in game setup (tactical must be selected, strategic is optional) [COMPLETED]
    - Note: ALL existing AI controllers are tactical, although some of the older ones like standard/smartManager.js and the LLM AIs don't inspect or act on player.controller.directive which is set by the strategic AI
-2. if strategic AI is selected then it handles general empire direction and diplomacy and is called once per turn
+   - A human player never has a controller of either kind: the setup UI clears a stale strategic selection when a row is switched to human, and `Player` nulls the strategic controller when there is no tactical one.
+2. if strategic AI is selected then it handles general empire direction and diplomacy and is called once per turn [COMPLETED]
    - player will call it first, before calling tactical AI
    - it can initiate chat/trade and set player.controller.directive based on game state
-3. Create a base class for strategic AIs in ai/strategic/base.js
-4. Create an implementation that uses an LLM harness to implement strategic ai (should be model independent, similar to tactical LLM harness)
+   - The manager RETURNS the directive; `Player.step()` stores a non-null return on `player.controller.directive` (the AI proxy is read-only). A failed or invalid strategic turn keeps the last valid directive and never blocks the tactical turn.
+3. Create a base class for strategic AIs in ai/strategic/base.js [COMPLETED]
+4. Create an implementation that uses an LLM harness to implement strategic ai (should be model independent, similar to tactical LLM harness) [COMPLETED]
+   - `ai/llm/strategic/harness.js` runs three phases: LLM trade review (named ids are validated against the player's real trades), chats one player at a time (each costs 1 order; a reply may carry a trade proposal negotiated inside the chat), then the directive. `ai/strategic/dummyStrategicAi.js` is the coded test double.
+   - Directive validation lives in `ai/strategic/directive.js` and is shared by the harness, the dummy, and the tests.
+   - Trade and diplomacy belong to the strategic AI. The mechanics live on `AiHelper` (`reviewTrades`, `maybeInitiateTrade`, `initiateTrade`) and the engine no longer calls them: the LLM tactical harness does deterministic trade housekeeping only when no directive is set, and coded tactical AIs do no trade/diplomacy by design.
+   - Incoming chat/trade is answered by the player's CHAT manager (`Player.getChatManager()`: strategic when present, tactical as fallback).

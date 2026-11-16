@@ -122,6 +122,8 @@ const HELPER_METHODS = new Set([
   'getEntitiesSortedByEffectiveness', 'findClosestEntity',
   'findPathTowardsUnexplored', 'selectCandidateCombatUnits',
   'attack', 'build', 'support', 'explore', 'moveAlongPath', 'chat', 'initiateTrade',
+  // Phase 26: trade mechanics live on the helper; any AI may call them.
+  'reviewTrades', 'maybeInitiateTrade',
   'onActionDone', 'getDirections8',
 ]);
 
