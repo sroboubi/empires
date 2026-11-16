@@ -12,7 +12,7 @@ import { DEFAULT_PROMPT_URLS } from '../promptUrls.js';
 export class MenuHarness extends LlmBaseManager {
     constructor(player, helper) {
         super(player, helper);
-        this.cachedMenuSystemPrompt = null;
+        this.cachedMenuSystemPromptTemplate = null;
         this._chatCooldownOrders = 0;
     }
 
@@ -34,20 +34,26 @@ export class MenuHarness extends LlmBaseManager {
     }
 
     async getMenuSystemPrompt() {
-        if (this.cachedMenuSystemPrompt) return this.cachedMenuSystemPrompt;
+        // Phase 26: only the raw template is cached — the directive changes
+        // every turn, so the {DIRECTIVE} replacement must run fresh on each
+        // call (a cached rendered prompt would pin the first directive).
+        if (!this.cachedMenuSystemPromptTemplate) {
+            const response = await fetch(DEFAULT_PROMPT_URLS.menu);
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            this.cachedMenuSystemPromptTemplate = await response.text();
+        }
         const absScoreToWin = this.gameState.settings?.winCondition?.absoluteScore;
         const relScoreToWin = this.gameState.settings?.winCondition?.relativeScore;
-        const response = await fetch(DEFAULT_PROMPT_URLS.menu);
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const md = await response.text();
-        this.cachedMenuSystemPrompt = md
+        return this.cachedMenuSystemPromptTemplate
             .replace('{NAME}', this.player.name)
             .replace('{DESCRIPTION}', this.personaBlock())
+            // Function replacement: a string replacement interprets $ patterns
+            // in the directive text (same B15 pitfall as the chat summarizer).
+            .replace('{DIRECTIVE}', () => this.directiveBlock())
             .replace('{ABS_SCORE_TO_WIN}', absScoreToWin)
             .replace('{REL_SCORE_TO_WIN}', relScoreToWin);
-        return this.cachedMenuSystemPrompt;
     }
 
     /**
@@ -58,6 +64,8 @@ export class MenuHarness extends LlmBaseManager {
      */
 
     async processTurn() {
+        // Phase 26: trade housekeeping first, only when no directive is set.
+        await this.runTradePhase();
         const client = this.getLLMClient();
         const menuSystemPrompt = await this.getMenuSystemPrompt();
         const menuCfg = this.player.controller?.config || {};

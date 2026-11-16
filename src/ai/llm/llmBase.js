@@ -9,9 +9,6 @@ import { LLMClient } from './client.js';
 import { manifestToMarkdown } from './markdown.js';
 import { DEFAULT_PROMPT_URLS } from './promptUrls.js';
 
-/** Minimum rounds between AI-initiated trade proposals by the same manager. */
-const TRADE_PROPOSAL_COOLDOWN_ROUNDS = 4;
-
 /**
  * Emotes the LLM may express in diplomatic chat (Phase 25). These are the
  * portrait filename stems under assets/leaders/<Name>/ — the approved
@@ -46,8 +43,6 @@ export class LlmBaseManager extends BaseManager {
     constructor(player, helper) {
         super(player, helper);
         this.llmClient = null;
-        // Round of the last AI-initiated trade proposal (see maybeInitiateTrade).
-        this._lastTradeProposalRound = -Infinity;
     }
 
     /**
@@ -60,7 +55,11 @@ export class LlmBaseManager extends BaseManager {
 
     getLLMClient() {
         if (!this.llmClient) {
-            const cc = this.player.controller?.config || {};
+            // Phase 26: read the config off this.controller, not
+            // player.controller — for a tactical harness they are the same
+            // object, but a strategic harness re-points this.controller at
+            // its strategic controller (whose provider/model it must use).
+            const cc = this.controller?.config || {};
             // H1: resolve the API key from sessionStorage at construction —
             // it is never stored in the controller config, so it can't leak
             // into saves or replay exports.
@@ -102,6 +101,67 @@ export class LlmBaseManager extends BaseManager {
             parts.push(`Your strategic focus: ${c.focus.join(', ')}.`);
         }
         return parts.join('\n');
+    }
+
+    /**
+     * The explicit directive, if one is set (controller.directive, or the
+     * config slots the coded tacticals also accept). Mirrors
+     * adaptiveManager.getExplicitDirective / entityCentricAi.getDirective:
+     * the resolved directive always has defaults, so "is a directive set"
+     * must test the explicit one, never the resolved one.
+     * @returns {Object|null}
+     */
+    getExplicitDirective() {
+        const c = this.player.controller || {};
+        const cfg = c.config || {};
+        return c.directive || cfg.directive || cfg.aiDirective || null;
+    }
+
+    /** True when a strategic AI (or config) has set a directive this turn. */
+    hasExplicitDirective() {
+        return !!this.getExplicitDirective();
+    }
+
+    /**
+     * Renders the explicit directive for the LLM tactical system prompt
+     * (Phase 26, settled: yes — alongside the leader focus). Empty string
+     * when no directive is set, so the {DIRECTIVE} placeholder vanishes.
+     * @returns {string}
+     */
+    directiveBlock() {
+        const d = this.getExplicitDirective();
+        if (!d) return '';
+        const lines = [];
+        if (d.focus) lines.push(`Focus: ${d.focus}.`);
+        if (d.stance && Object.keys(d.stance).length) {
+            const stances = Object.entries(d.stance).map(([id, s]) => {
+                const p = (this.gameState.players || []).find(p => String(p.id) === String(id));
+                return `${p ? p.name : `player ${id}`}: ${s}`;
+            }).join(', ');
+            lines.push(`Stances: ${stances}.`);
+        }
+        if (Array.isArray(d.goals) && d.goals.length) {
+            lines.push(`Goals (in priority order): ${d.goals.map(g => JSON.stringify(g)).join('; ')}.`);
+        }
+        if (!lines.length) return '';
+        return `Your director's current directive:\n${lines.join('\n')}`;
+    }
+
+    /**
+     * Trade housekeeping at the start of a tactical LLM turn (Phase 26).
+     * The mechanics live on the helper; a tactical AI only does trade work
+     * when no directive is set — a strategic AI owns trade then. Convention,
+     * not enforcement: coded tacticals simply never call this.
+     * @returns {Promise<void>}
+     */
+    async runTradePhase() {
+        if (this.hasExplicitDirective()) return;
+        if (typeof this.helper?.reviewTrades === 'function') {
+            await this.helper.reviewTrades(this.player);
+        }
+        if (typeof this.helper?.maybeInitiateTrade === 'function') {
+            await this.helper.maybeInitiateTrade(this.player);
+        }
     }
 
     /**
@@ -434,92 +494,6 @@ EVALUATION RULES:
                 message: "Our council advises against entering into this agreement at this juncture."
             };
         }
-    }
-
-    /**
-     * Opportunistically proposes a trade to a known opponent when the empire
-     * is short of a resource but has a surplus of another.
-     *
-     * Trade initiation is an LLM-manager capability only: standard and
-     * tactical AIs do not implement this hook, so Player.step never calls it
-     * for them. Subclasses may override this with a model-driven policy; the
-     * default is deterministic and cheap.
-     *
-     * Default policy:
-     * - only when a resource is projected to run out within 10 rounds;
-     * - give a resource with positive net income (or a large stock);
-     * - acute shortages (<= 3 rounds) become per-turn imports, otherwise a
-     *   one-time lump-sum exchange;
-     * - at most one proposal every few rounds, and never to an opponent that
-     *   already has an active per-turn agreement with us.
-     *
-     * The actual negotiation is delegated to `helper.initiateTrade()`, which
-     * handles AI evaluation or the human trade UI.
-     * @returns {Promise<void>}
-     */
-    async maybeInitiateTrade() {
-        const gs = this.gameState;
-        if (!gs || typeof this.helper?.initiateTrade !== 'function') return;
-        if (gs.currentRound - (this._lastTradeProposalRound ?? -Infinity) < TRADE_PROPOSAL_COOLDOWN_ROUNDS) return;
-
-        const profile = this.player.getResourceProfile();
-        const deficit = profile.criticalResource;
-        if (!deficit) return;
-
-        const turnsLeft = profile.turnsRemaining?.[deficit] ?? Infinity;
-        if (!Number.isFinite(turnsLeft) || turnsLeft > 10) return;
-        // Asking for a resource we already break even on makes no sense.
-        if ((profile.netIncome?.[deficit] ?? 0) >= 0) return;
-
-        const giveKey = Object.keys(profile.netIncome || {})
-            .filter(res => res !== deficit)
-            .map(res => ({
-                res,
-                net: profile.netIncome[res] || 0,
-                stock: profile.stock?.[res] || 0
-            }))
-            .filter(x => x.net > 0 || x.stock >= 30)
-            .sort((a, b) => (b.net - a.net) || (b.stock - a.stock))[0]?.res;
-        if (!giveKey) return;
-
-        const giveStock = profile.stock?.[giveKey] || 0;
-        const perTurn = turnsLeft <= 3;
-        let amount;
-        if (perTurn) {
-            const net = profile.netIncome?.[giveKey] || 0;
-            amount = Math.max(1, Math.min(3, Math.floor((net > 0 ? net : giveStock / 10) / 2)));
-        } else {
-            amount = Math.max(1, Math.min(10, Math.floor(giveStock / 4)));
-        }
-        amount = Math.min(amount, Math.floor(giveStock));
-        if (amount < 1) return;
-
-        // First visible opponent without an active per-turn deal with us.
-        const active = gs.getActiveTradesForPlayer(this.player) || [];
-        const busy = new Set(active.map(t =>
-            String(t.player1Id) === String(this.player.id)
-                ? String(t.player2Id)
-                : String(t.player1Id)
-        ));
-        const opponents = this.player.getOpponents?.() || {};
-        const targetId = Object.keys(opponents)
-            .filter(id => /^\d+$/.test(id) && !busy.has(id))
-            .sort((a, b) => Number(a) - Number(b))[0];
-        if (!targetId) return;
-
-        const offer = {
-            type: perTurn ? 'per_turn' : 'one_time',
-            proposerGives: { [giveKey]: amount },
-            proposerAsks: { [deficit]: amount }
-        };
-
-        this._lastTradeProposalRound = gs.currentRound;
-        const result = await this.helper.initiateTrade(this.player, Number(targetId), offer);
-        this.helper.aiLog?.(
-            this.player,
-            'trade',
-            `Proposed ${offer.type} to ${targetId}: ${this.helper.formatResourceBundle(offer.proposerGives)} for ${this.helper.formatResourceBundle(offer.proposerAsks)} -> ${result.status}${result.reason ? ` (${result.reason})` : ''}`
-        );
     }
 
     summarizeGameState() {

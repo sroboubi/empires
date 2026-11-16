@@ -128,6 +128,22 @@ async function main() {
       };
       delete p.controllerConfig;
     }
+    // Phase 26: strategic controller (optional). 'dummy' maps to the coded
+    // dummy strategic AI with its default fixed directive; an object is a
+    // built controller ({url, config}) used as-is.
+    if (p.strategicController === 'dummy') {
+      p.strategicController = {
+        key: 'strategic-dummy',
+        url: './ai/strategic/dummyStrategicAi.js',
+        config: {
+          directive: {
+            focus: 'economy',
+            stance: {},
+            goals: [{ type: 'explore', direction: 'NE' }]
+          }
+        },
+      };
+    }
   }
 
   // Checkpoint wiring: --resume <dir|file> loads the latest checkpoint;
@@ -224,6 +240,8 @@ async function main() {
   // needed here. Eagerly resolve now so a bad controller URL fails fast.
   for (const p of gameState.players) {
     if (p.controller) await p.getAiManager();
+    // Phase 26: same for the strategic manager.
+    if (p.strategicController) await p.getStrategicManager();
   }
 
   assert(gameState.players.length === players.length, `expected ${players.length} players`);
@@ -305,6 +323,18 @@ async function main() {
   restored.deserialize(saved);
   assert(restored.entities.length === gameState.entities.length, 'deserialize entity count matches');
   console.log(`[headless] Save/load round-trip OK (${(saved.length / 1024).toFixed(1)} KB)`);
+
+  // Phase 26: report the directive each strategic AI left on its tactical
+  // controller — and that it survived the save/load round-trip above.
+  for (const p of gameState.players) {
+    if (!p.strategicController) continue;
+    const d = p.controller?.directive;
+    console.log(`[headless] ${p.name} directive: ${d ? JSON.stringify(d) : '(none set)'}`);
+    assert(d && typeof d === 'object', `${p.name} has a strategic controller but no directive was set`);
+    const rd = restored.players.find(r => String(r.id) === String(p.id));
+    assert(JSON.stringify(rd?.controller?.directive) === JSON.stringify(d),
+      `${p.name} directive did not survive save/load`);
+  }
 
   console.log(failures === 0
     ? (resumePath

@@ -505,6 +505,17 @@ function renderSetupPlayers() {
       Object.keys(aiJson?.controllers || {}).map(k =>
         `<option value="${k}"${ctrlKey === k ? ' selected' : ''}>${k}</option>`).join('');
 
+    // Phase 26: strategic controller dropdown, AI rows only. "Strategic:
+    // none" by default; the picked key is stored as
+    // p.strategicControllerKey ('none' when unset).
+    const stratKey = p.strategicControllerKey || 'none';
+    const stratOpts = `<option value="none"${stratKey === 'none' ? ' selected' : ''}>Strategic: none</option>` +
+      Object.keys(aiJson?.strategicControllers || {}).map(k =>
+        `<option value="${k}"${stratKey === k ? ' selected' : ''}>${k}</option>`).join('');
+    const stratField = isAI
+      ? `<select name="strategic-controller" class="form-input strategic-select" style="max-width: 320px;" title="Strategic controller">${stratOpts}</select>`
+      : '';
+
     // Phase 23.3: name is a text input for humans, a leader picker for AI.
     let nameField;
     if (isAI) {
@@ -521,6 +532,7 @@ function renderSetupPlayers() {
       <input name="player-color" type="color" value="${p.color}" title="Choose color">
       ${nameField}
       <select name="controller" class="form-input controller-select" style="max-width: 320px;" title="Controller">${ctrlOpts}</select>
+      ${stratField}
       <button type="button" class="btn btn-danger btn-small" ${setupPlayers.length <= 1 ? 'disabled style="opacity:0.3;cursor:not-allowed;"' : ''}>✕</button>
     `;
 
@@ -529,6 +541,7 @@ function renderSetupPlayers() {
     const nameInput = row.querySelector('input[type="text"]');
     const leaderSelect = row.querySelector('.leader-select');
     const ctrlSelect = row.querySelector('.controller-select');
+    const stratSelect = row.querySelector('.strategic-select');
     const removeBtn = row.querySelector('.btn-danger');
 
     colorInput.addEventListener('change', (e) => { p.color = e.target.value; });
@@ -558,6 +571,11 @@ function renderSetupPlayers() {
       }
       renderSetupPlayers();
     });
+    if (stratSelect) {
+      stratSelect.addEventListener('change', (e) => {
+        p.strategicControllerKey = e.target.value;
+      });
+    }
 
     removeBtn.addEventListener('click', () => {
       if (setupPlayers.length > 1) {
@@ -865,13 +883,15 @@ function setupAiConfigUI() {
  * Looks up the controller definition in ai.json, resolves the provider
  * URL, adds the API key from session storage if present, and overlays
  * the leader's description/focus based on the player name.
- * Returns null for 'human'.
+ * Returns null for 'human' (and 'none' for the strategic dropdown).
+ * @param {string} registry - 'controllers' (default) or 'strategicControllers'
  */
-function buildController(key, playerName) {
-  if (!key || key === 'human' || !aiJson) return null;
-  const def = aiJson.controllers?.[key];
+function buildController(key, playerName, registry = 'controllers') {
+  if (!key || key === 'human' || key === 'none' || !aiJson) return null;
+  const def = aiJson[registry]?.[key];
   if (!def) return null;
   const controller = {
+    key,
     url: def.url,
     config: JSON.parse(JSON.stringify(def.config || {})),
   };
@@ -1019,7 +1039,9 @@ function handleStartGameClicked() {
         id: i + 1,
         name: p.name.trim() || `Player ${i + 1}`,
         color: p.color,
-        controller: buildController(p.controllerKey, p.name)
+        controller: buildController(p.controllerKey, p.name),
+        // Phase 26: strategic controller (null when "Strategic: none").
+        strategicController: buildController(p.strategicControllerKey, p.name, 'strategicControllers')
       };
     }),
     initialization: {
@@ -2039,7 +2061,9 @@ async function handleProposeTradeClicked() {
   renderTradeDrawer();
 
   try {
-    const mgr = await aiPlayer.getAiManager();
+    // Phase 26: the CHAT manager answers the offer (strategic when present
+    // — it handled the chat — tactical falls back).
+    const mgr = await aiPlayer.getChatManager();
     if (!mgr) {
       showToast(`${aiPlayer.name} cannot negotiate trade right now.`, true);
       if (isLiveSession()) {
@@ -2512,7 +2536,8 @@ async function closeChatModal() {
   try {
     if (aiPlayer && humanPlayer) {
       // Requirement 7: When human exits chat, allow the AI player to add a note to summarize the chat
-      const mgr = await aiPlayer.getAiManager();
+      // Phase 26: the chat manager summarizes (the strategic AI chatted when present).
+      const mgr = await aiPlayer.getChatManager();
       if (mgr) await mgr.summarizeChatAndAddNote(humanPlayer);
     }
   } catch (e) {
@@ -2598,7 +2623,9 @@ async function sendChatMessage() {
   `;
 
   try {
-    const mgr = await aiPlayer.getAiManager();
+    // Phase 26: the AI side replies through its CHAT manager (strategic
+    // when present, tactical as fallback).
+    const mgr = await aiPlayer.getChatManager();
     if (mgr) {
       const reply = await mgr.generateChatReply(humanPlayer);
 

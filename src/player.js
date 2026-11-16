@@ -20,7 +20,7 @@ export class Player {
    * @param {Object|string|null} [controller]
    * @param {Object} [ordersConfig] - { max, initial, perTurn }
    */
-  constructor(id, name, gameState, color, startingResources = {}, description = '', controller = null, ordersConfig = null, isReplay = false) {
+  constructor(id, name, gameState, color, startingResources = {}, description = '', controller = null, ordersConfig = null, isReplay = false, strategicController = null) {
     this.id = id;
     this.name = name;
     // Counter for entity IDs: each fresh entity this player owns takes the
@@ -30,6 +30,10 @@ export class Player {
     this.gameState = gameState;
     this.description = description || '';
     this.controller = controller || null;
+    // Phase 26: the strategic controller (optional; tactical is required).
+    // Same shape as controller: {key, url, config, description?, focus?}.
+    // Built by buildController from ai.json's strategicControllers map.
+    this.strategicController = strategicController || null;
     // Leader twist attributes (Phase 25): resolved once at setup and
     // carried on the controller (buildController), so the Player owns a
     // plain copy — no manifest lookup by name. Human players (no
@@ -80,6 +84,34 @@ export class Player {
     }
     this.aiManager = createAiManager(ManagerClass, this, this.gameState.aiHelper);
     return this.aiManager;
+  }
+
+  /**
+   * Returns the player's strategic AI manager (Phase 26), creating it on
+   * first use by resolving player.strategicController the same way
+   * getAiManager() resolves the tactical one. Returns null when no
+   * strategic controller is selected, or in replays.
+   */
+  async getStrategicManager() {
+    if (this.strategicManager) return this.strategicManager;
+    if (!this.strategicController?.url || this.isReplayAI) return null;
+    const module = await import(this.strategicController.url);
+    const ManagerClass = module.default;
+    if (!ManagerClass) {
+      throw new Error(`Default Class not found in module ${this.strategicController.url}`);
+    }
+    this.strategicManager = createAiManager(ManagerClass, this, this.gameState.aiHelper);
+    return this.strategicManager;
+  }
+
+  /**
+   * Returns the manager that speaks for this player in chat/trade (Phase 26):
+   * the strategic manager when one exists, else the tactical manager, else
+   * null (human). Chat is initiated with the strategic AI if it exists;
+   * otherwise it falls back to the tactical AI.
+   */
+  async getChatManager() {
+    return (await this.getStrategicManager()) || (await this.getAiManager());
   }
 
   /**
@@ -327,20 +359,27 @@ export class Player {
     this.recalculateScore();
 
     try {
+      // Phase 26: the strategic AI runs once per turn, before the tactical
+      // AI. It returns a directive (or null); the engine stores a non-null
+      // return on the tactical controller — the AI proxy is read-only, so
+      // the manager cannot write it itself. A strategic failure must never
+      // block the tactical turn: log it, swallow it, keep the last valid
+      // directive ("if the king is dead or asleep the general still
+      // continues"). Trade hooks are NOT called here anymore — the mechanics
+      // live on AiHelper and each AI calls them from its own turn.
+      try {
+        const strategicManager = await this.getStrategicManager();
+        if (strategicManager) {
+          const directive = await strategicManager.runStrategicTurn();
+          if (directive && typeof directive === 'object' && this.controller) {
+            this.controller.directive = directive;
+          }
+        }
+      } catch (err) {
+        console.error(`Strategic turn failed for player ${this.name}:`, err);
+      }
       const aiManager = await this.getAiManager();
       if (aiManager) {
-        // Let the AI re-evaluate ongoing per-turn deals before acting. A
-        // trade-review failure must never block the rest of the turn.
-        try {
-          if (typeof aiManager.reviewTrades === 'function') await aiManager.reviewTrades();
-        } catch (err) {
-          console.error(`Trade review failed for player ${this.name}:`, err);
-        }
-        try {
-          if (typeof aiManager.maybeInitiateTrade === 'function') await aiManager.maybeInitiateTrade();
-        } catch (err) {
-          console.error(`Trade proposal failed for player ${this.name}:`, err);
-        }
         await aiManager.processTurn();
       }
     } catch (err) {
@@ -678,6 +717,7 @@ export class Player {
       color: this.color,
       description: this.description,
       controller: this.controller,
+      strategicController: this.strategicController,
       attributes: this.attributes,
       resources: this.resources,
       orders: this.orders,
@@ -706,7 +746,10 @@ export class Player {
     if (data.controller?.config?.apiKey) {
       delete data.controller.config.apiKey;
     }
-    const player = new Player(data.id, data.name, gameState, data.color, data.resources, data.description, data.controller, data.ordersConfig, isReplay);
+    if (data.strategicController?.config?.apiKey) {
+      delete data.strategicController.config.apiKey;
+    }
+    const player = new Player(data.id, data.name, gameState, data.color, data.resources, data.description, data.controller, data.ordersConfig, isReplay, data.strategicController);
     // Leader twist attributes (Phase 25): they travel with the player in
     // the save (see toJSON), so a loaded game keeps them without any
     // re-resolution. The constructor already copied them from

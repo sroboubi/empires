@@ -34,8 +34,8 @@ AIs MAY use `aiHelper` for convenience (filtered info, multi-step actions), but 
 1. **`action.Do()` on any owned entity.** The action methods enforce all legality (resource costs, order costs, action points, terrain validity, range, etc.).  
 2. **Write to own player history.** (`player.addHistoryEntry()`) (e.g. logging decisions, diplomacy notes)  
 3. **Chat.** Send chat messages via `aiHelper.chat()` (manages order deduction and game chat rules).
-4. **Cancel own per-turn trade agreements.** `gameState.cancelTrade(tradeId)` cancels an active agreement only when the AI's player is a participant; the canceler is always the AI's player. `BaseManager.reviewTrades()` (called at the start of the AI's turn) applies the default policy: cancel a per-turn deal the AI can no longer afford.
-5. **Initiate a trade (trade-capable AIs only).** `helper.initiateTrade(this.player, target, offer)` validates the offer (distinct participants, non-empty positive bundles, one-time affordability), then either asks another AI's manager to evaluate it or opens the human trade UI and waits for the decision. Only the LLM managers (`LlmBaseManager` / `maybeInitiateTrade`) initiate; standard and tactical AIs do not implement the initiator hook and only respond to offers.
+4. **Cancel own per-turn trade agreements.** `gameState.cancelTrade(tradeId)` cancels an active agreement only when the AI's player is a participant; the canceler is always the AI's player. `helper.reviewTrades(player)` applies the default policy: cancel a per-turn deal the AI can no longer afford. Any AI may call it; the strategic AI owns it, and a tactical AI only calls it when no directive is set (convention, not enforcement — see below).
+5. **Initiate a trade.** `helper.initiateTrade(this.player, target, offer)` validates the offer (distinct participants, non-empty positive bundles, one-time affordability), then either asks another AI's manager to evaluate it or opens the human trade UI and waits for the decision. `helper.maybeInitiateTrade(player)` applies the default deterministic policy (deficit-driven: propose a surplus resource for a resource projected to run out). Any AI — tactical or strategic, coded or LLM — may call either. Convention, not enforcement: the strategic AI owns chat and trade; a tactical AI only deals with chat/trade when no directive is set. Incoming offers are answered by the chat manager (strategic when present, tactical as fallback); a tactical AI's own `handleTradeOffer()` decides per its implementation — coded tacticals reject by default, LLM tacticals evaluate with the LLM.
 
 ## NOT ALLOWED (proxy throws Error on attempt)
 
@@ -51,7 +51,15 @@ AIs MAY use `aiHelper` for convenience (filtered info, multi-step actions), but 
 - `AiHelper.chat()` manages diplomatic conversations, order deduction, and player history logging. AI private cooldown tracking (e.g. `_chatCooldownOrders`) is maintained on the harness instance rather than mutating `player`.
 - `AiHelper.formatResourceBundle(bundle)` formats resource-bundle maps for prompts/logs. **AI code in `src/ai/` must never import engine modules** (`gameState.js`, `utils.js`, etc.); everything it needs is reached through the injected `player`, `gameState`, and `helper` proxies.
 - Phase 25 visible-entity info: `adjustedView(player, meta, name)` is for the acting player's buildable catalog; `adjustedEntityView(entity, meta)` is for visible entity instances (including opponents') and uses the entity's real-owner methods. Adjusted entity properties are therefore public, while the foreign player object (value functions, resources, empire profile) stays hidden.
-- Trade initiation is an LLM-manager capability. `Player.step()` calls `maybeInitiateTrade()` only when the manager defines it, so standard (`SmartManager`) and tactical managers never initiate; they inherit `BaseManager.handleTradeOffer()`, which rejects offers. Human-initiated offers to a standard/tactical AI are rejected the same way.
+- Trade mechanics live on the helper (`AiHelper.reviewTrades(player)`,
+  `AiHelper.maybeInitiateTrade(player)`), not on the managers. `Player.step()`
+  calls only `processTurn()` — the engine never calls the trade hooks. The
+  strategic AI calls `reviewTrades` at the start of its turn and initiates
+  trade through chat; the LLM tactical harness calls both at the start of
+  `processTurn()` only when no directive is set; coded tacticals call neither.
+  The axis is tactical vs strategic, NOT LLM vs JS: any AI of either role
+  may call the helper methods, and a coded strategic AI would own chat/trade
+  the same as an LLM one.
 
 ## Proxy identity semantics (for AI implementors)
 

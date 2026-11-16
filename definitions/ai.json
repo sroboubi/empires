@@ -183,6 +183,30 @@
             }
         }
     },
+    "strategicControllers": {
+        "strategic-dummy": {
+            "url": "./ai/strategic/dummyStrategicAi.js",
+            "config": {
+                "directive": {
+                    "focus": "economy",
+                    "stance": {},
+                    "goals": [
+                        {
+                            "type": "explore",
+                            "direction": "NE"
+                        }
+                    ]
+                }
+            }
+        },
+        "strategic-llm": {
+            "url": "./ai/llm/strategic/harness.js",
+            "config": {
+                "provider": "local",
+                "model": "google/gemma-4-e4b"
+            }
+        }
+    },
     "baseConfig": {
         "callDelayMs": 0,
         "timeoutMs": 30000

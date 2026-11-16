@@ -10,4 +10,5 @@ export const DEFAULT_PROMPT_URLS = {
     menu: './src/ai/llm/menu/systemPrompt.menu.md',
     chat: './src/ai/llm/systemPrompt.chat.md',
     chatSummation: './src/ai/llm/systemPrompt.chatSummation.md',
+    strategic: './src/ai/llm/strategic/systemPrompt.strategic.md',
 };
