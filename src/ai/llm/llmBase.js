@@ -156,11 +156,21 @@ export class LlmBaseManager extends BaseManager {
      */
     async runTradePhase() {
         if (this.hasExplicitDirective()) return;
+        // Guarded like the strategic side (and like step() used to): a trade
+        // failure must never block the rest of the turn.
         if (typeof this.helper?.reviewTrades === 'function') {
-            await this.helper.reviewTrades(this.player);
+            try {
+                await this.helper.reviewTrades(this.player);
+            } catch (err) {
+                console.error(`Trade review failed for player ${this.player.name}:`, err);
+            }
         }
         if (typeof this.helper?.maybeInitiateTrade === 'function') {
-            await this.helper.maybeInitiateTrade(this.player);
+            try {
+                await this.helper.maybeInitiateTrade(this.player);
+            } catch (err) {
+                console.error(`Trade proposal failed for player ${this.player.name}:`, err);
+            }
         }
     }
 

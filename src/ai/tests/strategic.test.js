@@ -446,6 +446,16 @@ await asyncTest('runTradePhase calls neither when a directive is set', async () 
     assertEqual(calls, [], 'neither called');
 });
 
+await asyncTest('runTradePhase swallows a throwing helper (trade failure never blocks the turn)', async () => {
+    const calls = [];
+    const helper = mockTacticalHelper(calls);
+    helper.reviewTrades = async () => { calls.push('review'); throw new Error('boom'); };
+    helper.maybeInitiateTrade = async () => { calls.push('initiate'); };
+    const harness = new MenuHarness(mockTacticalPlayer(null), helper);
+    await harness.runTradePhase();
+    assertEqual(calls, ['review', 'initiate'], 'initiate still runs after review throws');
+});
+
 test('directiveBlock renders focus, stances by name, and goals', () => {
     const harness = new MenuHarness(
         mockTacticalPlayer({ focus: 'military', stance: { 2: 'defensive' }, goals: [{ type: 'explore', direction: 'NE' }] }),

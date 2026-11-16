@@ -716,6 +716,8 @@ export class Player {
       name: this.name,
       color: this.color,
       description: this.description,
+      // Phase 26: the directive lives on controller.directive, so it saves
+      // and loads with the controller (only apiKey is stripped in fromJSON).
       controller: this.controller,
       strategicController: this.strategicController,
       attributes: this.attributes,
