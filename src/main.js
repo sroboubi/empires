@@ -100,6 +100,34 @@ async function init() {
     // 3. Setup Event Listeners
     window.addEventListener('mousemove', onMouseMove);
 
+    // Full-size portrait preview on hover over any chat portrait (message
+    // portraits + the modal header portrait). Delegated: message portraits
+    // are re-rendered on every renderChatMessages, so the listener lives
+    // on the window and reads the img's own src / data-emote. A broken
+    // portrait hides the preview instead of showing a broken image.
+    let portraitHoverTarget = null;
+    document.getElementById('portrait-preview-img')?.addEventListener('error', hidePortraitPreview);
+    window.addEventListener('mouseover', (e) => {
+      const img = e.target?.closest?.('.chat-portrait');
+      if (!img || img === portraitHoverTarget) return;
+      portraitHoverTarget = img;
+      showPortraitPreview(img.src, img.dataset.emote || 'neutral', e.clientX, e.clientY);
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (!portraitHoverTarget) return;
+      if (e.target?.closest?.('.chat-portrait') === portraitHoverTarget) {
+        positionPortraitPreview(e.clientX, e.clientY);
+      }
+    });
+    window.addEventListener('mouseout', (e) => {
+      if (!portraitHoverTarget) return;
+      const next = e.relatedTarget?.closest?.('.chat-portrait');
+      if (next !== portraitHoverTarget) {
+        portraitHoverTarget = null;
+        hidePortraitPreview();
+      }
+    });
+
     window.addEventListener('pointerdown', (e) => {
       pointerDownPos = { x: e.clientX, y: e.clientY };
       pointerDownTime = Date.now();
@@ -2086,7 +2114,9 @@ async function handleProposeTradeClicked() {
     if (decision.message) {
       // The reply belongs in the history even if the modal closed while the
       // AI was evaluating, but only the live session may repaint the UI.
-      gameState.addChatMessage(aiPlayer, humanPlayer, decision.message);
+      // The trade decision carries an emote like a chat reply (neutral when
+      // the model omitted it), so the portrait matches the message.
+      gameState.addChatMessage(aiPlayer, humanPlayer, decision.message, false, decision.emote);
       if (isLiveSession()) renderChatMessages();
     }
 
@@ -2350,15 +2380,24 @@ function updateChatModalPortrait() {
   if (!img || !currentChatSession.aiPlayer) return;
   const history = gameState.getChatHistory(currentChatSession.humanPlayer, currentChatSession.aiPlayer);
   let url = null;
+  let headerEmote = 'neutral';
   if (history) {
     for (let i = history.length - 1; i >= 0; i--) {
       const m = history[i];
       url = leaderPortraitUrl(m.sender, m.emote || 'neutral');
-      if (url) break;
+      if (url) { headerEmote = m.emote || 'neutral'; break; }
     }
   }
   if (!url) url = leaderPortraitUrl(currentChatSession.aiPlayer.name, 'neutral');
-  if (url) { img.src = url; img.style.display = ''; }
+  // The hover preview reads the emote off the img itself.
+  img.dataset.emote = headerEmote;
+  if (url) {
+    img.src = url;
+    const size = CONFIG.CHAT_HEADER_PORTRAIT_SIZE || 40;
+    img.style.width = `${size}px`;
+    img.style.height = `${size}px`;
+    img.style.display = '';
+  }
   else { img.style.display = 'none'; }
 }
 
@@ -2408,9 +2447,10 @@ function renderChatMessages() {
     // shows the neutral portrait.
     const portrait = leaderPortraitUrl(msg.sender, msg.emote || 'neutral');
     if (!portrait) return bubble;
+    const size = CONFIG.CHAT_MESSAGE_PORTRAIT_SIZE || 96;
     return `
       <div style="display: flex; gap: 10px; align-items: flex-start;">
-        <img src="${portrait}" alt="" style="width: 48px; height: 48px; border-radius: 8px; object-fit: cover; flex-shrink: 0;" onerror="this.style.display='none'" />
+        <img class="chat-portrait" data-emote="${msg.emote || 'neutral'}" src="${portrait}" alt="" style="width: ${size}px; height: ${size}px; border-radius: 8px; object-fit: cover; flex-shrink: 0;" onerror="this.style.display='none'" />
         <div style="flex: 1; min-width: 0;">${bubble}</div>
       </div>
     `;
@@ -2687,7 +2727,7 @@ async function sendChatMessage() {
 
 
 /* ==========================================================================
-   PLAYERS UI LIST & RESOURCE PROFILES
+   PLAYERS UI LIST & PLAYER INFO
    (merged from src/ui.js — no longer needed as a separate module)
    ========================================================================== */
 
@@ -2741,7 +2781,7 @@ function updatePlayersUI(gameState, callbacks = {}) {
       ? `orders: ${player.orders}/${player.maxOrders}`
       : '';
 
-    const scoreStr = `total score: ${player.score.total} (${player.score.military} military, ${player.score.economic} economic, ${player.score.exploration} exploration)`;
+    const scoreStr = `total score: ${displayNum(player.score.total)} (${displayNum(player.score.military)} military, ${displayNum(player.score.economic)} economic, ${displayNum(player.score.exploration)} exploration)`;
 
     // Calculate score to win
     let scoreToWinParts = [];
@@ -2755,7 +2795,7 @@ function updatePlayersUI(gameState, callbacks = {}) {
         ? secondHighestScore
         : highestScore;
       const relativeTarget = Math.ceil(winCondition.relativeScore * targetScore);
-      scoreToWinParts.push(`Relative: ${relativeTarget} (${winCondition.relativeScore}×${targetScore})`);
+      scoreToWinParts.push(`Relative: ${relativeTarget} (${winCondition.relativeScore}×${displayNum(targetScore)})`);
     }
     const scoreToWinStr = scoreToWinParts.length > 0
       ? `score to win: ${scoreToWinParts.join(' | ')}`
@@ -2796,7 +2836,7 @@ function updatePlayersUI(gameState, callbacks = {}) {
       hideResourceTooltip();
     });
 
-    // Click -> Open Detailed Resource Profile Modal
+    // Click -> Open Detailed Player Info Modal
     li.addEventListener('click', () => {
       clearTimeout(playerHoverTimer);
       hideResourceTooltip();
@@ -2829,9 +2869,74 @@ function showResourceTooltip(gameState, player, x, y) {
   const tooltip = document.getElementById('resource-profile-tooltip');
   const content = document.getElementById('profile-tooltip-content');
 
-  content.innerHTML = renderResourceProfileHTML(player, gameState, true);
+  // Full-size portrait on top (leaders only): the player's latest emote
+  // across all conversations, neutral if they never spoke with one. The
+  // human has no portrait, so their tooltip is unchanged.
+  const portraitUrl = leaderPortraitUrl(player.name, latestPlayerEmote(gameState, player));
+  const portraitHTML = portraitUrl
+    ? `<div style="margin-bottom: 12px;"><img src="${portraitUrl}" alt="" style="display: block; width: 256px; height: 256px; border-radius: 8px; object-fit: cover;" onerror="this.style.display='none'" /></div>`
+    : '';
+  content.innerHTML = portraitHTML + renderResourceProfileHTML(player, gameState, true);
   tooltip.classList.add('active');
   positionResourceTooltip(x, y);
+}
+
+/**
+ * The latest emote a player expressed in any chat thread (their most
+ * recent message anywhere), or 'neutral' if they never spoke with an
+ * emote. The player-list hover has no single thread to read from, so it
+ * reads across all of them.
+ */
+function latestPlayerEmote(gameState, player) {
+  let latest = null;
+  for (const thread of Object.values(gameState?.chatHistory || {})) {
+    for (const m of thread) {
+      if ((m.senderId === player.id || m.sender === player.name)
+          && (!latest || (m.timestamp || 0) >= (latest.timestamp || 0))) {
+        latest = m;
+      }
+    }
+  }
+  return latest?.emote || 'neutral';
+}
+
+/** Display name for an emote stem: 'eye_roll' -> 'Eye roll'. */
+function formatEmoteName(emote) {
+  const name = (emote || 'neutral').replace(/_/g, ' ');
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+function showPortraitPreview(url, emote, x, y) {
+  const preview = document.getElementById('portrait-preview');
+  const img = document.getElementById('portrait-preview-img');
+  const label = document.getElementById('portrait-preview-label');
+  if (!preview || !img || !url) return;
+  img.src = url;
+  if (label) label.textContent = formatEmoteName(emote);
+  preview.classList.add('active');
+  positionPortraitPreview(x, y);
+}
+
+function hidePortraitPreview() {
+  const preview = document.getElementById('portrait-preview');
+  if (preview) preview.classList.remove('active');
+}
+
+function positionPortraitPreview(x, y) {
+  const preview = document.getElementById('portrait-preview');
+  if (!preview) return;
+  const rect = preview.getBoundingClientRect();
+  let posX = x + 15;
+  let posY = y - 20;
+
+  if (posX + rect.width > window.innerWidth - 10) {
+    posX = x - rect.width - 15;
+  }
+  if (posY + rect.height > window.innerHeight - 10) {
+    posY = window.innerHeight - rect.height - 10;
+  }
+  preview.style.left = `${Math.max(10, posX)}px`;
+  preview.style.top = `${Math.max(10, posY)}px`;
 }
 
 function hideResourceTooltip() {
@@ -2874,15 +2979,15 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
     <div class="profile-summary-grid">
       <div class="profile-stat-box">
         <span class="profile-stat-label">Military Score</span>
-        <span class="profile-stat-val stat-military">${player.score.military}</span>
+        <span class="profile-stat-val stat-military">${displayNum(player.score.military)}</span>
       </div>
       <div class="profile-stat-box">
         <span class="profile-stat-label">Economic Score</span>
-        <span class="profile-stat-val stat-economic">${player.score.economic}</span>
+        <span class="profile-stat-val stat-economic">${displayNum(player.score.economic)}</span>
       </div>
       <div class="profile-stat-box">
         <span class="profile-stat-label">Exploration Score</span>
-        <span class="profile-stat-val stat-exploration">${player.score.exploration}</span>
+        <span class="profile-stat-val stat-exploration">${displayNum(player.score.exploration)}</span>
       </div>
       <div class="profile-stat-box">
         <span class="profile-stat-label">Orders</span>
@@ -3137,7 +3242,7 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
   const titleHeader = isCompact ? `
     <div class="flex-row flex-row-spaced">
       <span class="player-color-dot" style="background-color: ${player.color};"></span>
-      <strong class="profile-title">${escapeHTML(player.name)} Resource Profile</strong>
+      <strong class="profile-title">${escapeHTML(player.name)} — Player Info</strong>
     </div>
   ` : '';
 
@@ -3155,7 +3260,7 @@ function renderResourceProfileHTML(player, gameState, isCompact = false) {
 }
 
 /* ==========================================================================
-   RESOURCE PROFILE VISUALIZER (MODAL & TOOLTIP)
+   PLAYER INFO (MODAL & TOOLTIP)
    ========================================================================== */
 
 function openProfileModal(player, gameState) {
@@ -3166,7 +3271,7 @@ function openProfileModal(player, gameState) {
   const content = document.getElementById('profile-modal-content');
 
   colorDot.style.backgroundColor = player.color;
-  nameSpan.textContent = `${player.name.toUpperCase()} — RESOURCE PROFILE`;
+  nameSpan.textContent = `${player.name.toUpperCase()} — PLAYER INFO`;
 
   function updateModalContent() {
     content.innerHTML = renderResourceProfileHTML(player, gameState, false);

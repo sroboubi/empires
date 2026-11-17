@@ -327,7 +327,22 @@ export class LlmStrategicManager extends LlmBaseManager {
             if (!ok) return;
             if (choice.tradeProposal && typeof this.helper?.initiateTrade === 'function') {
                 try {
-                    const result = await this.helper.initiateTrade(this.player, target, choice.tradeProposal);
+                    // The proposal entry carries the proposer's emote from
+                    // the chat that just happened (the last message they
+                    // sent in this thread) — the proposal itself is a
+                    // system line, so it has no emote of its own.
+                    let proposalEmote = null;
+                    try {
+                        const history = this.gameState.getChatHistory?.(this.player, target) || [];
+                        for (let i = history.length - 1; i >= 0; i--) {
+                            const m = history[i];
+                            if (m.senderId === this.player.id || m.sender === this.player.name) {
+                                proposalEmote = m.emote || null;
+                                break;
+                            }
+                        }
+                    } catch {}
+                    const result = await this.helper.initiateTrade(this.player, target, choice.tradeProposal, proposalEmote);
                     this.helper.aiLog?.(
                         this.player, 'trade',
                         `Proposed ${choice.tradeProposal.type} to ${target.name} in chat -> ${result.status}${result.reason ? ` (${result.reason})` : ''}`

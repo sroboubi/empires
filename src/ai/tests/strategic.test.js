@@ -848,7 +848,7 @@ await asyncTest('strategic chat-phase trade proposal is negotiated in the chat t
     // call: no active trades, so the review phase spends no LLM call.)
     const blueClient = scriptedClient([
         '{"targetPlayerId": 2, "tradeProposal": {"type": "one_time", "gives": {"wood": 5}, "asks": {"gold": 5}}}',
-        'Greetings, Red. Shall we talk trade? [END_CHAT]',
+        'Greetings, Red. Shall we talk trade? [EMOTE: joy] [END_CHAT]',
         'Chatted with Red about trade.',
         '{"targetPlayerId": null}',
         '{"focus": "balanced"}',
@@ -856,11 +856,11 @@ await asyncTest('strategic chat-phase trade proposal is negotiated in the chat t
     blueMgr.getLLMClient = () => blueClient;
     blueMgr.getStrategicSystemPrompt = async () => 'TEST STRATEGIC PROMPT';
     // Red's client, in call order: chat reply (ends the loop), chat
-    // summary, trade-offer evaluation (accept).
+    // summary, trade-offer evaluation (accept, with an emote).
     const redClient = scriptedClient([
         'Red here — I am listening. [END_CHAT]',
         'Chatted with Blue.',
-        '{"action": "accept", "message": "Agreed, Blue — a fair exchange."}',
+        '{"action": "accept", "message": "Agreed, Blue — a fair exchange.", "emote": "trust"}',
     ]);
     redMgr.getLLMClient = () => redClient;
 
@@ -871,15 +871,39 @@ await asyncTest('strategic chat-phase trade proposal is negotiated in the chat t
     const thread = threads.get('1:2') || [];
     assertEqual(thread.length, 5, 'thread holds opening, reply, proposal, decision, acceptance');
     assert(thread[0].sender === 'Blue' && thread[0].content.includes('Greetings'), 'opening first');
+    assertEqual(thread[0].emote, 'joy', 'opening carries the chat emote');
     assert(thread[1].sender === 'Red', 'reply second');
     assert(thread[2].sender === 'Blue' && /Trade Proposal/.test(thread[2].content)
         && thread[2].content.includes('5 wood') && thread[2].content.includes('5 gold'), 'proposal recorded in thread');
+    assertEqual(thread[2].emote, 'joy', 'proposal entry carries the proposer’s chat emote');
     assert(thread[3].sender === 'Red' && thread[3].content.includes('Agreed, Blue'), 'decision message in thread');
+    assertEqual(thread[3].emote, 'trust', 'decision message carries the emote from the trade response');
     assert(thread[4].sender === 'Red' && /Trade accepted/.test(thread[4].content), 'acceptance recorded in thread');
     assertEqual(bluePlayer.resources.wood, 95, 'Blue sent 5 wood');
     assertEqual(bluePlayer.resources.gold, 105, 'Blue received 5 gold');
     assertEqual(redPlayer.resources.wood, 105, 'Red received 5 wood');
     assertEqual(redPlayer.resources.gold, 95, 'Red sent 5 gold');
+});
+
+await asyncTest('trade-offer evaluation returns a validated emote with the decision', async () => {
+    const { bluePlayer, redMgr } = inlineTradeSetup();
+    // Two evaluations from one scripted client, in call order: a counter
+    // with a valid emote, then an accept with an unapproved emote. (One
+    // client instance — getLLMClient is called fresh per evaluation, so a
+    // new client per call would replay the first response.)
+    const client = scriptedClient([
+        '{"action": "counter", "message": "Close — send a little more gold.", "counterOffer": {"proposerGives": {"gold": 8}, "proposerAsks": {"wood": 5}}, "emote": "smug"}',
+        '{"action": "accept", "message": "Done.", "emote": "drunk"}',
+    ]);
+    redMgr.getLLMClient = () => client;
+    const offer = { type: 'one_time', proposerGives: { wood: 5 }, proposerAsks: { gold: 5 } };
+    const counter = await redMgr.handleTradeOffer(bluePlayer, offer);
+    assertEqual(counter.action, 'counter', 'counter action');
+    assertEqual(counter.emote, 'smug', 'valid emote returned with the decision');
+    assertEqual(counter.counterOffer.proposerGives.gold, 8, 'counter-offer still parsed');
+    const accepted = await redMgr.handleTradeOffer(bluePlayer, offer);
+    assertEqual(accepted.action, 'accept', 'accept action');
+    assertEqual(accepted.emote, 'neutral', 'unapproved emote falls back to neutral');
 });
 
 console.log(`\nstrategic.test.js: ${passed} passed, ${failed} failed`);

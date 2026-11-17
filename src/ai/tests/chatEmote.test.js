@@ -7,7 +7,7 @@
  * neutral fallback. generateChatReply itself needs a live LLM client,
  * so it is not exercised here.
  */
-import { APPROVED_CHAT_EMOTES, extractChatEmote } from '../llm/llmBase.js';
+import { APPROVED_CHAT_EMOTES, extractChatEmote, validateEmote } from '../llm/llmBase.js';
 
 let passed = 0, failed = 0;
 
@@ -78,6 +78,26 @@ test('works alongside [END_CHAT]', () => {
     assertEqual(emote, 'sadness', 'emote');
     assert(text.includes('[END_CHAT]'), 'END_CHAT left for its own parser');
     assert(!text.includes('[EMOTE'), 'emote tag stripped');
+});
+
+console.log('\n## validateEmote (structured trade responses)');
+
+test('accepts a valid emote as-is', () => {
+    assertEqual(validateEmote('joy'), 'joy', 'joy');
+});
+
+test('normalizes case and spaces like the tag parser', () => {
+    assertEqual(validateEmote('Eye Roll'), 'eye_roll', 'Eye Roll -> eye_roll');
+    assertEqual(validateEmote(' SMUG '), 'smug', 'trimmed + lowercased');
+});
+
+test('missing, non-string, or unapproved values fall back to neutral', () => {
+    assertEqual(validateEmote(undefined), 'neutral', 'undefined');
+    assertEqual(validateEmote(null), 'neutral', 'null');
+    assertEqual(validateEmote(''), 'neutral', 'empty');
+    assertEqual(validateEmote(42), 'neutral', 'non-string');
+    assertEqual(validateEmote('drunk'), 'neutral', 'drunk is excluded');
+    assertEqual(validateEmote('blushing'), 'neutral', 'blushing is excluded');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

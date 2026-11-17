@@ -1307,9 +1307,12 @@ export class AiHelper {
      * @param {Player|string|number} initiator
      * @param {Player|string|number} receiver
      * @param {Object} offer - { type: 'one_time'|'per_turn', proposerGives, proposerAsks }
+     * @param {string|null} [emote=null] - the proposer's portrait emote for
+     *   the proposal entry (e.g. the emote of the chat reply that carried
+     *   the proposal); null renders the neutral portrait.
      * @returns {Promise<{status: 'accepted'|'countered'|'rejected'|'invalid'|'failed', reason?: string, trade?: Object}>}
      */
-    async initiateTrade(initiator, receiver, offer) {
+    async initiateTrade(initiator, receiver, offer, emote = null) {
         const proposer = this._resolveTradePlayer(initiator);
         const target = this._resolveTradePlayer(receiver);
         const check = this.gameState?.validateTradeOffer?.(proposer, target, offer, {
@@ -1323,7 +1326,9 @@ export class AiHelper {
         this.gameState.addChatMessage(
             proposer,
             target,
-            `*[Trade Proposal: Proposing ${typeLabel} — Offering ${formatResourceBundle(offer.proposerGives)} for ${formatResourceBundle(offer.proposerAsks)}]*`
+            `*[Trade Proposal: Proposing ${typeLabel} — Offering ${formatResourceBundle(offer.proposerGives)} for ${formatResourceBundle(offer.proposerAsks)}]*`,
+            false,
+            emote
         );
 
         // Human receiver: hand the offer to the UI and wait for the decision.
@@ -1354,7 +1359,7 @@ export class AiHelper {
         const decision = await receiverHarness.handleTradeOffer(
             this._viewOfPlayer(receiverHarness, proposer), offer
         );
-        if (decision?.message) this.gameState.addChatMessage(target, proposer, decision.message);
+        if (decision?.message) this.gameState.addChatMessage(target, proposer, decision.message, false, decision.emote);
 
         if (decision?.action === 'accept') {
             const applied = this._applyAcceptedTrade(proposer, target, offer);
@@ -1402,7 +1407,7 @@ export class AiHelper {
             const reply = await initiatorHarness.handleTradeOffer(
                 this._viewOfPlayer(initiatorHarness, target), offerForProposer
             );
-            if (reply?.message) this.gameState.addChatMessage(proposer, target, reply.message);
+            if (reply?.message) this.gameState.addChatMessage(proposer, target, reply.message, false, reply.emote);
             if (reply?.action === 'accept') {
                 const applied = this._applyAcceptedTrade(proposer, target, counterOffer);
                 if (!applied.ok) return { status: 'failed', reason: applied.reason };
