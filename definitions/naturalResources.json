@@ -1,7 +1,7 @@
 [
   {
     "name": "tree",
-    "iconUrl": "./assets/resources/tree.jpg",
+    "iconUrl": "./assets/resources/tree.png",
     "terrains": [
       {
         "types": [

@@ -3453,6 +3453,7 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
 
       // Extract build stats if this is a build action
       let buildStatsHTML = '';
+      let buildIconHTML = '';
       if (action.name && action.name.toLowerCase().startsWith('build ')) {
         const buildTarget = action.name.substring(6).trim();
         const manifestEntities = gameState?.manifestData?.entities || {};
@@ -3462,6 +3463,11 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
           if (entry) meta = entry[1];
         }
         if (meta) {
+          // Standardized 256px icon: same stem/folder as the .glb model.
+          const iconUrl = meta.modelUrl ? meta.modelUrl.replace(/\.glb$/i, '.png') : null;
+          if (iconUrl) {
+            buildIconHTML = `<img src="${iconUrl}" alt="" style="width: 40px; height: 40px; object-fit: contain; flex-shrink: 0; border-radius: 6px;" onerror="this.style.display='none'" />`;
+          }
           const upkeepParts = Object.entries(meta.maintenance || {}).map(([r, a]) => `${a} ${r}`);
           const upkeepStr = upkeepParts.length > 0 ? upkeepParts.join(', ') : 'None';
           const yieldParts = Object.entries(meta.yields || {}).map(([r, a]) => `+${a} ${r}`);
@@ -3483,13 +3489,16 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
       }
 
       btn.innerHTML = `
-        <div style="display: flex; flex-direction: column; width: 100%;">
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <strong style="font-size: 12px; color: ${isPossible ? '#ffffff' : '#999999'};">${action.name}</strong>
-            <span style="font-size: 10px; color: ${isPossible ? 'var(--accent-color)' : '#666666'};">►</span>
+        <div style="display: flex; gap: 8px; align-items: flex-start; width: 100%;">
+          ${buildIconHTML}
+          <div style="display: flex; flex-direction: column; flex: 1; min-width: 0;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <strong style="font-size: 12px; color: ${isPossible ? '#ffffff' : '#999999'};">${action.name}</strong>
+              <span style="font-size: 10px; color: ${isPossible ? 'var(--accent-color)' : '#666666'};">►</span>
+            </div>
+            <span style="font-size: 10px; color: ${isPossible ? '#a78bfa' : '#ff6b6b'}; margin-top: 1px;">${previewText}</span>
+            ${buildStatsHTML}
           </div>
-          <span style="font-size: 10px; color: ${isPossible ? '#a78bfa' : '#ff6b6b'}; margin-top: 1px;">${previewText}</span>
-          ${buildStatsHTML}
         </div>
       `;
 
