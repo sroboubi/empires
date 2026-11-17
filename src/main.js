@@ -100,6 +100,34 @@ async function init() {
     // 3. Setup Event Listeners
     window.addEventListener('mousemove', onMouseMove);
 
+    // Full-size portrait preview on hover over any chat portrait (message
+    // portraits + the modal header portrait). Delegated: message portraits
+    // are re-rendered on every renderChatMessages, so the listener lives
+    // on the window and reads the img's own src / data-emote. A broken
+    // portrait hides the preview instead of showing a broken image.
+    let portraitHoverTarget = null;
+    document.getElementById('portrait-preview-img')?.addEventListener('error', hidePortraitPreview);
+    window.addEventListener('mouseover', (e) => {
+      const img = e.target?.closest?.('.chat-portrait');
+      if (!img || img === portraitHoverTarget) return;
+      portraitHoverTarget = img;
+      showPortraitPreview(img.src, img.dataset.emote || 'neutral', e.clientX, e.clientY);
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (!portraitHoverTarget) return;
+      if (e.target?.closest?.('.chat-portrait') === portraitHoverTarget) {
+        positionPortraitPreview(e.clientX, e.clientY);
+      }
+    });
+    window.addEventListener('mouseout', (e) => {
+      if (!portraitHoverTarget) return;
+      const next = e.relatedTarget?.closest?.('.chat-portrait');
+      if (next !== portraitHoverTarget) {
+        portraitHoverTarget = null;
+        hidePortraitPreview();
+      }
+    });
+
     window.addEventListener('pointerdown', (e) => {
       pointerDownPos = { x: e.clientX, y: e.clientY };
       pointerDownTime = Date.now();
@@ -2352,14 +2380,17 @@ function updateChatModalPortrait() {
   if (!img || !currentChatSession.aiPlayer) return;
   const history = gameState.getChatHistory(currentChatSession.humanPlayer, currentChatSession.aiPlayer);
   let url = null;
+  let headerEmote = 'neutral';
   if (history) {
     for (let i = history.length - 1; i >= 0; i--) {
       const m = history[i];
       url = leaderPortraitUrl(m.sender, m.emote || 'neutral');
-      if (url) break;
+      if (url) { headerEmote = m.emote || 'neutral'; break; }
     }
   }
   if (!url) url = leaderPortraitUrl(currentChatSession.aiPlayer.name, 'neutral');
+  // The hover preview reads the emote off the img itself.
+  img.dataset.emote = headerEmote;
   if (url) {
     img.src = url;
     const size = CONFIG.CHAT_HEADER_PORTRAIT_SIZE || 80;
@@ -2419,7 +2450,7 @@ function renderChatMessages() {
     const size = CONFIG.CHAT_MESSAGE_PORTRAIT_SIZE || 96;
     return `
       <div style="display: flex; gap: 10px; align-items: flex-start;">
-        <img src="${portrait}" alt="" style="width: ${size}px; height: ${size}px; border-radius: 8px; object-fit: cover; flex-shrink: 0;" onerror="this.style.display='none'" />
+        <img class="chat-portrait" data-emote="${msg.emote || 'neutral'}" src="${portrait}" alt="" style="width: ${size}px; height: ${size}px; border-radius: 8px; object-fit: cover; flex-shrink: 0;" onerror="this.style.display='none'" />
         <div style="flex: 1; min-width: 0;">${bubble}</div>
       </div>
     `;
@@ -2838,9 +2869,74 @@ function showResourceTooltip(gameState, player, x, y) {
   const tooltip = document.getElementById('resource-profile-tooltip');
   const content = document.getElementById('profile-tooltip-content');
 
-  content.innerHTML = renderResourceProfileHTML(player, gameState, true);
+  // Full-size portrait on top (leaders only): the player's latest emote
+  // across all conversations, neutral if they never spoke with one. The
+  // human has no portrait, so their tooltip is unchanged.
+  const portraitUrl = leaderPortraitUrl(player.name, latestPlayerEmote(gameState, player));
+  const portraitHTML = portraitUrl
+    ? `<div style="margin-bottom: 12px;"><img src="${portraitUrl}" alt="" style="display: block; width: 256px; height: 256px; border-radius: 8px; object-fit: cover;" onerror="this.style.display='none'" /></div>`
+    : '';
+  content.innerHTML = portraitHTML + renderResourceProfileHTML(player, gameState, true);
   tooltip.classList.add('active');
   positionResourceTooltip(x, y);
+}
+
+/**
+ * The latest emote a player expressed in any chat thread (their most
+ * recent message anywhere), or 'neutral' if they never spoke with an
+ * emote. The player-list hover has no single thread to read from, so it
+ * reads across all of them.
+ */
+function latestPlayerEmote(gameState, player) {
+  let latest = null;
+  for (const thread of Object.values(gameState?.chatHistory || {})) {
+    for (const m of thread) {
+      if ((m.senderId === player.id || m.sender === player.name)
+          && (!latest || (m.timestamp || 0) >= (latest.timestamp || 0))) {
+        latest = m;
+      }
+    }
+  }
+  return latest?.emote || 'neutral';
+}
+
+/** Display name for an emote stem: 'eye_roll' -> 'Eye roll'. */
+function formatEmoteName(emote) {
+  const name = (emote || 'neutral').replace(/_/g, ' ');
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+function showPortraitPreview(url, emote, x, y) {
+  const preview = document.getElementById('portrait-preview');
+  const img = document.getElementById('portrait-preview-img');
+  const label = document.getElementById('portrait-preview-label');
+  if (!preview || !img || !url) return;
+  img.src = url;
+  if (label) label.textContent = formatEmoteName(emote);
+  preview.classList.add('active');
+  positionPortraitPreview(x, y);
+}
+
+function hidePortraitPreview() {
+  const preview = document.getElementById('portrait-preview');
+  if (preview) preview.classList.remove('active');
+}
+
+function positionPortraitPreview(x, y) {
+  const preview = document.getElementById('portrait-preview');
+  if (!preview) return;
+  const rect = preview.getBoundingClientRect();
+  let posX = x + 15;
+  let posY = y - 20;
+
+  if (posX + rect.width > window.innerWidth - 10) {
+    posX = x - rect.width - 15;
+  }
+  if (posY + rect.height > window.innerHeight - 10) {
+    posY = window.innerHeight - rect.height - 10;
+  }
+  preview.style.left = `${Math.max(10, posX)}px`;
+  preview.style.top = `${Math.max(10, posY)}px`;
 }
 
 function hideResourceTooltip() {

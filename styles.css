@@ -421,6 +421,50 @@
       transform: translateY(0);
     }
 
+    /* Full-size portrait preview on hover over a chat portrait.
+       Fixed like the resource tooltip, but above the modals (10000) and
+       toasts (10001) so it stays visible over the chat modal. */
+    .portrait-preview {
+      position: fixed;
+      width: 256px;
+      background: rgba(18, 18, 26, 0.95);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(52, 152, 219, 0.4);
+      border-radius: 12px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.85);
+      z-index: 10002;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease;
+      overflow: hidden;
+    }
+
+    .portrait-preview.active {
+      opacity: 1;
+    }
+
+    .portrait-preview img {
+      display: block;
+      width: 256px;
+      height: 256px;
+      object-fit: cover;
+    }
+
+    /* Emote name written across the top of the enlarged portrait. */
+    .portrait-preview-label {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      padding: 8px 12px 20px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #fff;
+      background: linear-gradient(rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0));
+      pointer-events: none;
+    }
+
     /* Stacked Bar Chart & Resource Profile Styles */
     .profile-summary-grid {
       display: grid;
