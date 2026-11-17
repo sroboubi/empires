@@ -34,9 +34,21 @@ export const APPROVED_CHAT_EMOTES = [
  */
 export function extractChatEmote(rawText) {
     const match = /\[EMOTE:\s*([^\]]+)\]/i.exec(rawText);
-    const raw = match ? match[1].trim().toLowerCase().replace(/\s+/g, '_') : '';
-    const emote = APPROVED_CHAT_EMOTES.includes(raw) ? raw : 'neutral';
+    const emote = validateEmote(match ? match[1] : '');
     return { emote, text: rawText.replace(/\[EMOTE:\s*[^\]]+\]/gi, '').trim() };
+}
+
+/**
+ * Validates a bare emote value (e.g. from a structured trade response):
+ * normalize to the portrait filename stem and check against
+ * APPROVED_CHAT_EMOTES; anything missing or outside the list falls back
+ * to 'neutral'. Same validation as extractChatEmote, without tag parsing.
+ * @param {*} value
+ * @returns {string}
+ */
+export function validateEmote(value) {
+    const raw = typeof value === 'string' ? value.trim().toLowerCase().replace(/\s+/g, '_') : '';
+    return APPROVED_CHAT_EMOTES.includes(raw) ? raw : 'neutral';
 }
 
 export class LlmBaseManager extends BaseManager {
@@ -372,14 +384,15 @@ export class LlmBaseManager extends BaseManager {
      * Evaluates a trade proposal from an opponent leader using the LLM.
      * @param {Player} proposer
      * @param {Object} offer - { type: 'one_time'|'per_turn', proposerGives: Object, proposerAsks: Object }
-     * @returns {Promise<{ action: 'accept'|'counter'|'reject', message: string, counterOffer?: Object }>}
+     * @returns {Promise<{ action: 'accept'|'counter'|'reject', message: string, counterOffer?: Object, emote: string }>}
      */
     async handleTradeOffer(proposer, offer) {
         const client = this.getLLMClient();
         if (!client) {
             return {
                 action: 'reject',
-                message: `${this.player.name} cannot consider trade offers at this time.`
+                message: `${this.player.name} cannot consider trade offers at this time.`,
+                emote: 'neutral'
             };
         }
 
@@ -421,6 +434,7 @@ EVALUATION RULES:
 3. If the deal is close but needs adjustment (e.g. asking too much or offering too little), select "counter" and provide an adjusted "counterOffer" containing "proposerGives" (what the opponent should send you) and "proposerAsks" (what you are willing to send them).
 4. If the deal is unacceptable, insulting, or completely unaffordable, select "reject".
 5. Provide a diplomatic, in-character explanation in "message" written directly to the opponent leader.
+6. Include an "emote" naming your expression for this reply — one of: ${APPROVED_CHAT_EMOTES.join(', ')}. Your portrait shows it beside the message in the chat thread.
 `;
 
         const responseSchema = {
@@ -428,6 +442,7 @@ EVALUATION RULES:
             properties: {
                 action: { type: 'string', enum: ['accept', 'counter', 'reject'] },
                 message: { type: 'string', description: 'In-character diplomatic message explaining your decision' },
+                emote: { type: 'string', enum: APPROVED_CHAT_EMOTES, description: 'Your facial expression for this reply, shown as your portrait emote beside the message' },
                 counterOffer: {
                     type: 'object',
                     description: 'Required if action is counter. What the proposer gives and what the proposer receives.',
@@ -456,20 +471,23 @@ EVALUATION RULES:
             if (!rawResponse) {
                 return {
                     action: 'reject',
-                    message: "We have deliberated, but cannot agree to these terms."
+                    message: "We have deliberated, but cannot agree to these terms.",
+                    emote: 'neutral'
                 };
             }
 
             const parsed = typeof rawResponse === 'string' ? JSON.parse(rawResponse) : rawResponse;
             const action = ['accept', 'counter', 'reject'].includes(parsed.action) ? parsed.action : 'reject';
             const message = parsed.message || `${this.player.name} has reached a decision regarding the trade.`;
+            const emote = validateEmote(parsed.emote);
 
             // If action is accept, verify AI actually has the resources requested for one-time
             if (action === 'accept' && offer.type === 'one_time') {
                 if (!this.player.hasResources(offer.proposerAsks)) {
                     return {
                         action: 'reject',
-                        message: "Upon inspecting our warehouses, we realize we do not currently possess the goods you requested."
+                        message: "Upon inspecting our warehouses, we realize we do not currently possess the goods you requested.",
+                        emote: 'neutral'
                     };
                 }
             }
@@ -495,13 +513,15 @@ EVALUATION RULES:
             return {
                 action,
                 message,
-                counterOffer
+                counterOffer,
+                emote
             };
         } catch (err) {
             console.error(`[Harness] Error evaluating trade offer:`, err);
             return {
                 action: 'reject',
-                message: "Our council advises against entering into this agreement at this juncture."
+                message: "Our council advises against entering into this agreement at this juncture.",
+                emote: 'neutral'
             };
         }
     }

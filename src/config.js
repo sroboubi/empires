@@ -18,6 +18,8 @@ export var CONFIG = {
   REPLAY_MODE: false,    // when true, show a replay file selector instead of the game setup menu
   AUDIO_ENABLED: true,   // master switch for all game audio (query-param overridable)
   AUDIO_VOLUME: 0.8,     // master volume 0..1 (query-param overridable)
+  CHAT_MESSAGE_PORTRAIT_SIZE: 96, // leader portrait beside a chat message, px (query-param overridable)
+  CHAT_HEADER_PORTRAIT_SIZE: 80,  // leader portrait at the top of the chat modal, px (query-param overridable)
   SHADOW_CAMERA_SCALE: 1.1,  // static pop-free shadow bound = (panRange + maxZoom) * this (query-param overridable)
   SHADOW_MAP_SIZE: 4096,      // shadow map texture resolution (query-param overridable via ?shadowmapsize=)
   SHADOW_TYPE: 'pcfsoft',    // 'none' | 'basic' | 'pcf' | 'pcfsoft' (query-param overridable via ?shadowtype=)

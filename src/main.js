@@ -2086,7 +2086,9 @@ async function handleProposeTradeClicked() {
     if (decision.message) {
       // The reply belongs in the history even if the modal closed while the
       // AI was evaluating, but only the live session may repaint the UI.
-      gameState.addChatMessage(aiPlayer, humanPlayer, decision.message);
+      // The trade decision carries an emote like a chat reply (neutral when
+      // the model omitted it), so the portrait matches the message.
+      gameState.addChatMessage(aiPlayer, humanPlayer, decision.message, false, decision.emote);
       if (isLiveSession()) renderChatMessages();
     }
 
@@ -2358,7 +2360,13 @@ function updateChatModalPortrait() {
     }
   }
   if (!url) url = leaderPortraitUrl(currentChatSession.aiPlayer.name, 'neutral');
-  if (url) { img.src = url; img.style.display = ''; }
+  if (url) {
+    img.src = url;
+    const size = CONFIG.CHAT_HEADER_PORTRAIT_SIZE || 80;
+    img.style.width = `${size}px`;
+    img.style.height = `${size}px`;
+    img.style.display = '';
+  }
   else { img.style.display = 'none'; }
 }
 
@@ -2408,9 +2416,10 @@ function renderChatMessages() {
     // shows the neutral portrait.
     const portrait = leaderPortraitUrl(msg.sender, msg.emote || 'neutral');
     if (!portrait) return bubble;
+    const size = CONFIG.CHAT_MESSAGE_PORTRAIT_SIZE || 96;
     return `
       <div style="display: flex; gap: 10px; align-items: flex-start;">
-        <img src="${portrait}" alt="" style="width: 48px; height: 48px; border-radius: 8px; object-fit: cover; flex-shrink: 0;" onerror="this.style.display='none'" />
+        <img src="${portrait}" alt="" style="width: ${size}px; height: ${size}px; border-radius: 8px; object-fit: cover; flex-shrink: 0;" onerror="this.style.display='none'" />
         <div style="flex: 1; min-width: 0;">${bubble}</div>
       </div>
     `;
