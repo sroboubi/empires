@@ -754,6 +754,68 @@ await asyncTest('helper.reviewTrades is reachable through the proxy (dummy via c
     assert(directive && directive.focus === 'balanced', 'directive returned');
 });
 
+await asyncTest('proxy forces reviewTrades to the own player (cannot cancel another player\'s deals)', async () => {
+    const { gs, trades } = tradeGameState();
+    // t1: own player (id 1) cannot afford its outgoing gold; t2: the foreign
+    // player (id 2) cannot afford its outgoing gold. Both are old per-turn deals.
+    trades.push(
+        { id: 't1', type: 'per_turn', active: true, createdRound: 1, player1Id: 1, player2Id: 2, bundle1: { gold: 50 }, bundle2: { food: 10 } },
+        { id: 't2', type: 'per_turn', active: true, createdRound: 1, player1Id: 2, player2Id: 1, bundle1: { gold: 50 }, bundle2: { food: 10 } },
+    );
+    const helper = new AiHelper(gs);
+    helper.aiLog = () => {};
+    helper.onActionDone = async () => {};
+    const realPlayer = {
+        id: 1, name: 'Blue',
+        resources: { gold: 0, food: 100 }, orders: 5,
+        getEntities: () => [],
+        controller: { config: {} },
+        strategicController: {
+            key: 'strategic-dummy',
+            url: './ai/strategic/dummyStrategicAi.js',
+            config: { directive: { focus: 'balanced', stance: {}, goals: [] } }
+        },
+        hasResources: (b) => Object.entries(b || {}).every(([r, a]) => (realPlayer.resources[r] || 0) >= a),
+        getResourceProfile: () => ({ criticalResource: null, netIncome: {}, stock: realPlayer.resources }),
+        getOpponents: () => ({}),
+    };
+    gs.players = [realPlayer];
+    const mgr = createAiManager(DummyStrategicAi, realPlayer, helper);
+    // A hostile/buggy controller passes the foreign player: the proxy must
+    // review the OWN player's deals instead.
+    await mgr.helper.reviewTrades(tradePlayer(2, { gold: 0, food: 100 }));
+    assert(!trades[0].active, 'own unaffordable deal canceled');
+    assert(trades[1].active, 'foreign deal untouched');
+});
+
+await asyncTest('proxy forces maybeInitiateTrade to the own player (cannot propose as someone else)', async () => {
+    const { gs } = tradeGameState();
+    const helper = new AiHelper(gs);
+    const calls = [];
+    helper.initiateTrade = async (player, targetId, offer) => {
+        calls.push(player.id);
+        return { status: 'accepted' };
+    };
+    helper.aiLog = () => {};
+    const profile = {
+        stock: { gold: 5, wood: 100 },
+        netIncome: { gold: -5, wood: 10 },
+        turnsRemaining: { gold: 2 },
+        criticalResource: 'gold',
+    };
+    const realPlayer = tradePlayer(1, { gold: 5, wood: 100 }, profile);
+    realPlayer.controller = { config: {} };
+    realPlayer.strategicController = {
+        key: 'strategic-dummy',
+        url: './ai/strategic/dummyStrategicAi.js',
+        config: { directive: { focus: 'balanced', stance: {}, goals: [] } }
+    };
+    gs.players = [realPlayer];
+    const mgr = createAiManager(DummyStrategicAi, realPlayer, helper);
+    await mgr.helper.maybeInitiateTrade(tradePlayer(3, { gold: 5, wood: 100 }, profile));
+    assertEqual(calls, [1], 'proposal made as the own player, not the passed-in player');
+});
+
 console.log('\n## Strategic trade initiation inline with chat (real AiHelper)');
 
 // Part 2 probe: the strategic harness's chat-phase trade proposal, driven
