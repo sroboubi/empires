@@ -786,12 +786,11 @@ function createHelperProxy(helper, ownPlayer, aiName, seen = new WeakMap(), prox
               );
             }
           }
-          // Trade: an AI can only initiate a trade as itself — the
-          // initiator is forced to the AI's own player (same pattern as
-          // the gameState proxy's cancelTrade). A caller cannot propose
-          // (or have accepted) a trade on another player's behalf,
-          // including the human.
-          if (prop === 'initiateTrade') {
+          // Trade: an AI can only trade as itself — the acting player is
+          // forced to the AI's own player (same pattern as the gameState
+          // proxy's cancelTrade). A caller cannot propose a trade, review,
+          // or cancel deals on another player's behalf, including the human.
+          if (prop === 'initiateTrade' || prop === 'reviewTrades' || prop === 'maybeInitiateTrade') {
             args[0] = ownPlayer;
           }
           // P8: hand the helper the caller's FILTERED gameState, not the raw
