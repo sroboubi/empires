@@ -1169,6 +1169,10 @@ export class AiHelper {
      * @param {Player} player
      * @returns {Promise<void>}
      */
+    // Trade and diplomacy belong to the strategic AI — a tactical AI should
+    // not handle them. If a tactical AI does handle trade, it must call
+    // reviewTrades (or write its own equivalent) so unaffordable per-turn
+    // deals get cancelled instead of silently draining its resources.
     async reviewTrades(player) {
         const gs = this.gameState;
         if (!gs || typeof gs.getActiveTradesForPlayer !== 'function') return;

@@ -2393,7 +2393,7 @@ function updateChatModalPortrait() {
   img.dataset.emote = headerEmote;
   if (url) {
     img.src = url;
-    const size = CONFIG.CHAT_HEADER_PORTRAIT_SIZE || 40;
+    const size = CONFIG.CHAT_HEADER_PORTRAIT_SIZE;
     img.style.width = `${size}px`;
     img.style.height = `${size}px`;
     img.style.display = '';
@@ -2447,7 +2447,7 @@ function renderChatMessages() {
     // shows the neutral portrait.
     const portrait = leaderPortraitUrl(msg.sender, msg.emote || 'neutral');
     if (!portrait) return bubble;
-    const size = CONFIG.CHAT_MESSAGE_PORTRAIT_SIZE || 96;
+    const size = CONFIG.CHAT_MESSAGE_PORTRAIT_SIZE;
     return `
       <div style="display: flex; gap: 10px; align-items: flex-start;">
         <img class="chat-portrait" data-emote="${msg.emote || 'neutral'}" src="${portrait}" alt="" style="width: ${size}px; height: ${size}px; border-radius: 8px; object-fit: cover; flex-shrink: 0;" onerror="this.style.display='none'" />
