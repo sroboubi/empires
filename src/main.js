@@ -18,6 +18,7 @@ import {
   clearEntitySelectionHighlight,
   preloadModels,
   reconcileEntities,
+  isEntityMoving,
   clearEntityMeshes,
   buildCellResources,
   reconcileCellResources,
@@ -3349,6 +3350,11 @@ function handleLeftClick(event) {
   }
 
   const entity = gameState.getEntityAt(hovered.q, hovered.r);
+  if (entity && isEntityMoving(entity.id)) {
+    // Units are not selectable while their move animation is running.
+    deselectEntity();
+    return;
+  }
   if (entity && entity.owner && entity.owner.id === activePlayer.id) {
     selectEntity(entity);
   } else {
@@ -3364,7 +3370,7 @@ function handleRightClick(event) {
     return;
   }
 
-  if (!selectedEntity) {
+  if (!selectedEntity || isEntityMoving(selectedEntity.id)) {
     hideContextMenu();
     return;
   }
@@ -3398,6 +3404,8 @@ function handleRightClick(event) {
 }
 
 function selectEntity(entity, quiet = false) {
+  // A unit that is walking its movement path cannot be selected.
+  if (entity && isEntityMoving(entity.id)) return;
   selectedEntity = entity;
   // L9: quiet re-selects (after an action) skip the SFX/toast so they
   // don't overwrite the action result.
@@ -3535,7 +3543,9 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
         reconcileCellResources(gameState);
         updatePlayersUI(gameState, { onContextMenu: showPlayerContextMenu });
 
-        if (selectedEntity && !gameState.entities.includes(selectedEntity)) {
+        if (selectedEntity && (!gameState.entities.includes(selectedEntity) || isEntityMoving(selectedEntity.id))) {
+          // The unit was destroyed, or it is now walking and cannot be
+          // selected until its move animation finishes.
           deselectEntity();
         } else if (selectedEntity) {
           // L9: re-select quietly — the full selectEntity plays the select

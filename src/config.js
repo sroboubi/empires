@@ -8,6 +8,7 @@ export var CONFIG = {
   SHOW_ALL: false,
   SHOW_FPS: false,
   SHOW_COMPASS: true,
+  MOVE_TIME_PER_CELL: 0.5, // base seconds to cross one cell at movement cost 1 (query-param overridable)
   AI_ACTION_SLEEP: 500,  // ms
   AI_BUILD_MAX_DISTANCE: 10,     // furthest cell from a builder considered as a build site
   AI_BUILD_DISTANCE_PENALTY: 0.2, // weighting of extra travel vs. yield gain when ranking build sites

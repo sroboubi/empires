@@ -9,6 +9,8 @@ export function spawnParticleBurst() {}
 export function drawGrid() {}
 export function updateHexFog() {}
 export function reconcileEntities() {}
+export function queueEntityMoveAnimation() {}
+export function isEntityMoving() { return false; }
 export function clearEntityMeshes() {}
 export function highlightCell() {}
 export function highlightPathCells() {}

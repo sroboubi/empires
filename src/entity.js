@@ -1,6 +1,6 @@
 import { camelToTitle, calculateAttackMultiplier, showToast, displayNum } from './utils.js';
 import { HexGrid } from './hexGrid.js';
-import { spawnDamageText, spawnParticleBurst } from './renderer.js';
+import { spawnDamageText, spawnParticleBurst, queueEntityMoveAnimation } from './renderer.js';
 import { audio } from './audio.js';
 import { applyResourceYieldBonus, checkTreasurePickup } from './resources.js';
 import { CONFIG } from './config.js';
@@ -677,6 +677,17 @@ export default class Entity {
           const oldQ = this.q;
           const oldR = this.r;
 
+          // Whether this move is observable to a human (starting or ending
+          // cell visible). Captured before vision updates so a unit moving
+          // out of sight still animates the visible part of its move.
+          const startVisible = !!(this.gameState && oldCell && this.gameState.isVisibleToHuman?.(oldCell));
+          const endVisible = !!(this.gameState && this.gameState.isVisibleToHuman?.(cell));
+          // Per-cell movement cost drives the animation duration (mountains
+          // take longer than grassland, leader/terrain modifiers included).
+          const pathCellCosts = Array.isArray(check.path)
+            ? check.path.slice(1).map(c => this.getMovementCost(c))
+            : [];
+
           if (this.gameState && this.gameState.hexGrid) {
             const dirInfo = this.gameState.hexGrid.directionTo(this, cell);
             this.facing = dirInfo.fromSource;
@@ -693,6 +704,12 @@ export default class Entity {
 
           // Update entity vision & player visibility on move
           this.updateVisibility();
+
+          // Animate the unit walking the path. The renderer spawns the mesh
+          // at the path start if needed, then walks it through each cell.
+          if (this.gameState && check.path && check.path.length > 1) {
+            queueEntityMoveAnimation(this, check.path, pathCellCosts, startVisible, endVisible);
+          }
 
           // Collect treasure if the destination cell holds one
           const pickup = checkTreasurePickup(this);

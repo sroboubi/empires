@@ -618,6 +618,215 @@ function updateEffects(deltaTime) {
   }
 }
 
+// --- Entity movement animation ---
+//
+// The Entity "Move" action queues one leg per cell it crosses (with the
+// per-cell movement cost), and the effect below walks the mesh through them.
+// Several moves in the same AI action chain into one continuous animation.
+const entityMoveStates = new Map(); // entity.id -> running animation state
+
+/**
+ * Rotation (radians) for a unit facing from one cell toward another.
+ */
+function entityFacingRotation(entity, from, to) {
+  const grid = entity.gameState && entity.gameState.hexGrid;
+  if (!grid || !from || !to) return 0;
+  const direction = grid.directionTo(from, to).fromSource;
+  const facingRot = FACING_ROTATIONS[direction] || 0;
+  const rotOffset = THREE.MathUtils.degToRad(entity.rotationOffset) || 0;
+  return facingRot + rotOffset;
+}
+
+/**
+ * Queues a move animation for an entity. Does nothing when the move was not
+ * observable to a human player (neither endpoint visible) — invisible AI
+ * moves should stay instant.
+ *
+ * @param {Entity} entity - Moving entity
+ * @param {Array} path - Cells from source to destination (includes source)
+ * @param {Array<number>} cellCosts - Movement cost of each destination cell
+ * @param {boolean} startVisible - Was the source cell visible to a human?
+ * @param {boolean} endVisible - Was the destination cell visible to a human?
+ */
+export function queueEntityMoveAnimation(entity, path, cellCosts = [], startVisible = false, endVisible = false) {
+  // Headless runs have no scene; there is nothing to animate.
+  if (!scene || !entity || !entity.gameState || !Array.isArray(path) || path.length < 2) return;
+  if (!CONFIG.SHOW_ALL && !startVisible && !endVisible) return;
+
+  const legs = [];
+  for (let i = 1; i < path.length; i++) {
+    const from = path[i - 1];
+    const to = path[i];
+    if (!from || !to) continue;
+    const fromPixel = HexGrid.axialToPixel(from.q, from.r);
+    const toPixel = HexGrid.axialToPixel(to.q, to.r);
+    const fromY = from.terrain ? from.terrain.height : 1.0;
+    const toY = to.terrain ? to.terrain.height : 1.0;
+    const rawCost = cellCosts[i - 1];
+    const cost = Number.isFinite(rawCost) ? rawCost : 1;
+    const baseTime = Number.isFinite(CONFIG.MOVE_TIME_PER_CELL) ? CONFIG.MOVE_TIME_PER_CELL : 0.5;
+    const duration = Math.max(0.001, baseTime * cost);
+
+    legs.push({
+      from,
+      to,
+      fromX: fromPixel.x,
+      fromY,
+      fromZ: fromPixel.z,
+      toX: toPixel.x,
+      toY,
+      toZ: toPixel.z,
+      duration,
+      rotationY: entityFacingRotation(entity, from, to),
+    });
+  }
+  if (legs.length === 0) return;
+
+  // If the mesh already exists, start (or extend) the animation right away.
+  // Otherwise spawn it at the path start so a unit moving into view still
+  // animates the whole visible movement.
+  const running = entityMoveStates.get(entity.id);
+  if (running) {
+    running.legs.push(...legs);
+    return;
+  }
+  let meshGroup = entityMeshMap[entity.id];
+  if (!meshGroup) {
+    const first = legs[0];
+    meshGroup = spawnEntityMesh(entity, entity.gameState, first.fromX, first.fromY, first.fromZ, first.rotationY, false);
+  }
+  startEntityMoveAnimation(entity, meshGroup, legs, entity.gameState);
+}
+
+/**
+ * True while an entity has a running move animation. Used by the input layer
+ * to make moving units unselectable.
+ */
+export function isEntityMoving(entityId) {
+  return entityMoveStates.has(entityId);
+}
+
+/**
+ * Starts (or appends to) an entity's move animation. The effect walks each
+ * leg in order, facing the next cell, for MOVE_TIME_PER_CELL * cell cost
+ * seconds. It reserves the mesh transform so reconcileEntities() does not
+ * snap the unit to its destination while the animation runs.
+ */
+function startEntityMoveAnimation(entity, group, legs, gameState) {
+  if (!group || !legs || legs.length === 0) return;
+
+  const running = entityMoveStates.get(entity.id);
+  if (running) {
+    running.legs.push(...legs);
+    return;
+  }
+
+  const state = {
+    entity,
+    group,
+    gameState,
+    legs: legs.slice(),
+    legIndex: 0,
+    elapsed: 0,
+    effect: null,
+  };
+  entityMoveStates.set(entity.id, state);
+
+  const first = state.legs[0];
+  group.scale.set(1, 1, 1);
+  group.position.set(first.fromX, first.fromY, first.fromZ);
+  group.rotation.y = first.rotationY;
+
+  const effect = {
+    object: null,
+    update: (dt) => {
+      let remaining = dt;
+      while (state.legIndex < state.legs.length) {
+        const leg = state.legs[state.legIndex];
+        const duration = Math.max(0.001, leg.duration);
+
+        // Face the next cell for the whole leg.
+        if (state.elapsed === 0) group.rotation.y = leg.rotationY;
+
+        const step = Math.min(remaining, duration - state.elapsed);
+        state.elapsed += step;
+        remaining -= step;
+        const t = Math.min(1, state.elapsed / duration);
+
+        // Linear interpolation between hex centers (and terrain heights).
+        group.position.set(
+          leg.fromX + (leg.toX - leg.fromX) * t,
+          leg.fromY + (leg.toY - leg.fromY) * t,
+          leg.fromZ + (leg.toZ - leg.fromZ) * t
+        );
+
+        if (state.elapsed >= duration) {
+          state.legIndex++;
+          state.elapsed = 0;
+        }
+        if (remaining <= 0) break;
+      }
+
+      if (state.legIndex >= state.legs.length) {
+        finishEntityMoveAnimation(entity.id);
+        return false;
+      }
+      return true;
+    }
+  };
+
+  state.effect = effect;
+  activeEffects.push(effect);
+}
+
+/**
+ * Completes an entity's move animation, parking the mesh on the final cell.
+ * If the unit moved out of human vision it is removed (it is no longer
+ * renderable), matching reconcileEntities' visibility rules.
+ */
+function finishEntityMoveAnimation(entityId) {
+  const state = entityMoveStates.get(entityId);
+  if (!state) return;
+  entityMoveStates.delete(entityId);
+
+  const last = state.legs[state.legs.length - 1];
+  if (last) {
+    state.group.position.set(last.toX, last.toY, last.toZ);
+    // Settle on the entity's final facing (the per-cell rotations above faced
+    // each "next" cell while walking; there is no next cell at the end).
+    const facingRot = state.entity.facing !== undefined ? (FACING_ROTATIONS[state.entity.facing] || 0) : last.rotationY;
+    const rotOffset = THREE.MathUtils.degToRad(state.entity.rotationOffset) || 0;
+    state.group.rotation.y = state.entity.facing !== undefined ? facingRot + rotOffset : last.rotationY;
+  }
+
+  const stillVisible = CONFIG.SHOW_ALL ||
+    !!(state.gameState && state.gameState.isVisibleToHuman && state.gameState.isVisibleToHuman(state.entity.cell));
+  if (!stillVisible && entityMeshMap[entityId] === state.group) {
+    scene.remove(state.group);
+    disposeEntityMesh(state.group);
+    delete entityMeshMap[entityId];
+  }
+}
+
+/**
+ * Cancels a running move animation (entity removed, visibility changed,
+ * game unloaded, ...).
+ */
+function cancelEntityMoveAnimation(entityId) {
+  const state = entityMoveStates.get(entityId);
+  if (!state) return;
+  entityMoveStates.delete(entityId);
+  if (state.effect) {
+    const index = activeEffects.indexOf(state.effect);
+    if (index !== -1) activeEffects.splice(index, 1);
+  }
+}
+
+/** Clears every running move animation. */
+function clearEntityMoveAnimations() {
+  for (const id of [...entityMoveStates.keys()]) cancelEntityMoveAnimation(id);
+}
+
 // --- Visual Effect Triggers ---
 
 export function playSpawnAnimation(entityMeshGroup) {
@@ -1008,9 +1217,18 @@ export function reconcileEntities(gameState) {
 
   gameState.entities.forEach(entity => {
     const isEntityVisibleInScene = entity.cell ? gameState.isVisibleToHuman(entity.cell) : false;
+    const isAnimating = entityMoveStates.has(entity.id);
 
-    if (isEntityVisibleInScene || CONFIG.SHOW_ALL) {
+    // A running move keeps the mesh in the scene even when the unit is
+    // already outside current vision: the move started or ended in view, so
+    // the observable part should play before the unit disappears.
+    if (isEntityVisibleInScene || CONFIG.SHOW_ALL || isAnimating) {
       activeIds.add(entity.id);
+
+      if (isAnimating) {
+        // The running animation owns the mesh transform.
+        return;
+      }
 
       const cell = entity.cell || gameState.hexGrid.cells.get(`${entity.q},${entity.r}`);
       const terrainHeight = cell && cell.terrain ? cell.terrain.height : 1.0;
@@ -1033,6 +1251,7 @@ export function reconcileEntities(gameState) {
   // remove meshes for entities that are not visible
   for (const id in entityMeshMap) {
     if (!activeIds.has(id)) {
+      cancelEntityMoveAnimation(id);
       const meshGroup = entityMeshMap[id];
       if (meshGroup) {
         scene.remove(meshGroup);
@@ -1042,6 +1261,12 @@ export function reconcileEntities(gameState) {
       }
       delete entityMeshMap[id];
     }
+  }
+
+  // Drop running animations for entities that no longer exist.
+  const liveIds = new Set(gameState.entities.map(e => e.id));
+  for (const id of [...entityMoveStates.keys()]) {
+    if (!liveIds.has(id)) cancelEntityMoveAnimation(id);
   }
 }
 
@@ -1061,7 +1286,7 @@ function disposeEntityMesh(group) {
   });
 }
 
-function spawnEntityMesh(entity, gameState, x, terrainHeight, z, rotationY) {
+function spawnEntityMesh(entity, gameState, x, terrainHeight, z, rotationY, animateSpawn = true) {
   const meta = gameState.manifestData ? gameState.manifestData.entities[entity.name] : null;
   const group = new THREE.Group();
   group.rotation.y = rotationY;
@@ -1115,11 +1340,14 @@ function spawnEntityMesh(entity, gameState, x, terrainHeight, z, rotationY) {
   entityMeshMap[entity.id] = group;
   scene.add(group);
 
-  // Trigger pop-in scale animation when spawned
-  playSpawnAnimation(group);
+  // Trigger pop-in scale animation when spawned (skipped when the spawn is
+  // immediately followed by a move animation).
+  if (animateSpawn) playSpawnAnimation(group);
+  return group;
 }
 
 export function clearEntityMeshes() {
+  clearEntityMoveAnimations();
   for (const id in entityMeshMap) {
     if (entityMeshMap[id]) {
       scene.remove(entityMeshMap[id]);
