@@ -1957,6 +1957,13 @@ function renderTradeDrawer() {
     }).join('');
   }
 
+  // A draft holds only positive amounts: setting an amount to 0 removes the
+  // entry, so a zero can never reach the offer validator downstream.
+  const setDraftAmount = (targetObj, resName, val) => {
+    if (val <= 0) delete targetObj[resName];
+    else targetObj[resName] = val;
+  };
+
   // Attach input & button listeners for resource amounts
   drawer.querySelectorAll('.btn-trade-inc').forEach(btn => {
     btn.onclick = (e) => {
@@ -1970,7 +1977,7 @@ function renderTradeDrawer() {
         const stock = humanPlayer.resources[resName] || 0;
         next = Math.min(stock, next);
       }
-      targetObj[resName] = next;
+      setDraftAmount(targetObj, resName, next);
       const inp = drawer.querySelector(`.inp-trade-qty[data-side="${side}"][data-res="${resName}"]`);
       if (inp) inp.value = next;
     };
@@ -1984,7 +1991,7 @@ function renderTradeDrawer() {
       const step = e.shiftKey ? 1 : 5;
       const cur = targetObj[resName] || 0;
       const next = Math.max(0, cur - step);
-      targetObj[resName] = next;
+      setDraftAmount(targetObj, resName, next);
       const inp = drawer.querySelector(`.inp-trade-qty[data-side="${side}"][data-res="${resName}"]`);
       if (inp) inp.value = next;
     };
@@ -2002,7 +2009,7 @@ function renderTradeDrawer() {
         val = Math.min(stock, val);
       }
       e.currentTarget.value = val;
-      targetObj[resName] = val;
+      setDraftAmount(targetObj, resName, val);
     };
   });
 
