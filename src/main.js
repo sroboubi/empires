@@ -2151,15 +2151,31 @@ async function handleProposeTradeClicked() {
         renderTradeDrawer();
       }
     } else if (decision.action === 'counter') {
-      showToast(`${aiPlayer.name} made a counter-offer.`);
-      if (isLiveSession()) {
-        session.pendingOffer = {
-          type: tradeType,
-          proposerGives: decision.counterOffer?.proposerGives || offer.proposerGives,
-          proposerAsks: decision.counterOffer?.proposerAsks || offer.proposerAsks,
-          status: 'countered'
-        };
-        renderTradeDrawer();
+      // A counter with no counter terms is a rejection, not a re-presentation
+      // of the original offer: accepting it would execute the original terms
+      // under the "counter-offer" label. (The AI-to-AI path fails closed the
+      // same way, via validateTradeOffer.)
+      const counterOffer = decision.counterOffer;
+      const hasCounterTerms = counterOffer &&
+        (Object.keys(counterOffer.proposerGives || {}).length > 0 ||
+         Object.keys(counterOffer.proposerAsks || {}).length > 0);
+      if (!hasCounterTerms) {
+        showToast(`${aiPlayer.name} declined the trade offer.`);
+        if (isLiveSession()) {
+          session.pendingOffer = null;
+          renderTradeDrawer();
+        }
+      } else {
+        showToast(`${aiPlayer.name} made a counter-offer.`);
+        if (isLiveSession()) {
+          session.pendingOffer = {
+            type: tradeType,
+            proposerGives: counterOffer.proposerGives,
+            proposerAsks: counterOffer.proposerAsks,
+            status: 'countered'
+          };
+          renderTradeDrawer();
+        }
       }
     } else {
       showToast(`${aiPlayer.name} declined the trade offer.`);
