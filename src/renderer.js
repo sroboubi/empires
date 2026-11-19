@@ -8,11 +8,13 @@ import { HexGrid } from './hexGrid.js';
 import { CONFIG } from './config.js';
 import { findSpawnDef, findTerrainGroup } from './resources.js';
 import { Compass } from './compass.js';
+import { CloudManager } from './cloudManager.js';
 
 export let scene, camera, renderer, controls;
 export let dirLight, hemiLight, sky, sunMesh;
 export let stats = null;
 let compass = null;
+let cloudManager = null; // animated cloud layer (see cloudManager.js)
 let panClampRings = Infinity; // camera-target pan limit in hex rings; set per map by setMapCameraLimits()
 let shadowStaticBound = 600; // pop-free max shadow half-extent; set per map by setMapCameraLimits()
 let shadowFitHalfExtent = -1; // last dynamically fitted half-extent (-1 = not yet fitted)
@@ -207,6 +209,10 @@ export function initRenderer(canvas) {
 
   // Set initial time of day
   setTimeOfDay(currentHour);
+
+  // Animated clouds live in their own group so they never interfere with
+  // hex/unit picking. Seeded by drawGrid() once the map radius is known.
+  cloudManager = new CloudManager(scene, camera);
 
   // 7. Groups & Overlays
   hexGroup = new THREE.Group();
@@ -1026,6 +1032,9 @@ function animate() {
   // Update animated effects
   updateEffects(deltaTime);
 
+  // Drift/recycle the cloud layer (frame-rate independent).
+  if (cloudManager) cloudManager.update(deltaTime);
+
   if (entitySelectionMesh && entitySelectionMesh.visible) {
     entitySelectionMesh.material.opacity = 0.6 + 0.35 * Math.sin(clock.getElapsedTime() * 5);
   }
@@ -1074,6 +1083,9 @@ export function drawGrid(gameState) {
   // Automatically update dark ground bed based on map extent
   const maxMapRadius = Math.sqrt(maxDistanceSq) + CONFIG.HEX_SIZE;
   updateGroundBase(maxMapRadius);
+
+  // Rebuild the cloud layer for this map (no-op when disabled).
+  if (cloudManager) cloudManager.init(maxMapRadius, gameState.hexGrid?.cells?.size);
 }
 
 /**
