@@ -1958,6 +1958,13 @@ function renderTradeDrawer() {
     }).join('');
   }
 
+  // A draft holds only positive amounts: setting an amount to 0 removes the
+  // entry, so a zero can never reach the offer validator downstream.
+  const setDraftAmount = (targetObj, resName, val) => {
+    if (val <= 0) delete targetObj[resName];
+    else targetObj[resName] = val;
+  };
+
   // Attach input & button listeners for resource amounts
   drawer.querySelectorAll('.btn-trade-inc').forEach(btn => {
     btn.onclick = (e) => {
@@ -1971,7 +1978,7 @@ function renderTradeDrawer() {
         const stock = humanPlayer.resources[resName] || 0;
         next = Math.min(stock, next);
       }
-      targetObj[resName] = next;
+      setDraftAmount(targetObj, resName, next);
       const inp = drawer.querySelector(`.inp-trade-qty[data-side="${side}"][data-res="${resName}"]`);
       if (inp) inp.value = next;
     };
@@ -1985,7 +1992,7 @@ function renderTradeDrawer() {
       const step = e.shiftKey ? 1 : 5;
       const cur = targetObj[resName] || 0;
       const next = Math.max(0, cur - step);
-      targetObj[resName] = next;
+      setDraftAmount(targetObj, resName, next);
       const inp = drawer.querySelector(`.inp-trade-qty[data-side="${side}"][data-res="${resName}"]`);
       if (inp) inp.value = next;
     };
@@ -2003,7 +2010,7 @@ function renderTradeDrawer() {
         val = Math.min(stock, val);
       }
       e.currentTarget.value = val;
-      targetObj[resName] = val;
+      setDraftAmount(targetObj, resName, val);
     };
   });
 
@@ -2145,15 +2152,31 @@ async function handleProposeTradeClicked() {
         renderTradeDrawer();
       }
     } else if (decision.action === 'counter') {
-      showToast(`${aiPlayer.name} made a counter-offer.`);
-      if (isLiveSession()) {
-        session.pendingOffer = {
-          type: tradeType,
-          proposerGives: decision.counterOffer?.proposerGives || offer.proposerGives,
-          proposerAsks: decision.counterOffer?.proposerAsks || offer.proposerAsks,
-          status: 'countered'
-        };
-        renderTradeDrawer();
+      // A counter with no counter terms is a rejection, not a re-presentation
+      // of the original offer: accepting it would execute the original terms
+      // under the "counter-offer" label. (The AI-to-AI path fails closed the
+      // same way, via validateTradeOffer.)
+      const counterOffer = decision.counterOffer;
+      const hasCounterTerms = counterOffer &&
+        (Object.keys(counterOffer.proposerGives || {}).length > 0 ||
+         Object.keys(counterOffer.proposerAsks || {}).length > 0);
+      if (!hasCounterTerms) {
+        showToast(`${aiPlayer.name} declined the trade offer.`);
+        if (isLiveSession()) {
+          session.pendingOffer = null;
+          renderTradeDrawer();
+        }
+      } else {
+        showToast(`${aiPlayer.name} made a counter-offer.`);
+        if (isLiveSession()) {
+          session.pendingOffer = {
+            type: tradeType,
+            proposerGives: counterOffer.proposerGives,
+            proposerAsks: counterOffer.proposerAsks,
+            status: 'countered'
+          };
+          renderTradeDrawer();
+        }
       }
     } else {
       showToast(`${aiPlayer.name} declined the trade offer.`);
