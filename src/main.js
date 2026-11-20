@@ -19,6 +19,8 @@ import {
   preloadModels,
   reconcileEntities,
   isEntityMoving,
+  waitForMoveAnimations,
+  onMoveAnimationEnd,
   clearEntityMeshes,
   buildCellResources,
   reconcileCellResources,
@@ -45,6 +47,9 @@ const HISTORY_ROUNDS_PER_PAGE = 5; // L9: history pagination page size
 
 const mouse = { x: 0, y: 0 };
 let selectedEntity = null;
+// Unit to re-select once its move animation finishes (set when an action
+// deselects it because it started walking; cleared by any explicit deselect).
+let pendingReselectEntity = null;
 let pointerDownPos = { x: 0, y: 0 };
 let pointerDownTime = 0;
 
@@ -76,7 +81,12 @@ async function onActionDone(involvedCells = null, actionDesc = '') {
   // updateHexFog here, so newly revealed cells stayed dark until the
   // next turn.
   updateHexFog(gameState);
-  await new Promise(r => setTimeout(r, CONFIG.AI_ACTION_SLEEP ?? 0));
+  // Pace the AI: keep the fixed sleep as a floor, but also wait until every
+  // move animation has finished so the next action starts only once the
+  // meshes have caught up with the logical positions.
+  const sleepDone = new Promise(r => setTimeout(r, CONFIG.AI_ACTION_SLEEP ?? 0));
+  await waitForMoveAnimations();
+  await sleepDone;
 }
 
 /**
@@ -96,6 +106,19 @@ async function init() {
     // 2. Initialize 3D Renderer and preload models
     const canvas = document.getElementById('game-canvas');
     initRenderer(canvas);
+    // Re-select a unit whose move animation just finished, if the player
+    // has not selected anything else in the meantime.
+    onMoveAnimationEnd((entityId) => {
+      const entity = pendingReselectEntity;
+      if (!entity || entity.id !== entityId) return;
+      pendingReselectEntity = null;
+      if (selectedEntity || !gameState) return;
+      const activePlayer = gameState.activePlayer;
+      if (!activePlayer || activePlayer.isAI) return;
+      if (!gameState.entities.includes(entity)) return;
+      if (!entity.owner || entity.owner.id !== activePlayer.id) return;
+      selectEntity(entity, true);
+    });
     await preloadModels({ ...manifestData.entities, ...collectResourceModelEntries(manifestData) });
 
     // 3. Setup Event Listeners
@@ -3445,6 +3468,7 @@ function selectEntity(entity, quiet = false) {
 }
 
 function deselectEntity() {
+  pendingReselectEntity = null;
   if (selectedEntity) {
     selectedEntity = null;
     clearEntitySelectionHighlight();
@@ -3568,8 +3592,11 @@ function showContextMenu(x, y, entity, actions, targetCell, targetEntity) {
 
         if (selectedEntity && (!gameState.entities.includes(selectedEntity) || isEntityMoving(selectedEntity.id))) {
           // The unit was destroyed, or it is now walking and cannot be
-          // selected until its move animation finishes.
+          // selected until its move animation finishes. Remember a walking
+          // unit so it can be re-selected when the walk ends.
+          const walkingEntity = isEntityMoving(selectedEntity.id) ? selectedEntity : null;
           deselectEntity();
+          pendingReselectEntity = walkingEntity;
         } else if (selectedEntity) {
           // L9: re-select quietly — the full selectEntity plays the select
           // SFX and shows a "Selected X" toast, overwriting the action

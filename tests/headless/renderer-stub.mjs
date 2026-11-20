@@ -11,6 +11,8 @@ export function updateHexFog() {}
 export function reconcileEntities() {}
 export function queueEntityMoveAnimation() {}
 export function isEntityMoving() { return false; }
+export function waitForMoveAnimations() { return Promise.resolve(); }
+export function onMoveAnimationEnd() {}
 export function clearEntityMeshes() {}
 export function highlightCell() {}
 export function highlightPathCells() {}

@@ -712,6 +712,40 @@ export function isEntityMoving(entityId) {
   return entityMoveStates.has(entityId);
 }
 
+const moveAnimationWaiters = [];
+const moveAnimationEndCallbacks = [];
+
+/**
+ * Resolves once no entity move animations are running. Used by the AI
+ * pacing hook (onActionDone) so the next AI action waits until every mesh
+ * has caught up with its logical position.
+ */
+export function waitForMoveAnimations() {
+  if (entityMoveStates.size === 0) return Promise.resolve();
+  return new Promise(resolve => moveAnimationWaiters.push(resolve));
+}
+
+/**
+ * Registers a callback invoked with the entity id whenever a move animation
+ * finishes naturally (not when cancelled). Used by the input layer to
+ * re-select a unit after its walk completes.
+ */
+export function onMoveAnimationEnd(callback) {
+  moveAnimationEndCallbacks.push(callback);
+}
+
+function notifyMoveAnimationEnded(entityId, finished) {
+  if (finished) {
+    for (const cb of moveAnimationEndCallbacks) {
+      try { cb(entityId); } catch (e) { console.error('[renderer] move-end callback failed:', e); }
+    }
+  }
+  if (entityMoveStates.size === 0 && moveAnimationWaiters.length > 0) {
+    const waiters = moveAnimationWaiters.splice(0);
+    for (const resolve of waiters) resolve();
+  }
+}
+
 /**
  * Starts (or appends to) an entity's move animation. The effect walks each
  * leg in order, facing the next cell, for MOVE_TIME_PER_CELL * cell cost
@@ -812,6 +846,7 @@ function finishEntityMoveAnimation(entityId) {
     disposeEntityMesh(state.group);
     delete entityMeshMap[entityId];
   }
+  notifyMoveAnimationEnded(entityId, true);
 }
 
 /**
@@ -826,6 +861,7 @@ function cancelEntityMoveAnimation(entityId) {
     const index = activeEffects.indexOf(state.effect);
     if (index !== -1) activeEffects.splice(index, 1);
   }
+  notifyMoveAnimationEnded(entityId, false);
 }
 
 /** Clears every running move animation. */

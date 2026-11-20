@@ -968,5 +968,89 @@ await asyncTest('trade-offer evaluation returns a validated emote with the decis
     assertEqual(accepted.emote, 'neutral', 'unapproved emote falls back to neutral');
 });
 
+// --- Pacing contract: after an action, onActionDone is mandatory ---
+
+function pacingFixture() {
+    const gs = { players: [], entities: [], trades: [] };
+    const helper = new AiHelper(gs);
+    helper.aiLog = () => {};
+    helper.onActionDone = async () => {};
+    // Stub a successful attack (1 order used) — these tests exercise the
+    // proxy's pacing contract, not AiHelper's combat logic.
+    helper.attack = () => ({ ordersUsed: 1, result: { status: 'completed' } });
+    const unit = {
+        id: 7, name: 'Unit', health: 10, cell: { q: 0, r: 0 }, ownerId: 1,
+        active: true,
+        getActions: () => [{ name: 'Move', canDo: () => ({ possible: true }), do: () => true }],
+    };
+    const realPlayer = {
+        id: 1, name: 'Blue',
+        resources: { gold: 0, food: 100 }, orders: 5,
+        getEntities: () => [unit],
+        controller: { config: {} },
+        hasResources: (b) => Object.entries(b || {}).every(([r, a]) => (realPlayer.resources[r] || 0) >= a),
+        getResourceProfile: () => ({ criticalResource: null, netIncome: {}, stock: realPlayer.resources }),
+        getOpponents: () => ({}),
+    };
+    unit.owner = realPlayer;
+    gs.players = [realPlayer];
+    gs.entities = [unit];
+    const mgr = createAiManager(DummyStrategicAi, realPlayer, helper);
+    return { gs, mgr, unit, helper };
+}
+
+await asyncTest('pacing: a second action without onActionDone throws; reads stay allowed', async () => {
+    const { gs, mgr, unit } = pacingFixture();
+    mgr.helper.attack(gs, unit, unit, 1);
+    // Reads are allowed while an action is pending.
+    mgr.helper.getConfig();
+    assertEqual(mgr.player.orders, 5, 'property reads are not blocked');
+    mgr.helper.aiLog(mgr.player, 'test', 'logging is not blocked');
+    // A second action is blocked until onActionDone.
+    let threw = false;
+    try { mgr.helper.attack(gs, unit, unit, 1); } catch (e) { threw = /Pacing violation/.test(e.message); }
+    assert(threw, 'second action without onActionDone must throw a pacing violation');
+    await mgr.helper.onActionDone(gs, null, 'test action');
+    mgr.helper.attack(gs, unit, unit, 1); // cleared — must not throw
+    await mgr.helper.onActionDone(gs, null, 'test action 2');
+});
+
+await asyncTest('pacing: onActionDone without a pending action is fine', async () => {
+    const { gs, mgr } = pacingFixture();
+    await mgr.helper.onActionDone(gs, null, 'nothing happened');
+    mgr.helper.getConfig();
+});
+
+await asyncTest('pacing: a failed action (0 orders) does not set the pending flag', async () => {
+    const { gs, mgr, unit, helper } = pacingFixture();
+    // Replace the stub with a failing attack: nothing happened, so the next
+    // action is not blocked and needs no onActionDone.
+    helper.attack = () => ({ ordersUsed: 0, result: { status: 'failed' } });
+    mgr.helper.attack(gs, unit, unit, 1);
+    mgr.helper.attack(gs, unit, unit, 1); // must not throw
+});
+
+await asyncTest('pacing: trade methods do not set the pending flag', async () => {
+    const { mgr } = pacingFixture();
+    await mgr.helper.reviewTrades(mgr.player);
+    mgr.helper.getConfig(); // no onActionDone needed after a trade call
+});
+
+await asyncTest('pacing: entity action.do sets the pending flag', async () => {
+    const { gs, mgr } = pacingFixture();
+    const entities = mgr.player.getEntities();
+    const actions = entities[0].getActions();
+    actions[0].do();
+    // Reads stay allowed while pending.
+    mgr.player.getEntities();
+    // A second action.do is blocked until onActionDone.
+    let threw = false;
+    try { actions[0].do(); } catch (e) { threw = /Pacing violation/.test(e.message); }
+    assert(threw, 'second action.do without onActionDone must throw a pacing violation');
+    await mgr.helper.onActionDone(gs, null, 'move');
+    actions[0].do(); // cleared — must not throw
+    await mgr.helper.onActionDone(gs, null, 'move 2');
+});
+
 console.log(`\nstrategic.test.js: ${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

@@ -240,7 +240,7 @@ export default class ApexAi extends FableAi {
                 ...this.scrapOptions(ctx),
             ].filter(o => o.value > 0 && !this.turn.failed.has(o.key));
             if (options.length === 0) {
-                if (this.tryFallback(ctx)) {
+                if (await this.tryFallback(ctx)) {
                     acted++;
                     continue;
                 }
@@ -264,7 +264,7 @@ export default class ApexAi extends FableAi {
 
             const before = player.orders;
             const from = { q: best.unit.q, r: best.unit.r };
-            const failure = best.run();
+            const failure = await best.run();
             const used = before - player.orders;
             if (used <= 0) {
                 this.turn.failed.set(best.key, failure || 'no order was spent');
@@ -290,7 +290,7 @@ export default class ApexAi extends FableAi {
     }
 
     /** Last-resort spending: explore with a capable mobile unit when nothing scores. */
-    tryFallback(ctx) {
+    async tryFallback(ctx) {
         if (!this.cfg.fallbackExplore || ctx.unexplored <= 0) return false;
         const candidates = ctx.mine
             .filter(u => u.type.mobile && u.ap > 0 && !this.memory.projects.has(u.id))
@@ -298,7 +298,11 @@ export default class ApexAi extends FableAi {
         for (const u of candidates) {
             const before = this.player.orders;
             const failure = this.runExplore(ctx, u, false);
-            if (this.player.orders < before) return true;
+            if (this.player.orders < before) {
+                // Pacing contract: complete the action before returning.
+                await this.helper.onActionDone(this.gameState, [u.e.cell], 'Fallback explore');
+                return true;
+            }
             this.turn.failed.set(`explore:${u.id}`, failure || 'no exploration progress');
         }
         return false;
@@ -629,8 +633,8 @@ export default class ApexAi extends FableAi {
         return best && best.value > 0 ? best : null;
     }
 
-    runBuild(o, site) {
-        const result = super.runBuild(o, site);
+    async runBuild(o, site) {
+        const result = await super.runBuild(o, site);
         const project = this.memory.projects.get(o.u.id);
         if (project) project.value = o.value;
         // An engine-rejected site must not stay as a multi-turn commitment,

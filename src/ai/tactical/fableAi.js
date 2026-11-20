@@ -249,7 +249,7 @@ export default class FableAi extends BaseManager {
 
             const before = player.orders;
             const from = { q: best.unit.q, r: best.unit.r };
-            const failure = best.run();
+            const failure = await best.run();
             const used = before - player.orders;
             if (used <= 0) {
                 // Remember WHY, and only for this exact unit + action + target (addendum #3).
@@ -840,7 +840,7 @@ export default class FableAi extends BaseManager {
         return helper.moveAlongPath(player, u.e, this.moveAction(u), path, gameState, category, reason) ? null : 'could not move along the path';
     }
 
-    runBuild(o, site) {
+    async runBuild(o, site) {
         const { helper, gameState, player } = this;
         const { u, t } = o;
         const projects = this.memory.projects;
@@ -851,6 +851,9 @@ export default class FableAi extends BaseManager {
                 projects.delete(u.id);
                 return 'could not move toward the site (path blocked or not enough AP)';
             }
+            // Pacing contract: the move must complete (onActionDone) before
+            // the Build action below may execute.
+            await helper.onActionDone(gameState, [u.e.cell], `heading to build ${t.name}`);
         }
         projects.set(u.id, { type: t.name, q: site.pos.q, r: site.pos.r });   // stays until built or invalid
         if (helper.distance(u.e, site.cell) !== 1) return null;                // still travelling

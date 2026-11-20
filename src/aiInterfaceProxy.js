@@ -127,6 +127,43 @@ const HELPER_METHODS = new Set([
   'onActionDone', 'getDirections8',
 ]);
 
+// Helper methods that execute entity actions (action.do) internally. After
+// one of these — or a direct action.do() — the AI must call and await
+// onActionDone before executing another action, so a human sees each action
+// happen sequentially instead of in a flash. Reads and chat/trade calls are
+// allowed while an action is pending; only a second action is blocked.
+const ACTION_HELPER_METHODS = new Set(['attack', 'build', 'support', 'explore', 'moveAlongPath']);
+
+// Per-manager pacing state, keyed by the manager's `seen` cache (the one
+// object that identifies a manager's whole proxy tree). Registered by
+// createAiManager; proxies built outside it have no entry and are not paced.
+const pacingByManager = new WeakMap();
+
+function assertNoPendingAction(seen, aiName, what) {
+  const pacing = pacingByManager.get(seen);
+  if (pacing && pacing.pending) {
+    throw new Error(
+      `[AI Interface] Pacing violation: AI '${aiName}' attempted ${what} while a previous action is still pending. ` +
+      `Call and await helper.onActionDone after every action before executing another.`
+    );
+  }
+}
+
+function markActionPending(seen) {
+  const pacing = pacingByManager.get(seen);
+  if (pacing) pacing.pending = true;
+}
+
+// Did an action-executing call actually do something? Failed attempts
+// (0 orders used, action.do() === false) change nothing and need no pacing.
+// Helper action methods return { ordersUsed, ... }; moveAlongPath returns
+// 1/0; action.do() returns a boolean.
+function actionExecuted(result) {
+  if (result === true) return true;
+  if (typeof result === 'number') return result > 0;
+  return !!(result && typeof result === 'object' && result.ordersUsed > 0);
+}
+
 function isEntityObject(obj) {
   return obj !== null && typeof obj === 'object' &&
     typeof obj.getActions === 'function' &&
@@ -207,7 +244,21 @@ function wrapActionsWithOwnership(actions, entityTarget, entityName, aiName, see
         }
       });
     }
-    return wrappedAction;
+    // Own actions: executing one sets the pacing flag — the AI must call
+    // onActionDone before executing another action.
+    return new Proxy(wrappedAction, {
+      get(actTarget, actProp) {
+        if (actProp === 'do') {
+          return (...args) => {
+            assertNoPendingAction(seen, aiName, `action '${action.name}'`);
+            const result = Reflect.get(actTarget, 'do').apply(actTarget, args);
+            if (actionExecuted(result)) markActionPending(seen);
+            return result;
+          };
+        }
+        return Reflect.get(actTarget, actProp);
+      }
+    });
   });
 }
 
@@ -755,6 +806,9 @@ function createHelperProxy(helper, ownPlayer, aiName, seen = new WeakMap(), prox
         // and applyResourceYieldBonus are engine-internal.
         if (!HELPER_METHODS.has(prop)) return undefined;
         return function (...args) {
+          // Pacing: an action-executing call may not run while a previous
+          // action is still pending (onActionDone not yet called/awaited).
+          if (ACTION_HELPER_METHODS.has(prop)) assertNoPendingAction(seen, aiName, `helper.${String(prop)}`);
           if (['attack', 'build', 'support', 'explore'].includes(prop)) {
             const sourceEntity = unwrap(args[1]);
             // P6: a missing owner counts as not-owned (barbarians are
@@ -803,7 +857,17 @@ function createHelperProxy(helper, ownPlayer, aiName, seen = new WeakMap(), prox
             if (u === target.gameState && proxiedGameState) return proxiedGameState;
             return u;
           });
-          return deepWrap(val.apply(target, realArgs), aiName, seen, ownPlayer);
+          const result = val.apply(target, realArgs);
+          if (prop === 'onActionDone') {
+            // Clear the pacing flag once the pacing wait settles — the AI
+            // must await this call before executing another action.
+            return Promise.resolve(result).then(
+              (v) => { const p = pacingByManager.get(seen); if (p) p.pending = false; return v; },
+              (e) => { const p = pacingByManager.get(seen); if (p) p.pending = false; throw e; }
+            );
+          }
+          if (ACTION_HELPER_METHODS.has(prop) && actionExecuted(result)) markActionPending(seen);
+          return deepWrap(result, aiName, seen, ownPlayer);
         };
       }
       if (val !== null && typeof val === 'object') {
@@ -852,6 +916,9 @@ export function createAiManager(ManagerClass, player, helper) {
   // transparently — e.g. unit.owner === this.player is true when they wrap
   // the same underlying player.
   const seen = new WeakMap();
+  // Pacing contract: after an action-executing call, this manager must
+  // call and await onActionDone before executing another action.
+  pacingByManager.set(seen, { pending: false });
   const proxiedPlayer = createPlayerProxy(player, aiName, seen);
   const rawGameState = helper.getGameState();
   const proxiedGameState = createGameStateProxy(rawGameState, player, aiName, seen);

@@ -297,10 +297,13 @@ export default class CheaterAi {
             const check = moveAction.canDo(cell, null);
             if (!check?.possible) break;
             if (!moveAction.do(cell, null)) break;
+            // Pacing contract: onActionDone after every action.
+            await helper.onActionDone(gs, [cell], 'Cheater move');
           }
         }
       } else {
         helper.explore(gs, swordsman);
+        await helper.onActionDone(gs, null, 'Cheater explore');
       }
     }
     return { ordersUsed: 0, result: { status: 'completed', message: 'red-team scan done' } };
