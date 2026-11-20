@@ -8,9 +8,9 @@
  *
  * Usage:
  *   const clouds = new CloudManager(scene, camera);
- *   clouds.init(maxMapRadius);   // after the map is generated
- *   clouds.update(deltaTime);    // every frame
- *   clouds.dispose();            // when the map or scene goes away
+ *   clouds.init(maxMapRadius, mapCellCount); // after the map is generated
+ *   clouds.update(deltaTime);                // every frame
+ *   clouds.dispose();                        // when the map/scene goes away
  */
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
@@ -22,27 +22,37 @@ const WIND_DIRECTION = new THREE.Vector3(0.8, 0, -0.6).normalize();
 const CAMERA_FADE_NEAR = 4;
 const CAMERA_FADE_FAR = 14;
 // Transparent terrain (water) is in the same render pass as the clouds. Force
-// clouds to draw after it; otherwise camera-dependent transparent sorting can
-// put a water bucket after a cloud and paint over it (clouds never write depth).
-const CLOUD_RENDER_ORDER = 1;
-// Shared stochastic alpha mask for partial cloud shadows. The shadow pass
-// reads the green channel of alphaMap, so all channels hold the same byte.
-const CLOUD_SHADOW_NOISE_SIZE = 256;
-const CLOUD_SHADOW_NOISE_REPEAT = 4;
+// shadows first and clouds after it; otherwise camera-dependent transparent
+// sorting can put a water bucket after a cloud and paint over it.
+const CLOUD_SHADOW_RENDER_ORDER = 1;
+const CLOUD_RENDER_ORDER = 2;
+// Soft, ground-projected cloud shadows. A radial alpha texture is stretched
+// along the sun direction; opacity follows the cloud's own opacity.
+const CLOUD_SHADOW_TEXTURE_SIZE = 64;
+// Shadow blob radius as a multiple of each cloud sphere's world radius.
+const CLOUD_SHADOW_SCALE = 1.35;
+// Y of the flat shadow overlay. With depth testing off this only affects
+// screen placement; it is not an occlusion height.
+const CLOUD_SHADOW_PLANE_Y = 1.0;
+// Fade shadows out smoothly over this many hex rings past the map edge.
+const CLOUD_SHADOW_EDGE_FADE_RINGS = 2;
+// Hide shadows when the sun is too close to the horizon to read cleanly.
+const CLOUD_SHADOW_MIN_SUN_Y = 0.15;
+
+// Scratch objects for the per-frame shadow projection (one manager at a time).
+const _sunWorld = new THREE.Vector3();
+const _sunTargetWorld = new THREE.Vector3();
+const _shadowWorld = new THREE.Vector3();
+const _shadowPos = new THREE.Vector3();
+const _shadowScale = new THREE.Vector3();
+const _shadowQuat = new THREE.Quaternion();
+const _shadowEuler = new THREE.Euler();
+const _shadowMatrix = new THREE.Matrix4();
 
 export class CloudManager {
   /**
    * @param {THREE.Scene} scene - Scene to add the cloud layer to.
    * @param {THREE.Camera} camera - Camera used for the proximity fade.
-   * @param {Object} [options]
-   * @param {boolean} [options.enabled] - Override CONFIG.CLOUDS_ENABLED.
-   * @param {boolean} [options.castShadows] - Override CONFIG.CLOUD_CAST_SHADOWS.
-   * @param {number} [options.windSpeed] - Override CONFIG.CLOUD_WIND_SPEED.
-   * @param {number} [options.density] - Override CONFIG.CLOUD_DENSITY.
-   * @param {number} [options.sizeMin] - Override CONFIG.CLOUD_SIZE_MIN.
-   * @param {number} [options.sizeMax] - Override CONFIG.CLOUD_SIZE_MAX.
-   * @param {number} [options.altitudeMin] - Override CONFIG.CLOUD_ALTITUDE_MIN.
-   * @param {number} [options.altitudeMax] - Override CONFIG.CLOUD_ALTITUDE_MAX.
    */
   constructor(scene, camera) {
     this.scene = scene;
@@ -55,15 +65,32 @@ export class CloudManager {
     this.sizeMax = Math.max(this.sizeMin, CONFIG.CLOUD_SIZE_MAX);
     this.altitudeMin = CONFIG.CLOUD_ALTITUDE_MIN;
     this.altitudeMax = Math.max(this.altitudeMin, CONFIG.CLOUD_ALTITUDE_MAX);
+    this.shadowStrength = Math.max(0, CONFIG.CLOUD_SHADOW_STRENGTH);
+    this.shadowSoftness = Math.max(0.01, CONFIG.CLOUD_SHADOW_SOFTNESS);
     this.hexSize = CONFIG.HEX_SIZE;
 
     this.group = null;
     this.geometry = null;
-    this.shadowNoiseTexture = null;
+    this.shadowLayer = null;
+    this.shadowGeometry = null;
+    this.shadowTexture = null;
+    this.sunLight = null;
     this.clouds = [];
     this.time = 0;
 
+    this._shadowLightDir = new THREE.Vector3();
+    this._shadowEnabled = false;
+    this._shadowStretch = 1;
+    this._shadowRotationY = 0;
+    // Shared shader uniforms for clipping shadow fragments to the hex map.
+    this._shadowEdgeUniforms = {
+      uCloudShadowMapRings: { value: 0 },
+      uCloudShadowHexSize: { value: this.hexSize },
+      uCloudShadowEdgeFadeRings: { value: CLOUD_SHADOW_EDGE_FADE_RINGS },
+    };
+
     this.maxMapRadius = 0;
+    this.mapRings = 0;
     this.innerRadius = 0;
     this.outerRadius = 0;
 
@@ -92,13 +119,25 @@ export class CloudManager {
     // outer ring of cells noticeably bare.)
     this.innerRadius = maxMapRadius;
     this.outerRadius = maxMapRadius + 6 * this.hexSize;
+    // Ring count of the hex map, used by the shadow edge fade.
+    this.mapRings = Math.max(0, (maxMapRadius - this.hexSize) / (Math.sqrt(3) * this.hexSize));
+    this._shadowEdgeUniforms.uCloudShadowMapRings.value = this.mapRings;
+    this.sunLight = this.scene.children.find(child => child.isDirectionalLight) || null;
 
     this.geometry = new THREE.IcosahedronGeometry(1, 1);
     this.group = new THREE.Group();
     this.group.name = 'cloudLayer';
     this.group.userData.isCloudLayer = true;
     this.scene.add(this.group);
-    this.shadowNoiseTexture = this._createShadowNoiseTexture();
+
+    if (this.castShadows) {
+      this.shadowGeometry = new THREE.PlaneGeometry(2, 2);
+      this.shadowGeometry.rotateX(-Math.PI / 2);
+      this.shadowTexture = this._createShadowTexture();
+      this.shadowLayer = new THREE.Group();
+      this.shadowLayer.name = 'cloudShadowLayer';
+      this.scene.add(this.shadowLayer);
+    }
 
     this.time = 0;
     // Density is expressed as clouds per 100 map cells.
@@ -107,6 +146,7 @@ export class CloudManager {
       : this._estimateCellCount(maxMapRadius);
     const count = Math.round(cellCount * this.density / 100);
     console.log(`[clouds] density ${this.density} -> ${count} clouds (${Math.round(cellCount)} cells)`);
+    console.log(`[clouds] shadows: ${this.castShadows ? 'smooth projected blobs' : 'off'}`);
     if (count > 2000) {
       console.warn(`[clouds] ${count} clouds is very high and will likely hurt performance.`);
     }
@@ -139,6 +179,7 @@ export class CloudManager {
     // the map on the first frame after it regains focus.
     const dt = Math.min(deltaTime, 0.1);
     this.time += dt;
+    this._updateSunDirection();
 
     for (const cloud of this.clouds) {
       const speed = this.baseWindSpeed * cloud.speedMultiplier;
@@ -153,6 +194,7 @@ export class CloudManager {
 
       this._positionCloud(cloud);
       this._updateOpacity(cloud);
+      this._updateShadows(cloud);
     }
   }
 
@@ -162,7 +204,8 @@ export class CloudManager {
   dispose() {
     for (const cloud of this.clouds) {
       if (cloud.material) cloud.material.dispose();
-      if (cloud.depthMaterial) cloud.depthMaterial.dispose();
+      if (cloud.shadowMaterial) cloud.shadowMaterial.dispose();
+      if (cloud.shadowMesh) cloud.shadowMesh.dispose();
       cloud.meshes.length = 0;
     }
     this.clouds.length = 0;
@@ -170,9 +213,17 @@ export class CloudManager {
     if (this.group && this.scene) this.scene.remove(this.group);
     this.group = null;
 
-    if (this.shadowNoiseTexture) {
-      this.shadowNoiseTexture.dispose();
-      this.shadowNoiseTexture = null;
+    if (this.shadowLayer && this.scene) this.scene.remove(this.shadowLayer);
+    this.shadowLayer = null;
+
+    if (this.shadowGeometry) {
+      this.shadowGeometry.dispose();
+      this.shadowGeometry = null;
+    }
+
+    if (this.shadowTexture) {
+      this.shadowTexture.dispose();
+      this.shadowTexture = null;
     }
 
     if (this.geometry) {
@@ -180,7 +231,9 @@ export class CloudManager {
       this.geometry = null;
     }
 
+    this.sunLight = null;
     this.maxMapRadius = 0;
+    this.mapRings = 0;
     this.innerRadius = 0;
     this.outerRadius = 0;
   }
@@ -190,28 +243,79 @@ export class CloudManager {
   // -------------------------------------------------------------------------
 
   /**
-   * Shared random alpha mask for dithered partial shadows. One texture is
-   * created per cloud-layer init and reused by every cloud's depth material.
+   * Soft radial alpha mask used by every cloud shadow blob. RGB stays black
+   * so the material darkens the ground; alpha fades smoothly to zero.
    */
-  _createShadowNoiseTexture() {
-    const size = CLOUD_SHADOW_NOISE_SIZE;
+  _createShadowTexture() {
+    const size = CLOUD_SHADOW_TEXTURE_SIZE;
     const data = new Uint8Array(size * size * 4);
-    for (let i = 0; i < data.length; i += 4) {
-      const value = Math.floor(Math.random() * 256);
-      data[i] = value;
-      data[i + 1] = value;
-      data[i + 2] = value;
-      data[i + 3] = 255;
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const nx = ((x + 0.5) / size) * 2 - 1;
+        const ny = ((y + 0.5) / size) * 2 - 1;
+        const edge = Math.max(0, 1 - Math.sqrt(nx * nx + ny * ny));
+        const falloff = edge * edge * (3 - 2 * edge);
+        const alpha = Math.round(255 * Math.pow(falloff, this.shadowSoftness));
+        const i = (y * size + x) * 4;
+        data[i] = 0;
+        data[i + 1] = 0;
+        data[i + 2] = 0;
+        data[i + 3] = alpha;
+      }
     }
 
     const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
-    texture.wrapS = THREE.RepeatWrapping;
-    texture.wrapT = THREE.RepeatWrapping;
-    texture.repeat.set(CLOUD_SHADOW_NOISE_REPEAT, CLOUD_SHADOW_NOISE_REPEAT);
-    texture.magFilter = THREE.NearestFilter;
-    texture.minFilter = THREE.NearestFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.minFilter = THREE.LinearFilter;
+    texture.generateMipmaps = false;
     texture.needsUpdate = true;
     return texture;
+  }
+
+  /**
+   * Patches a shadow material so fragments fade out past the map boundary.
+   * The fade is computed per fragment in world XZ using the same axial
+   * distance formula as the hex grid, so the void never receives shadows.
+   */
+  _configureShadowMaterial(material) {
+    const uniforms = this._shadowEdgeUniforms;
+
+    material.onBeforeCompile = (shader) => {
+      shader.uniforms.uCloudShadowMapRings = uniforms.uCloudShadowMapRings;
+      shader.uniforms.uCloudShadowHexSize = uniforms.uCloudShadowHexSize;
+      shader.uniforms.uCloudShadowEdgeFadeRings = uniforms.uCloudShadowEdgeFadeRings;
+
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', `#include <common>
+          varying vec2 vCloudShadowXZ;
+        `)
+        .replace('#include <begin_vertex>', `#include <begin_vertex>
+          #ifdef USE_INSTANCING
+            vCloudShadowXZ = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xz;
+          #else
+            vCloudShadowXZ = (modelMatrix * vec4(transformed, 1.0)).xz;
+          #endif
+        `);
+
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `#include <common>
+          varying vec2 vCloudShadowXZ;
+          uniform float uCloudShadowMapRings;
+          uniform float uCloudShadowHexSize;
+          uniform float uCloudShadowEdgeFadeRings;
+        `)
+        .replace('#include <map_fragment>', `#include <map_fragment>
+          float cloudShadowQ = ((sqrt(3.0) / 3.0) * vCloudShadowXZ.x - (1.0 / 3.0) * vCloudShadowXZ.y) / uCloudShadowHexSize;
+          float cloudShadowR = ((2.0 / 3.0) * vCloudShadowXZ.y) / uCloudShadowHexSize;
+          float cloudShadowDistance = (abs(cloudShadowQ) + abs(cloudShadowR) + abs(cloudShadowQ + cloudShadowR)) * 0.5;
+          diffuseColor.a *= 1.0 - smoothstep(
+            uCloudShadowMapRings,
+            uCloudShadowMapRings + uCloudShadowEdgeFadeRings,
+            cloudShadowDistance
+          );
+        `);
+    };
+    material.customProgramCacheKey = () => 'cloudShadowBlob';
   }
 
   /**
@@ -228,25 +332,34 @@ export class CloudManager {
       depthWrite: false,
       flatShading: true,
     });
-    // The shadow pass ignores opacity, so a depth material with a noise mask
-    // turns opacity into shadow density: alphaTest = 1 - opacity.
-    const depthMaterial = new THREE.MeshDepthMaterial({
-      depthPacking: THREE.RGBADepthPacking,
-      alphaMap: this.shadowNoiseTexture,
-      alphaTest: 1,
-    });
-    depthMaterial.userData.alphaTest = 1;
-    // r160's shadow pass overwrites alphaMap/alphaTest from the color
-    // material before rendering the caster. Restore ours just before use.
-    const restoreShadowAlpha = () => {
-      depthMaterial.alphaMap = this.shadowNoiseTexture;
-      depthMaterial.alphaTest = depthMaterial.userData.alphaTest;
-    };
+    let shadowMaterial = null;
+    let shadowMesh = null;
+    if (this.castShadows) {
+      shadowMaterial = new THREE.MeshBasicMaterial({
+        map: this.shadowTexture,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        // A depth-tested plane at a fixed height gets cut out by trees and
+        // towers that rise above it. Draw the soft blob as an overlay instead.
+        depthTest: false,
+        side: THREE.DoubleSide,
+      });
+      this._configureShadowMaterial(shadowMaterial);
+      shadowMesh = new THREE.InstancedMesh(this.shadowGeometry, shadowMaterial, 8);
+      shadowMesh.count = 0;
+      shadowMesh.visible = false;
+      shadowMesh.frustumCulled = false;
+      shadowMesh.renderOrder = CLOUD_SHADOW_RENDER_ORDER;
+      shadowMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      shadowMesh.raycast = () => { };
+      this.shadowLayer.add(shadowMesh);
+    }
 
     const group = new THREE.Group();
     group.name = 'cloud';
     const meshes = [];
-    // A cloud uses 4-8 of these; extra meshes stay hidden and are reused on
+    // A cloud uses 3-6 of these; extra meshes stay hidden and are reused on
     // recycle, so no geometry is created after init().
     for (let i = 0; i < 8; i++) {
       const mesh = new THREE.Mesh(this.geometry, material);
@@ -254,9 +367,9 @@ export class CloudManager {
       // Explicitly keep clouds out of any future raycasting. Picking is
       // currently math-based (pickHexCell), but this makes the rule local.
       mesh.raycast = () => { };
-      mesh.castShadow = this.castShadows;
-      mesh.customDepthMaterial = depthMaterial;
-      mesh.onBeforeShadow = restoreShadowAlpha;
+      // Cloud shadows are separate ground-projected blobs, not shadow-map
+      // casters, so keep the real shadow pass out of this.
+      mesh.castShadow = false;
       mesh.receiveShadow = false;
       mesh.renderOrder = CLOUD_RENDER_ORDER;
       mesh.visible = false;
@@ -268,8 +381,9 @@ export class CloudManager {
     return {
       group,
       material,
-      depthMaterial,
       meshes,
+      shadowMaterial,
+      shadowMesh,
       baseX: 0,
       baseZ: 0,
       altitude: this.altitudeMin,
@@ -285,9 +399,9 @@ export class CloudManager {
   }
 
   /**
-   * Resets a cloud's layout, altitude, speed and motion. Initial seeding
-   * spreads clouds along the wind corridor; recycled clouds come from a
-   * randomized upwind arc outside the despawn radius.
+   * Resets a cloud's layout, altitude, speed and motion. New clouds are seeded
+   * uniformly across the map disc; recycled clouds re-enter along the full
+   * upwind edge.
    */
   _seedCloud(cloud, initial) {
     if (initial) {
@@ -329,7 +443,7 @@ export class CloudManager {
   }
 
   /**
-   * Lays out 4-8 non-uniformly scaled spheres: a few large masses near the
+   * Lays out 3-6 non-uniformly scaled spheres: a few large masses near the
    * middle, plus smaller puffs around the outer rim. The local X axis is the
    * long axis, so the finished cluster stays wider than it is tall.
    */
@@ -402,6 +516,75 @@ export class CloudManager {
   }
 
   /**
+   * Refreshes the sun direction used to project shadows. Shadows hide at
+   * night or when the sun is too close to the horizon to read cleanly.
+   */
+  _updateSunDirection() {
+    if (!this.castShadows || !this.sunLight) {
+      this._shadowEnabled = false;
+      return;
+    }
+
+    this.sunLight.getWorldPosition(_sunWorld);
+    this.sunLight.target.getWorldPosition(_sunTargetWorld);
+    this._shadowLightDir.subVectors(_sunWorld, _sunTargetWorld).normalize();
+    this._shadowEnabled = this._shadowLightDir.y > CLOUD_SHADOW_MIN_SUN_Y;
+    if (this._shadowEnabled) {
+      this._shadowStretch = Math.min(2.5, 1 / Math.max(this._shadowLightDir.y, 0.35));
+      this._shadowRotationY = Math.atan2(-this._shadowLightDir.z, this._shadowLightDir.x);
+    }
+  }
+
+  /**
+   * Projects the visible spheres of a cloud onto a flat shadow plane along
+   * the sun direction. The shader fades fragments out past the map edge.
+   */
+  _updateShadows(cloud) {
+    if (!cloud.shadowMesh) return;
+
+    if (!this._shadowEnabled || cloud.material.opacity <= 0.005) {
+      cloud.shadowMesh.visible = false;
+      cloud.shadowMesh.count = 0;
+      return;
+    }
+
+    cloud.group.updateMatrixWorld(true);
+    const groupScale = cloud.group.scale.x;
+    const light = this._shadowLightDir;
+    const stretch = this._shadowStretch;
+    cloud.shadowMaterial.opacity = cloud.material.opacity * this.shadowStrength;
+
+    // Project the whole cluster using one plane. Per-sphere terrain heights
+    // made the blobs pop as clouds drifted over stepped hex tiles, and using
+    // the bobbing group height made the shadow wobble. Use the base altitude.
+    const t = cloud.altitude / light.y;
+    const shadowY = CLOUD_SHADOW_PLANE_Y;
+
+    let count = 0;
+    for (const source of cloud.meshes) {
+      if (!source.visible) continue;
+
+      source.getWorldPosition(_shadowWorld);
+      const sx = _shadowWorld.x - light.x * t;
+      const sz = _shadowWorld.z - light.z * t;
+      const radius = Math.max(source.scale.x, source.scale.z) * groupScale;
+      const scale = radius * CLOUD_SHADOW_SCALE;
+
+      _shadowPos.set(sx, shadowY, sz);
+      _shadowScale.set(scale * stretch, 1, scale);
+      _shadowEuler.set(0, this._shadowRotationY, 0);
+      _shadowQuat.setFromEuler(_shadowEuler);
+      _shadowMatrix.compose(_shadowPos, _shadowQuat, _shadowScale);
+      cloud.shadowMesh.setMatrixAt(count, _shadowMatrix);
+      count++;
+    }
+
+    cloud.shadowMesh.count = count;
+    cloud.shadowMesh.instanceMatrix.needsUpdate = true;
+    cloud.shadowMesh.visible = count > 0;
+  }
+
+  /**
    * Opacity is the product of:
    * - radial fade: full to the map edge, smoothstep to 0 at the outer
    *   spawn/despawn radius;
@@ -420,8 +603,6 @@ export class CloudManager {
     const cameraFade = this._cameraFade(cloud);
     const opacity = cloud.peakOpacity * radial * cameraFade;
     cloud.material.opacity = opacity;
-    cloud.depthMaterial.alphaTest = 1 - opacity;
-    cloud.depthMaterial.userData.alphaTest = 1 - opacity;
     cloud.group.visible = opacity > 0.005;
   }
 

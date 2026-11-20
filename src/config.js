@@ -16,6 +16,8 @@ export var CONFIG = {
   CLOUD_SIZE_MAX: 6,
   CLOUD_ALTITUDE_MIN: 10,     // cloud altitude band in world units (query-param overridable)
   CLOUD_ALTITUDE_MAX: 16,
+  CLOUD_SHADOW_STRENGTH: 0.5,  // cloud shadow darkness multiplier (query-param overridable)
+  CLOUD_SHADOW_SOFTNESS: 1,    // shadow edge softness; higher = softer (query-param overridable)
   MOVE_TIME_PER_CELL: 0.2, // base seconds to cross one cell at movement cost 1 (query-param overridable)
   AI_ACTION_SLEEP: 500,  // ms
   AI_BUILD_MAX_DISTANCE: 10,     // furthest cell from a builder considered as a build site
