@@ -25,6 +25,10 @@ const CAMERA_FADE_FAR = 14;
 // clouds to draw after it; otherwise camera-dependent transparent sorting can
 // put a water bucket after a cloud and paint over it (clouds never write depth).
 const CLOUD_RENDER_ORDER = 1;
+// Shared stochastic alpha mask for partial cloud shadows. The shadow pass
+// reads the green channel of alphaMap, so all channels hold the same byte.
+const CLOUD_SHADOW_NOISE_SIZE = 256;
+const CLOUD_SHADOW_NOISE_REPEAT = 4;
 
 export class CloudManager {
   /**
@@ -55,6 +59,7 @@ export class CloudManager {
 
     this.group = null;
     this.geometry = null;
+    this.shadowNoiseTexture = null;
     this.clouds = [];
     this.time = 0;
 
@@ -93,6 +98,7 @@ export class CloudManager {
     this.group.name = 'cloudLayer';
     this.group.userData.isCloudLayer = true;
     this.scene.add(this.group);
+    this.shadowNoiseTexture = this._createShadowNoiseTexture();
 
     this.time = 0;
     // Density is expressed as clouds per 100 map cells.
@@ -156,12 +162,18 @@ export class CloudManager {
   dispose() {
     for (const cloud of this.clouds) {
       if (cloud.material) cloud.material.dispose();
+      if (cloud.depthMaterial) cloud.depthMaterial.dispose();
       cloud.meshes.length = 0;
     }
     this.clouds.length = 0;
 
     if (this.group && this.scene) this.scene.remove(this.group);
     this.group = null;
+
+    if (this.shadowNoiseTexture) {
+      this.shadowNoiseTexture.dispose();
+      this.shadowNoiseTexture = null;
+    }
 
     if (this.geometry) {
       this.geometry.dispose();
@@ -178,6 +190,31 @@ export class CloudManager {
   // -------------------------------------------------------------------------
 
   /**
+   * Shared random alpha mask for dithered partial shadows. One texture is
+   * created per cloud-layer init and reused by every cloud's depth material.
+   */
+  _createShadowNoiseTexture() {
+    const size = CLOUD_SHADOW_NOISE_SIZE;
+    const data = new Uint8Array(size * size * 4);
+    for (let i = 0; i < data.length; i += 4) {
+      const value = Math.floor(Math.random() * 256);
+      data[i] = value;
+      data[i + 1] = value;
+      data[i + 2] = value;
+      data[i + 3] = 255;
+    }
+
+    const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(CLOUD_SHADOW_NOISE_REPEAT, CLOUD_SHADOW_NOISE_REPEAT);
+    texture.magFilter = THREE.NearestFilter;
+    texture.minFilter = THREE.NearestFilter;
+    texture.needsUpdate = true;
+    return texture;
+  }
+
+  /**
    * Creates one pooled cloud: a group with 8 reusable sphere meshes and a
    * private material (so opacity/color can change per cloud).
    */
@@ -191,6 +228,20 @@ export class CloudManager {
       depthWrite: false,
       flatShading: true,
     });
+    // The shadow pass ignores opacity, so a depth material with a noise mask
+    // turns opacity into shadow density: alphaTest = 1 - opacity.
+    const depthMaterial = new THREE.MeshDepthMaterial({
+      depthPacking: THREE.RGBADepthPacking,
+      alphaMap: this.shadowNoiseTexture,
+      alphaTest: 1,
+    });
+    depthMaterial.userData.alphaTest = 1;
+    // r160's shadow pass overwrites alphaMap/alphaTest from the color
+    // material before rendering the caster. Restore ours just before use.
+    const restoreShadowAlpha = () => {
+      depthMaterial.alphaMap = this.shadowNoiseTexture;
+      depthMaterial.alphaTest = depthMaterial.userData.alphaTest;
+    };
 
     const group = new THREE.Group();
     group.name = 'cloud';
@@ -204,6 +255,8 @@ export class CloudManager {
       // currently math-based (pickHexCell), but this makes the rule local.
       mesh.raycast = () => { };
       mesh.castShadow = this.castShadows;
+      mesh.customDepthMaterial = depthMaterial;
+      mesh.onBeforeShadow = restoreShadowAlpha;
       mesh.receiveShadow = false;
       mesh.renderOrder = CLOUD_RENDER_ORDER;
       mesh.visible = false;
@@ -215,6 +268,7 @@ export class CloudManager {
     return {
       group,
       material,
+      depthMaterial,
       meshes,
       baseX: 0,
       baseZ: 0,
@@ -366,6 +420,8 @@ export class CloudManager {
     const cameraFade = this._cameraFade(cloud);
     const opacity = cloud.peakOpacity * radial * cameraFade;
     cloud.material.opacity = opacity;
+    cloud.depthMaterial.alphaTest = 1 - opacity;
+    cloud.depthMaterial.userData.alphaTest = 1 - opacity;
     cloud.group.visible = opacity > 0.005;
   }
 
