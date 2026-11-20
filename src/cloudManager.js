@@ -208,8 +208,13 @@ export class CloudManager {
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
     texture.repeat.set(CLOUD_SHADOW_NOISE_REPEAT, CLOUD_SHADOW_NOISE_REPEAT);
-    texture.magFilter = THREE.NearestFilter;
-    texture.minFilter = THREE.NearestFilter;
+    // Mipmapped linear filtering: each shadow texel samples the noise
+    // averaged over its footprint instead of one random texel, so the
+    // dither becomes a smooth alpha field — softer partial shadows and
+    // far less frame-to-frame flicker as clouds drift.
+    texture.magFilter = THREE.LinearFilter;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.generateMipmaps = true;
     texture.needsUpdate = true;
     return texture;
   }
