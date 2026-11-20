@@ -28,7 +28,7 @@ const CLOUD_RENDER_ORDER = 1;
 // Shared stochastic alpha mask for partial cloud shadows. The shadow pass
 // reads the green channel of alphaMap, so all channels hold the same byte.
 const CLOUD_SHADOW_NOISE_SIZE = 256;
-const CLOUD_SHADOW_NOISE_REPEAT = 4;
+const CLOUD_SHADOW_NOISE_REPEAT = 16;
 
 export class CloudManager {
   /**
