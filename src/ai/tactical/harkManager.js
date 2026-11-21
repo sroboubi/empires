@@ -371,13 +371,13 @@ export class HarkManager extends AdaptiveManager {
         return this.sortForEngagement(chosen, target);
     }
 
-    /** helper.attack with B2 failure bookkeeping. Returns orders used. */
+    /** actions.attack with B2 failure bookkeeping. Returns orders used. */
     async engage(attacker, target, label, ownerName, involvedCells) {
         const from = { q: attacker.q, r: attacker.r };
         // Strike pool (canStrikeThisTurn) includes move-then-attack units,
         // which need 2 orders; with maxOrders=1 they spent the order moving
-        // and never struck. helper.attack caps by the player's actual orders.
-        const result = await this.helper.attack(this.gameState, attacker, target, Math.min(2, num(this.player.orders)));
+        // and never struck. actions.attack caps by the player's actual orders.
+        const result = await this.actions.attack(attacker, target, Math.min(2, num(this.player.orders)));
         const used = ordersUsedFrom(result);
         if (used > 0) {
             involvedCells.push(from, attacker.cell);
@@ -645,8 +645,8 @@ export class HarkManager extends AdaptiveManager {
         let used = 0;
         if (site.stage.path.length > 0) {
             if (!moveAction || num(builder.actionPoints) <= 0) return 0;
-            const moved = this.helper.moveAlongPath(
-                this.player, builder, moveAction, site.stage.path, this.gameState, category,
+            const moved = this.actions.moveAlongPath(
+                builder, moveAction, site.stage.path, category,
                 `moving to build ${this.helper.camelToTitle(targetName)} at (${site.cell.q},${site.cell.r})`
             );
             if (!moved) return 0;

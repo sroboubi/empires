@@ -1,12 +1,14 @@
+import { ActionApi } from './actions.js';
+
 /**
  * BaseManager
  * Abstract base class for AI turn controllers (e.g. SmartManager, Harness).
- * Provides unified interface and access to player and gameState references.
+ * Provides unified interface and access to player and gameState references,
+ * plus the AI-owned action composites (`this.actions`, src/ai/actions.js).
  *
  * The `helper` is the engine's `AiHelper` instance: the AI module's
- * only channel to engine features (hex distance, config, renderer callbacks,
- * etc.). It is required — the constructor throws without it. (An earlier
- * docstring called it optional; the code has always required both arguments.)
+ * only channel to engine utilities (hex distance, config, renderer callbacks,
+ * etc.). It is required — the constructor throws without it.
  *
  * NOTE: BaseManager does NOT apply the AI interface proxy itself. The game
  * constructs managers via createAiManager() (src/aiInterfaceProxy.js), which
@@ -25,6 +27,7 @@ export class BaseManager {
         this.player = player;
         this.helper = helper;
         this.gameState = helper.getGameState();
+        this.actions = new ActionApi(this.player, this.gameState, this.helper);
         this.controller = player.controller;
     }
 

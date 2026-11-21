@@ -124,25 +124,25 @@ export class JsonHarness extends LlmBaseManager {
                         lastResponseError = `Attack requires targetId (a specific visible enemy). entityName is for Build only — attacking a type name like "village" is rejected.`;
                         continue;
                     }
-                    actionOutcome = await this.helper.attack(this.gameState, entity, target, this.player.orders);
+                    actionOutcome = await this.actions.attack(entity, target, this.player.orders);
                 } else if (command === "REPAIR") {
                     if (!response.targetId) {
                         lastResponseError = `Repair requires targetId (a specific damaged entity). entityName is for Build only.`;
                         continue;
                     }
-                    actionOutcome = await this.helper.support(this.gameState, entity, target, "Repair", this.player.orders);
+                    actionOutcome = await this.actions.support(entity, target, "Repair", this.player.orders);
                 } else if (command === "BUILD") {
                     if (!response.entityName) {
                         lastResponseError = `Build requires entityName (must be in the builder's Builds list)`;
                         continue;
                     }
-                    actionOutcome = await this.helper.build(this.gameState, entity, response.entityName);
+                    actionOutcome = await this.actions.build(entity, response.entityName);
                 } else if (command === "EXPLORE") {
                     // B6: only seek treasure when no direction was given.
                     // The old call passed getTreasure=true always, and the
                     // treasure branch recursed with direction null — so the
                     // LLM's chosen direction was silently ignored.
-                    actionOutcome = this.helper.explore(this.gameState, entity, response.direction, !response.direction);
+                    actionOutcome = this.actions.explore(entity, response.direction, !response.direction);
                 }
 
                 ordersUsed = actionOutcome.ordersUsed;

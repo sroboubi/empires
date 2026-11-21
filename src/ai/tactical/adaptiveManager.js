@@ -649,7 +649,7 @@ export class AdaptiveManager extends BaseManager {
             + `| Target: ${this.helper.camelToTitle(targetName)} | Cost: ${costText} | Reason: ${reason}`
         );
 
-        const result = await this.helper.build(this.gameState, builder, targetName);
+        const result = await this.actions.build(builder, targetName);
         const used = ordersUsedFrom(result);
         if (used > 0) {
             // B15: log the BUILT cell, not the builder's cell — the UI
@@ -938,7 +938,7 @@ export class AdaptiveManager extends BaseManager {
             pool = dedicated.length > 0 ? dedicated : (nonBuilders.length > 0 ? nonBuilders : own);
             // Emergency defence only pulls nearby units — a unit 10+ hexes
             // away can't help with a threat here now. (B2's canAttackTarget
-            // check was reverted: helper.attack already closes distance or
+            // check was reverted: actions.attack already closes distance or
             // burns nothing, so the check only removed useful progress.)
             pool = pool.filter(entity =>
                 this.helper.distance(entity, target) <= this.config.opportunisticRange
@@ -1036,7 +1036,7 @@ export class AdaptiveManager extends BaseManager {
 
             for (const attacker of candidates) {
                 const from = { q: attacker.q, r: attacker.r };
-                const result = await this.helper.attack(this.gameState, attacker, target, 1);
+                const result = await this.actions.attack(attacker, target, 1);
                 const used = ordersUsedFrom(result);
                 if (used > 0) {
                     involvedCells.push(from, attacker.cell);
@@ -1265,7 +1265,7 @@ export class AdaptiveManager extends BaseManager {
 
             for (const attacker of candidates) {
                 const from = { q: attacker.q, r: attacker.r };
-                const result = await this.helper.attack(this.gameState, attacker, target, 1);
+                const result = await this.actions.attack(attacker, target, 1);
                 const used = ordersUsedFrom(result);
                 if (used > 0) {
                     involvedCells.push(from, attacker.cell);
@@ -1468,7 +1468,7 @@ export class AdaptiveManager extends BaseManager {
             // B7: maxOrders 2, not 1 — with 1 order, support() could move the
             // repairer adjacent but never repair in the same call, so the unit
             // ping-ponged between retreat (step 4, outranks repair) and repair.
-            const result = await this.helper.support(this.gameState, repairer, target, 'Repair', 2);
+            const result = await this.actions.support(repairer, target, 'Repair', 2);
             const used = ordersUsedFrom(result);
             if (used > 0) {
                 involvedCells.push(from, repairer.cell);
@@ -1656,12 +1656,10 @@ export class AdaptiveManager extends BaseManager {
         if (path.length === 0) return 0;
 
         const from = { q: unit.q, r: unit.r };
-        const used = this.helper.moveAlongPath(
-            this.player,
+        const used = this.actions.moveAlongPath(
             unit,
             moveAction,
             path,
-            this.gameState,
             'combat',
             reason
         );
@@ -1890,12 +1888,10 @@ export class AdaptiveManager extends BaseManager {
 
         if (best.stage.path.length > 0) {
             if (!moveAction || asNumber(builder.actionPoints, 0) <= 0) return 0;
-            const moved = this.helper.moveAlongPath(
-                this.player,
+            const moved = this.actions.moveAlongPath(
                 builder,
                 moveAction,
                 best.stage.path,
-                this.gameState,
                 'build',
                 `moving toward goal build site for ${this.helper.camelToTitle(targetName)} at (${best.cell.q},${best.cell.r})`
             );
@@ -2063,8 +2059,7 @@ export class AdaptiveManager extends BaseManager {
 
             for (let attempt = 0; attempt < 3 && direction; attempt++) {
                 const from = { q: explorer.q, r: explorer.r };
-                const result = this.helper.explore(
-                    this.gameState,
+                const result = this.actions.explore(
                     explorer,
                     direction,
                     false,
@@ -2092,8 +2087,7 @@ export class AdaptiveManager extends BaseManager {
         // Fallback: nearest unexplored cell (still respects per-turn targeted cells).
         for (const explorer of explorers) {
             const from = { q: explorer.q, r: explorer.r };
-            const result = this.helper.explore(
-                this.gameState,
+            const result = this.actions.explore(
                 explorer,
                 null,
                 false,
@@ -2161,12 +2155,10 @@ export class AdaptiveManager extends BaseManager {
             if (!moveAction) continue;
 
             const from = { q: explorer.q, r: explorer.r };
-            const used = this.helper.moveAlongPath(
-                this.player,
+            const used = this.actions.moveAlongPath(
                 explorer,
                 moveAction,
                 pathResult.path,
-                this.gameState,
                 'explore',
                 `exploring toward goal target (${coord.q},${coord.r})`
             );

@@ -740,7 +740,7 @@ export default class ApexAi extends FableAi {
                     key: `attack:${u.id}:${f.id}`, unit: u, category: 'combat', value, orders,
                     text: `${this.tag(u)} attacks ${this.tag(f)}: ${why}${f.attackedUs ? ', it attacked us' : ''}; ${plan}`,
                     run: async () => {
-                        const result = await helper.attack(gameState, u.e, f.e, maxOrders);
+                        const result = await this.actions.attack(u.e, f.e, maxOrders);
                         return result.ordersUsed > 0 ? null : (result.result?.message || 'attack not possible');
                     },
                 });

@@ -1,4 +1,5 @@
 import { BaseManager } from '../baseManager.js';
+import { ActionApi } from '../actions.js';
 
 /**
  * Smart AI Manager
@@ -176,6 +177,7 @@ function findProducersForResource(manifest, resKey, player) {
  * build step, registers the needed amounts into reservedResources so proactive growth doesn't spend them.
  */
 async function handleCriticalDeficits(player, gameState, manifest, myEntities, evalRes, reservedResources, involvedCells, helper) {
+    const actions = new ActionApi(player, gameState, helper);
     const urgentNeeds = [...evalRes.deficits, ...evalRes.lowStock];
     if (urgentNeeds.length === 0) return false;
 
@@ -207,7 +209,7 @@ async function handleCriticalDeficits(player, gameState, manifest, myEntities, e
 
             const startingCell = { q: builder.q, r: builder.r };
             helper.aiLog(player, 'build', `STABILIZE: Using ${builder.name} at (${builder.q},${builder.r}) to build ${helper.camelToTitle(target)}${step.directTarget !== target ? ` (prerequisite for ${helper.camelToTitle(step.directTarget)})` : ''} to resolve ${need.res} shortage.`);
-            const { ordersUsed } = await helper.build(gameState, builder, target);
+            const { ordersUsed } = await actions.build(builder, target);
             if (ordersUsed > 0) {
                 involvedCells.push(startingCell, builder.cell);
                 return true;
@@ -227,6 +229,7 @@ async function handleCriticalDeficits(player, gameState, manifest, myEntities, e
  * Engages with dedicated military units with extensive diagnostic logging.
  */
 async function handleCombatAndThreats(player, gameState, manifest, myEntities, involvedCells, helper) {
+    const actions = new ActionApi(player, gameState, helper);
     // A. Detect visible opponent entities strictly via player.getOpponents(gameState) (Guideline 19)
     const opponents = player.getOpponents ? player.getOpponents(gameState) : {};
     const visibleOpponents = [];
@@ -310,7 +313,7 @@ async function handleCombatAndThreats(player, gameState, manifest, myEntities, i
 
                 const startingCell = { q: warrior.q, r: warrior.r };
                 helper.aiLog(player, 'combat', `Retaliating: Deploying closer unit ${warrior.name} at (${warrior.q},${warrior.r}) (dist: ${dist}, AP: ${warrior.actionPoints}) against revenge target ${target.name} at (${target.q},${target.r}).`);
-                const { ordersUsed } = await helper.attack(gameState, warrior, target, player.orders);
+                const { ordersUsed } = await actions.attack(warrior, target, player.orders);
                 if (ordersUsed > 0) {
                     const status = target.destroyed || target.health <= 0
                         ? 'TARGET DESTROYED'
@@ -360,7 +363,7 @@ async function handleCombatAndThreats(player, gameState, manifest, myEntities, i
 
                     const startingCell = { q: warrior.q, r: warrior.r };
                     helper.aiLog(player, 'combat', `Tactical Strike: Deploying closer unit ${warrior.name} at (${warrior.q},${warrior.r}) (dist: ${dist}, AP: ${warrior.actionPoints}) targeting ${target.owner?.name || 'Enemy'}'s ${target.name} at (${target.q},${target.r}).`);
-                    const { ordersUsed } = await helper.attack(gameState, warrior, target, player.orders);
+                    const { ordersUsed } = await actions.attack(warrior, target, player.orders);
                     if (ordersUsed > 0) {
                         const status = target.destroyed || target.health <= 0
                             ? 'TARGET DESTROYED'
@@ -390,7 +393,7 @@ async function handleCombatAndThreats(player, gameState, manifest, myEntities, i
                     const cost = player.getSpawnCost(target);
                     if (player.hasResources && player.hasResources(cost)) {
                         helper.aiLog(player, 'combat', `Threat Defense: Lack military to engage threats! Spawning military defender ${helper.camelToTitle(target)} via ${builder.name} at (${builder.q},${builder.r}).`);
-                        const { ordersUsed } = await helper.build(gameState, builder, target);
+                        const { ordersUsed } = await actions.build(builder, target);
                         if (ordersUsed > 0) return true;
                     }
                 }
@@ -412,7 +415,7 @@ async function handleCombatAndThreats(player, gameState, manifest, myEntities, i
 
                         const startingCell = { q: fighter.q, r: fighter.r };
                         helper.aiLog(player, 'warn', `Emergency Defense: Adjacent enemy ${adj.name} at (${adj.q},${adj.r})! Fighting back with ${fighter.name} at (${fighter.q},${fighter.r}) (AP: ${fighter.actionPoints}).`);
-                        const { ordersUsed } = await helper.attack(gameState, fighter, adj, player.orders);
+                        const { ordersUsed } = await actions.attack(fighter, adj, player.orders);
                         if (ordersUsed > 0) {
                             const status = adj.destroyed || adj.health <= 0
                                 ? 'TARGET DESTROYED'
@@ -435,6 +438,7 @@ async function handleCombatAndThreats(player, gameState, manifest, myEntities, i
  * Repairs heavily damaged friendly structures/units (<50% HP).
  */
 async function handleHeavyRepairs(player, gameState, myEntities, involvedCells, helper) {
+    const actions = new ActionApi(player, gameState, helper);
     let heavilyDamaged = myEntities.filter(e => e.active && e.health < (e.maxHealth * 0.5));
     if (heavilyDamaged.length === 0) return false;
 
@@ -453,7 +457,7 @@ async function handleHeavyRepairs(player, gameState, myEntities, involvedCells, 
         for (const target of myTargets) {
             const startingCell = { q: repairer.q, r: repairer.r };
             helper.aiLog(player, 'build', `Repairing critical damage: ${repairer.name} at (${repairer.q},${repairer.r}) restoring ${target.name} at (${target.q},${target.r}) (HP: ${Math.round(target.health)}/${target.maxHealth})`);
-            const { ordersUsed } = await helper.support(gameState, repairer, target, "Repair", player.orders);
+            const { ordersUsed } = await actions.support(repairer, target, "Repair", player.orders);
             if (ordersUsed > 0) {
                 involvedCells.push(startingCell, repairer.cell);
                 return true;
@@ -470,6 +474,7 @@ async function handleHeavyRepairs(player, gameState, myEntities, involvedCells, 
  * Respects reservedResources to prevent starving pending deficit remedies.
  */
 async function handleProactiveGrowth(player, gameState, manifest, myEntities, evalRes, reservedResources, involvedCells, helper) {
+    const actions = new ActionApi(player, gameState, helper);
     const stock = player.resources || {};
     const profile = evalRes.profile;
 
@@ -567,7 +572,7 @@ async function handleProactiveGrowth(player, gameState, manifest, myEntities, ev
     for (const { builder, targetName, roi } of scored) {
         const startingCell = { q: builder.q, r: builder.r };
         helper.aiLog(player, 'build', `Proactive Expansion: ${builder.name} at (${builder.q},${builder.r}) building ${helper.camelToTitle(targetName)} (ROI: ${roi.toFixed(2)}).`);
-        const { ordersUsed } = await helper.build(gameState, builder, targetName);
+        const { ordersUsed } = await actions.build(builder, targetName);
         if (ordersUsed > 0) {
             involvedCells.push(startingCell, builder.cell);
             return true;
@@ -583,6 +588,7 @@ async function handleProactiveGrowth(player, gameState, manifest, myEntities, ev
  * which moves at most 1 order per call. Strictly excludes builder units.
  */
 async function handleExploration(player, gameState, manifest, myEntities, targetedCells, involvedCells, helper) {
+    const actions = new ActionApi(player, gameState, helper);
     // Strictly filter out builder units, constructs, inactive units, or units with 0 AP
     let explorers = myEntities.filter(e => {
         if (!e.active || !helper.isMobile(e)) return false;
@@ -603,7 +609,7 @@ async function handleExploration(player, gameState, manifest, myEntities, target
 
     for (const explorer of explorers) {
         const startingCell = { q: explorer.q, r: explorer.r };
-        const { ordersUsed } = helper.explore(gameState, explorer, null, false, targetedCells);
+        const { ordersUsed } = actions.explore(explorer, null, false, targetedCells);
         if (ordersUsed > 0) {
             involvedCells.push(startingCell, explorer.cell);
             return true;

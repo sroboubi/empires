@@ -29,6 +29,7 @@ import { MenuHarness } from '../llm/menu/harness.js';
 import { Player } from '../../player.js';
 import { AiHelper } from '../../aiHelper.js';
 import { createAiManager } from '../../aiInterfaceProxy.js';
+import { ActionApi } from '../actions.js';
 
 let passed = 0, failed = 0;
 function test(name, fn) {
@@ -969,7 +970,7 @@ await asyncTest('trade-offer evaluation returns a validated emote with the decis
     assertEqual(accepted.emote, 'neutral', 'unapproved emote falls back to neutral');
 });
 
-// --- Pacing contract: after an action, onActionDone is mandatory ---
+// --- Pacing contract: direct action.do + onActionDone ---
 
 class PacingTurnAi {
     constructor(player, helper) {
@@ -984,9 +985,6 @@ function pacingFixture(ManagerClass = DummyStrategicAi) {
     const helper = new AiHelper(gs);
     helper.aiLog = () => {};
     helper.onActionDone = async () => {};
-    // Stub a successful attack (1 order used) — these tests exercise the
-    // proxy's pacing contract, not AiHelper's combat logic.
-    helper.attack = () => ({ ordersUsed: 1, result: { status: 'completed' } });
     const unit = {
         id: 7, name: 'Unit', health: 10, cell: { q: 0, r: 0 }, ownerId: 1,
         active: true,
@@ -1008,35 +1006,39 @@ function pacingFixture(ManagerClass = DummyStrategicAi) {
     return { gs, mgr, unit, helper };
 }
 
+function firstAction(mgr) {
+    return mgr.player.getEntities()[0].getActions()[0];
+}
+
 await asyncTest('pacing: a second action without onActionDone throws; reads stay allowed', async () => {
-    const { gs, mgr, unit } = pacingFixture();
-    mgr.helper.attack(gs, unit, unit, 1);
+    const { mgr } = pacingFixture();
+    const action = firstAction(mgr);
+    action.do();
     // Reads are allowed while an action is pending.
     mgr.helper.getConfig();
     assertEqual(mgr.player.orders, 5, 'property reads are not blocked');
     mgr.helper.aiLog(mgr.player, 'test', 'logging is not blocked');
     // A second action is blocked until onActionDone.
     let threw = false;
-    try { mgr.helper.attack(gs, unit, unit, 1); } catch (e) { threw = /Pacing violation/.test(e.message); }
+    try { action.do(); } catch (e) { threw = /Pacing violation/.test(e.message); }
     assert(threw, 'second action without onActionDone must throw a pacing violation');
-    await mgr.helper.onActionDone(gs, null, 'test action');
-    mgr.helper.attack(gs, unit, unit, 1); // cleared — must not throw
-    await mgr.helper.onActionDone(gs, null, 'test action 2');
+    await mgr.helper.onActionDone(mgr.gameState, null, 'test action');
+    action.do(); // cleared — must not throw
+    await mgr.helper.onActionDone(mgr.gameState, null, 'test action 2');
 });
 
 await asyncTest('pacing: onActionDone without a pending action is fine', async () => {
-    const { gs, mgr } = pacingFixture();
-    await mgr.helper.onActionDone(gs, null, 'nothing happened');
+    const { mgr } = pacingFixture();
+    await mgr.helper.onActionDone(mgr.gameState, null, 'nothing happened');
     mgr.helper.getConfig();
 });
 
-await asyncTest('pacing: a failed action (0 orders) does not set the pending flag', async () => {
-    const { gs, mgr, unit, helper } = pacingFixture();
-    // Replace the stub with a failing attack: nothing happened, so the next
-    // action is not blocked and needs no onActionDone.
-    helper.attack = () => ({ ordersUsed: 0, result: { status: 'failed' } });
-    mgr.helper.attack(gs, unit, unit, 1);
-    mgr.helper.attack(gs, unit, unit, 1); // must not throw
+await asyncTest('pacing: a failed action.do (false) does not set the pending flag', async () => {
+    const { mgr, unit } = pacingFixture();
+    unit.getActions = () => [{ name: 'Noop', canDo: () => ({ possible: true }), do: () => false }];
+    const action = firstAction(mgr);
+    assertEqual(action.do(), false, 'failed action returns false');
+    action.do(); // must not throw
 });
 
 await asyncTest('pacing: trade methods do not set the pending flag', async () => {
@@ -1046,114 +1048,97 @@ await asyncTest('pacing: trade methods do not set the pending flag', async () =>
 });
 
 await asyncTest('pacing: entity action.do sets the pending flag', async () => {
-    const { gs, mgr } = pacingFixture();
-    const entities = mgr.player.getEntities();
-    const actions = entities[0].getActions();
-    actions[0].do();
+    const { mgr } = pacingFixture();
+    const action = firstAction(mgr);
+    action.do();
     // Reads stay allowed while pending.
     mgr.player.getEntities();
-    // A second action.do is blocked until onActionDone.
     let threw = false;
-    try { actions[0].do(); } catch (e) { threw = /Pacing violation/.test(e.message); }
+    try { action.do(); } catch (e) { threw = /Pacing violation/.test(e.message); }
     assert(threw, 'second action.do without onActionDone must throw a pacing violation');
-    await mgr.helper.onActionDone(gs, null, 'move');
-    actions[0].do(); // cleared — must not throw
-    await mgr.helper.onActionDone(gs, null, 'move 2');
-});
-
-
-await asyncTest('pacing: async helper action stays pending until onActionDone', async () => {
-    const { gs, mgr, unit, helper } = pacingFixture();
-    helper.attack = async () => ({ ordersUsed: 1, result: { status: 'completed' } });
-    await mgr.helper.attack(gs, unit, unit, 1);
-    let threw = false;
-    try { await mgr.helper.attack(gs, unit, unit, 1); } catch (e) { threw = /Pacing violation/.test(e.message); }
-    assert(threw, 'second async action without onActionDone must throw');
-    await mgr.helper.onActionDone(gs, null, 'async action');
-    await mgr.helper.attack(gs, unit, unit, 1);
-    await mgr.helper.onActionDone(gs, null, 'async action 2');
-});
-
-await asyncTest('pacing: onActionDone waits for an un-awaited helper call to complete', async () => {
-    const { gs, mgr, unit, helper } = pacingFixture();
-    const order = [];
-    helper.attack = async () => {
-        await new Promise(r => setTimeout(r, 10));
-        order.push('attack done');
-        return { ordersUsed: 1, result: { status: 'completed' } };
-    };
-    // Fire without awaiting, then await onActionDone: it must not resolve
-    // until the helper call has fully completed.
-    mgr.helper.attack(gs, unit, unit, 1);
-    await mgr.helper.onActionDone(gs, null, 'un-awaited attack');
-    order.push('onActionDone done');
-    assertEqual(order, ['attack done', 'onActionDone done'], 'onActionDone waits for the in-flight helper');
-    // Flag cleared after the wait: the next action is allowed.
-    await mgr.helper.attack(gs, unit, unit, 1);
-    await mgr.helper.onActionDone(gs, null, 'second attack');
-});
-
-await asyncTest('pacing: action while helper in flight and onActionDone not awaited throws', async () => {
-    const { gs, mgr, unit, helper } = pacingFixture();
-    helper.attack = async () => {
-        await new Promise(r => setTimeout(r, 10));
-        return { ordersUsed: 1, result: { status: 'completed' } };
-    };
-    mgr.helper.attack(gs, unit, unit, 1); // un-awaited, still in flight
-    mgr.helper.onActionDone(gs, null, 'not awaited'); // also un-awaited
-    // The flag clears only after the in-flight helper settles, so an
-    // immediate second action still throws.
-    let threw = false;
-    try { mgr.helper.attack(gs, unit, unit, 1); } catch (e) { threw = /Pacing violation/.test(e.message); }
-    assert(threw, 'second action before onActionDone settles must throw');
-    await mgr.helper.onActionDone(gs, null, 'cleanup');
-});
-
-await asyncTest('pacing: failed async helper action clears its own pending flag', async () => {
-    const { gs, mgr, unit, helper } = pacingFixture();
-    helper.attack = async () => ({ ordersUsed: 0, result: { status: 'failed' } });
-    await mgr.helper.attack(gs, unit, unit, 1);
-    await mgr.helper.attack(gs, unit, unit, 1); // must not throw
-});
-
-await asyncTest('pacing: a rejecting async helper clears its pending flag', async () => {
-    const { gs, mgr, unit, helper } = pacingFixture();
-    helper.attack = async () => { throw new Error('boom'); };
-    let threw = false;
-    try { await mgr.helper.attack(gs, unit, unit, 1); } catch (e) { threw = /boom/.test(e.message); }
-    assert(threw, 'async helper rejection propagates');
-    helper.attack = () => ({ ordersUsed: 1, result: { status: 'completed' } });
-    mgr.helper.attack(gs, unit, unit, 1); // pending was cleared on reject
-    await mgr.helper.onActionDone(gs, null, 'after reject');
-});
-
-await asyncTest('pacing: moveAlongPath sets the pending flag when it moves', async () => {
-    const { mgr, unit, helper } = pacingFixture();
-    helper.moveAlongPath = () => 1;
-    helper.attack = () => ({ ordersUsed: 1, result: { status: 'completed' } });
-    mgr.helper.moveAlongPath(mgr.player, unit, { name: 'Move' }, [], {});
-    let threw = false;
-    try { mgr.helper.attack(mgr.gameState, unit, unit, 1); } catch (e) { threw = /Pacing violation/.test(e.message); }
-    assert(threw, 'moveAlongPath requires onActionDone before the next action');
-    await mgr.helper.onActionDone(mgr.gameState, null, 'moved');
+    await mgr.helper.onActionDone(mgr.gameState, null, 'move');
+    action.do(); // cleared — must not throw
+    await mgr.helper.onActionDone(mgr.gameState, null, 'move 2');
 });
 
 await asyncTest('pacing: starting a new turn clears a leaked pending action', async () => {
-    const { gs, mgr, unit } = pacingFixture(PacingTurnAi);
-    mgr.helper.attack(gs, unit, unit, 1); // leave pending, as if the AI threw before onActionDone
+    const { mgr } = pacingFixture(PacingTurnAi);
+    const action = firstAction(mgr);
+    action.do(); // leave pending, as if the AI threw before onActionDone
     await mgr.processTurn();
-    mgr.helper.attack(gs, unit, unit, 1); // must not throw after the turn reset
-    await mgr.helper.onActionDone(gs, null, 'recovered');
+    action.do(); // must not throw after the turn reset
+    await mgr.helper.onActionDone(mgr.gameState, null, 'recovered');
+});
+
+// --- AI action composites (src/ai/actions.js) ---
+
+await asyncTest('ActionApi.build paces the walk before placing the structure', async () => {
+    let done = 0, moved = 0, built = 0;
+    const helper = {
+        getConfig: () => ({ buildMaxDistance: 10, buildDistancePenalty: 0.2 }),
+        findBuildCandidates: () => ({
+            candidates: [{ cell: { q: 1, r: 0 }, dist: 1, yield: 1, stage: { path: [{ q: 1, r: 0 }] } }],
+            canonicalName: 'Farm',
+        }),
+        camelToTitle: s => s,
+        aiLog: () => {},
+        distance: () => 1,
+        onActionDone: async () => { done++; },
+    };
+    const gameState = { hexGrid: {}, getEntityAt: () => null };
+    const move = { name: 'Move', canDo: () => ({ possible: true }), do: () => { moved++; return true; } };
+    const build = { name: 'Build Farm', canDo: () => ({ possible: true }), do: () => { built++; return true; } };
+    const builder = {
+        active: true, name: 'Worker', q: 0, r: 0,
+        owner: { orders: 5 }, actionPoints: 1, cell: { q: 0, r: 0 },
+        getActions: () => [move, build],
+        getMovementCost: () => 1,
+    };
+    const api = new ActionApi({ name: 'Blue' }, gameState, helper);
+    const res = await api.build(builder, 'Farm');
+    assertEqual(res.ordersUsed, 2, 'move + build both spent an order');
+    assertEqual(moved, 1, 'builder moved once');
+    assertEqual(built, 1, 'build executed once');
+    assertEqual(done, 1, 'walk was paced before the build');
+});
+
+await asyncTest('ActionApi.build leaves a walk-only step to the caller', async () => {
+    let done = 0, built = 0;
+    const helper = {
+        getConfig: () => ({ buildMaxDistance: 10, buildDistancePenalty: 0.2 }),
+        findBuildCandidates: () => ({
+            candidates: [{ cell: { q: 3, r: 0 }, dist: 3, yield: 1, stage: { path: [{ q: 1, r: 0 }, { q: 2, r: 0 }, { q: 3, r: 0 }] } }],
+            canonicalName: 'Farm',
+        }),
+        camelToTitle: s => s,
+        aiLog: () => {},
+        distance: () => 3,
+        onActionDone: async () => { done++; },
+    };
+    const gameState = { hexGrid: {}, getEntityAt: () => null };
+    const move = { name: 'Move', canDo: () => ({ possible: true }), do: () => true };
+    const build = { name: 'Build Farm', canDo: () => ({ possible: true }), do: () => { built++; return true; } };
+    const builder = {
+        active: true, name: 'Worker', q: 0, r: 0,
+        owner: { orders: 5 }, actionPoints: 1, cell: { q: 0, r: 0 },
+        getActions: () => [move, build],
+        getMovementCost: () => 1,
+    };
+    const api = new ActionApi({ name: 'Blue' }, gameState, helper);
+    const res = await api.build(builder, 'Farm');
+    assertEqual(res.ordersUsed, 1, 'walk-only step spent one order');
+    assertEqual(built, 0, 'build did not run while still travelling');
+    assertEqual(done, 0, 'walk-only step is paced by the caller, not internally');
 });
 
 await asyncTest('Fable build pacing: move-only step leaves pacing to the caller', async () => {
     let done = 0;
     const fable = Object.create(FableAi.prototype);
     fable.helper = {
-        moveAlongPath: () => 1,
         distance: () => 2,
         onActionDone: async () => { done++; },
     };
+    fable.actions = { moveAlongPath: () => 1 };
     fable.gameState = {};
     fable.player = { orders: 5 };
     fable.memory = { projects: new Map() };
@@ -1172,10 +1157,10 @@ await asyncTest('Fable build pacing: move+build waits exactly once before buildi
     let built = 0;
     const fable = Object.create(FableAi.prototype);
     fable.helper = {
-        moveAlongPath: () => 1,
         distance: () => 1,
         onActionDone: async () => { done++; },
     };
+    fable.actions = { moveAlongPath: () => 1 };
     fable.gameState = {};
     fable.player = { orders: 5 };
     fable.memory = { projects: new Map() };
@@ -1190,60 +1175,6 @@ await asyncTest('Fable build pacing: move+build waits exactly once before buildi
     assertEqual(result, null, 'build succeeded');
     assertEqual(done, 1, 'one internal onActionDone between move and build');
     assertEqual(built, 1, 'build executed once');
-});
-
-await asyncTest('helper.build paces the walk before placing the structure', async () => {
-    let done = 0;
-    const helper = new AiHelper({});
-    helper.getConfig = () => ({ buildMaxDistance: 10, buildDistancePenalty: 0.2 });
-    helper.findBuildCandidates = () => ({
-        candidates: [{ cell: { q: 1, r: 0 }, dist: 1, yield: 1, stage: { path: [{ q: 1, r: 0 }] } }],
-        canonicalName: 'Farm',
-    });
-    helper.camelToTitle = s => s;
-    helper.aiLog = () => {};
-    helper.moveAlongPath = () => 1;
-    helper.distance = () => 1;
-    helper.onActionDone = async () => { done++; };
-    const move = { name: 'Move', do: () => true };
-    const build = { name: 'Build Farm', canDo: () => ({ possible: true }), do: () => true };
-    const builder = {
-        active: true, name: 'Worker', q: 0, r: 0,
-        owner: { orders: 5 }, actionPoints: 1, cell: { q: 0, r: 0 },
-        getActions: () => [move, build],
-        getMovementCost: () => 1,
-    };
-    const gs = { hexGrid: {}, getEntityAt: () => null };
-    const res = await helper.build(gs, builder, 'Farm');
-    assertEqual(res.ordersUsed, 2, 'move + build both spent an order');
-    assertEqual(done, 1, 'walk was paced before the build');
-});
-
-await asyncTest('helper.build leaves a walk-only step to the caller', async () => {
-    let done = 0;
-    const helper = new AiHelper({});
-    helper.getConfig = () => ({ buildMaxDistance: 10, buildDistancePenalty: 0.2 });
-    helper.findBuildCandidates = () => ({
-        candidates: [{ cell: { q: 3, r: 0 }, dist: 3, yield: 1, stage: { path: [{ q: 1, r: 0 }, { q: 2, r: 0 }, { q: 3, r: 0 }] } }],
-        canonicalName: 'Farm',
-    });
-    helper.camelToTitle = s => s;
-    helper.aiLog = () => {};
-    helper.moveAlongPath = () => 1;
-    helper.distance = () => 3;
-    helper.onActionDone = async () => { done++; };
-    const move = { name: 'Move', do: () => true };
-    const build = { name: 'Build Farm', canDo: () => ({ possible: true }), do: () => true };
-    const builder = {
-        active: true, name: 'Worker', q: 0, r: 0,
-        owner: { orders: 5 }, actionPoints: 1, cell: { q: 0, r: 0 },
-        getActions: () => [move, build],
-        getMovementCost: () => 1,
-    };
-    const gs = { hexGrid: {}, getEntityAt: () => null };
-    const res = await helper.build(gs, builder, 'Farm');
-    assertEqual(res.ordersUsed, 1, 'walk-only step spent one order');
-    assertEqual(done, 0, 'walk-only step is paced by the caller, not internally');
 });
 
 console.log(`\nstrategic.test.js: ${passed} passed, ${failed} failed`);

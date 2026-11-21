@@ -837,7 +837,7 @@ export default class FableAi extends BaseManager {
         const route = helper.movementCostTo(u.e.cell, target, (c) => u.e.getMovementCost(c), { allowDetours: true });
         const path = route ? toArray(route.path).slice(1) : [];
         if (path.length === 0) return 'no path toward the target';
-        return helper.moveAlongPath(player, u.e, this.moveAction(u), path, gameState, category, reason) ? null : 'could not move along the path';
+        return this.actions.moveAlongPath(u.e, this.moveAction(u), path, category, reason) ? null : 'could not move along the path';
     }
 
     async runBuild(o, site) {
@@ -847,7 +847,7 @@ export default class FableAi extends BaseManager {
         const startCell = { q: u.e.q, r: u.e.r };
         let moved = false;
         if (site.path.length > 0) {
-            moved = helper.moveAlongPath(player, u.e, this.moveAction(u), site.path, gameState, 'build',
+            moved = this.actions.moveAlongPath(u.e, this.moveAction(u), site.path, 'build',
                 `heading to build ${t.name} at (${site.pos.q},${site.pos.r})`);
             if (!moved) {
                 projects.delete(u.id);
@@ -874,7 +874,7 @@ export default class FableAi extends BaseManager {
 
     /**
      * What `u` could do to `f` this turn: moves needed, attacks that fit in its AP, damage.
-     * Used to VALUE the engagement only; legality stays with helper.attack (addendum #2).
+     * Used to VALUE the engagement only; legality stays with actions.attack (addendum #2).
      */
     estimateStrike(u, f) {
         const t = u.type;
@@ -935,7 +935,7 @@ export default class FableAi extends BaseManager {
                     key: `attack:${u.id}:${f.id}`, unit: u, category: 'combat', value, orders,
                     text: `${this.tag(u)} attacks ${this.tag(f)}: ${why}${f.attackedUs ? ', it attacked us' : ''}; ${plan}`,
                     run: async () => {
-                        const result = await helper.attack(gameState, u.e, f.e, Math.max(1, Math.min(player.orders, orders)));
+                        const result = await this.actions.attack(u.e, f.e, Math.max(1, Math.min(player.orders, orders)));
                         return result.ordersUsed > 0 ? null : (result.result?.message || 'attack not possible');
                     },
                 });
@@ -967,7 +967,7 @@ export default class FableAi extends BaseManager {
                     key: `repair:${u.id}:${a.id}`, unit: u, category: 'build', value, orders: d > 1 ? 2 : 1,
                     text: `${this.tag(u)} repairs ${this.tag(a)} (${Math.round(a.hp)}/${a.maxHp} HP${idle ? ', not yielding' : ''}${heavy ? ', heavily damaged' : ''})`,
                     run: async () => {
-                        const result = await helper.support(gameState, u.e, a.e, ACTION.repair, 2);
+                        const result = await this.actions.support(u.e, a.e, ACTION.repair, 2);
                         return result.ordersUsed > 0 ? null : (result.result?.message || 'repair not possible');
                     },
                 });
@@ -1100,21 +1100,21 @@ export default class FableAi extends BaseManager {
             this.turn.claimed.add('-'); // marks the set as initialised
         }
         if (forTreasure) {
-            const result = helper.explore(gameState, u.e, null, true, this.turn.claimed);
+            const result = this.actions.explore(u.e, null, true, this.turn.claimed);
             return result.ordersUsed > 0 ? null : result.result?.message;
         }
         const anchor = this.goalAnchor(['explore']);
         let direction = anchor ? helper.directionTo(u.e.cell, anchor).fromSource : this.memory.exploreDir.get(u.id);
         if (!direction) direction = this.pickDirection(u);
         if (direction) {
-            const result = helper.explore(gameState, u.e, direction, false, this.turn.claimed);
+            const result = this.actions.explore(u.e, direction, false, this.turn.claimed);
             if (result.ordersUsed > 0) {
                 this.memory.exploreDir.set(u.id, direction);
                 return null;
             }
             this.memory.exploreDir.delete(u.id); // that direction is exhausted or unreachable: re-pick next time
         }
-        const result = helper.explore(gameState, u.e, null, false, this.turn.claimed);
+        const result = this.actions.explore(u.e, null, false, this.turn.claimed);
         return result.ordersUsed > 0 ? null : result.result?.message;
     }
 

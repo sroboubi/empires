@@ -53,7 +53,7 @@ const DEFAULT_BIG_PICKLE_CONFIG = {
 
     // --- Combat tempo -----------------------------------------------------
     // Two orders allow a unit to move into range and attack in one sequence.
-    // helper.attack() spends nothing when the target is unreachable, so this
+    // actions.attack() spends nothing when the target is unreachable, so this
     // does not burn orders on hopeless targets.
     combatOrders: 2,
     emergencyCombatOrders: 2,
@@ -583,8 +583,7 @@ export class BigPickleManager extends AdaptiveManager {
 
             for (const attacker of candidates) {
                 const from = { q: attacker.q, r: attacker.r };
-                const result = await this.helper.attack(
-                    this.gameState,
+                const result = await this.actions.attack(
                     attacker,
                     target,
                     this.getCombatOrderBudget(true)
@@ -622,8 +621,7 @@ export class BigPickleManager extends AdaptiveManager {
 
             for (const attacker of candidates) {
                 const from = { q: attacker.q, r: attacker.r };
-                const result = await this.helper.attack(
-                    this.gameState,
+                const result = await this.actions.attack(
                     attacker,
                     target,
                     this.getCombatOrderBudget(item.isThreat)
@@ -1138,8 +1136,7 @@ export class BigPickleManager extends AdaptiveManager {
 
             for (const entry of ranked) {
                 const from = { q: explorer.q, r: explorer.r };
-                const result = this.helper.explore(
-                    this.gameState,
+                const result = this.actions.explore(
                     explorer,
                     entry.direction,
                     false,
@@ -1168,8 +1165,7 @@ export class BigPickleManager extends AdaptiveManager {
         // take a directional path (still respects per-turn claimed cells).
         for (const explorer of explorers) {
             const from = { q: explorer.q, r: explorer.r };
-            const result = this.helper.explore(
-                this.gameState,
+            const result = this.actions.explore(
                 explorer,
                 null,
                 false,

@@ -26,7 +26,7 @@ this to anyone — human or AI — before they write or "fix" AI logic.
    badly — don't forbid it. The old conditional code (builders explore only
    when nothing is urgent or threatening) was the author's choice, not a bug.
 2. **Duplicating engine guarantees (B2 — reverted).** A `canAttackTarget`
-   pre-check duplicated what `helper.attack` already does: close distance
+   pre-check duplicated what `actions.attack` already does: close distance
    if possible, burn nothing if not. Before adding a guard, verify what the
    engine/helper already guarantees — a redundant check only removes useful
    behavior (here: units that would have closed distance).

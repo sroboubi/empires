@@ -9,7 +9,7 @@ This test plan provides comprehensive verification procedures for human manual t
 Verify that:
 1. **Architectural Separation**: AI controllers and base classes in `src/ai/` have zero dependencies on or imports of `aiInterfaceProxy.js`. The proxy wrapper is instantiated cleanly via `createAiManager` in `src/player.js`.
 2. **Direct State Mutations are Blocked (WRITE Protection)**: Any attempt by AI controllers to mutate game state (player resources, orders, entity HP/AP, cell properties, game round) throws an explicit `Error`.
-3. **Action Legality is Enforced**: An AI can only call `action.do()` on entities it owns; attempting to command enemy/neutral entities directly or via `helper.attack()` throws an `Error`.
+3. **Action Legality is Enforced**: An AI can only call `action.do()` on entities it owns; attempting to command enemy/neutral entities directly or via the AI action composites throws an `Error`.
 4. **Fog of War & Privacy are Maintained (READ Visibility)**:
    - Entities outside visible cells do not appear in `gameState.entities`, `getEntityAt()`, or `getEntityById()`.
    - Terrain and resources of unexplored cells return `undefined`.
@@ -90,7 +90,7 @@ const ai = await p1.getAiManager();
    - **Expected**: Throws `Error: [AI Interface] Illegal action: AI '<name>' attempted to execute action "Move" on entity "<enemyName>" owned by another player.`
 
 3. **Helper Action Ownership Check (Gap 4)**:
-   - **Action**: Run `await ai.helper.attack(ai.gameState, enemy, unit);`
+   - **Action**: Run `await ai.actions.attack(enemy, unit);`
    - **Expected**: Throws `Error: [AI Interface] Illegal action: AI '<name>' cannot command entity "<enemyName>" owned by another player.`
 
 ---

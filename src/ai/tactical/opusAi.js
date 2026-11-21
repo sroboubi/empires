@@ -1239,7 +1239,7 @@ export default class OpusAI extends BaseManager {
     async execAttack(u, t, orders, value, plan, team) {
         const from = this.where(u);
         const hpBefore = t.e.health;
-        const res = await this.helper.attack(this.gameState, u.e, t.e, orders);
+        const res = await this.actions.attack(u.e, t.e, orders);
         this.log(`ATTACK ${this.label(t)} with ${u.name} from ${from} (stance ${this.stanceOf(t.ownerId)}, threat ${t.risk.toFixed(2)}, value ${value.toFixed(2)}, plan ${plan.hits} hit(s) from (${plan.pos}), team damage ${Math.round(team)}): ${res?.result?.message} [hp ${Math.round(hpBefore)} -> ${t.e.destroyed ? 0 : Math.round(t.e.health)}]`);
         return res?.ordersUsed || 0;
     }
@@ -1285,7 +1285,7 @@ export default class OpusAI extends BaseManager {
                     kind: 'repair', key: `repair:${rp.id}:${t.id}`, value: v, orders: adj ? 1 : 2,
                     exec: async () => {
                         const from = this.where(rp);
-                        const res = await this.helper.support(this.gameState, rp.e, t.e, 'Repair', adj ? 1 : 2);
+                        const res = await this.actions.support(rp.e, t.e, 'Repair', adj ? 1 : 2);
                         this.log(`REPAIR ${this.label(t)} hp ${Math.round(t.hp)}/${t.maxHp} by ${rp.name} from ${from} (value ${v.toFixed(2)}${lostYield ? ', restores yields' : ''}${heavy ? (threatened ? ', under attack' : ', heavily damaged') : ''}): ${res?.result?.message}`);
                         return res?.ordersUsed || 0;
                     },
@@ -1461,7 +1461,7 @@ export default class OpusAI extends BaseManager {
         const cells = [];
         for (const k of path) { const [q, r] = parseK(k); const c = this.helper.getCell(q, r); if (c) cells.push(c); }
         const from = this.where(u);
-        const used = this.helper.moveAlongPath(this.player, u.e, u.move, cells, this.gameState, 'explore', why);
+        const used = this.actions.moveAlongPath(u.e, u.move, cells, 'explore', why);
         if (used) this.log(`MOVE ${u.name}#${String(u.id).split('_').pop()} ${from} -> (${u.e.q},${u.e.r}): ${why}`);
         return used;
     }

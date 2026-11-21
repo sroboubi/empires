@@ -106,7 +106,7 @@ The AI expands economically, defends its territory, explores opportunistically, 
 ## Implementation Notes
 
 - The tactical AI is constructed as `new TacticalAI(player, aiHelper)` (or other classname) and is a subclass of baseManager. It reads `player.controller.directive` (or equivalent) at the start of each `processTurn()`.  
-- The `AiHelper` provides all game interactions: `helper.build(...)`, `helper.attack(...)`, `helper.move(...)`, `helper.findBuildCandidates(...)`, etc. The tactical AI never imports game code directly.
+- The `AiHelper` provides all game interactions: `actions.build(...)`, `actions.attack(...)`, `actions.moveAlongPath(...)`, `helper.findBuildCandidates(...)`, etc. The tactical AI never imports game code directly.
 - Directives are read fresh each turn — the LLM can update them mid-game.  
 - The tactical AI must always respect hard constraints: orders available, AP, build validity, movement rules. Directives influence *choices*, never *legality*.  
 - The strategic counterpart (Phase 26) is `src/ai/strategic/base.js`. It runs once per turn, before the tactical AI, and RETURNS the directive; `Player.step()` stores a non-null return on `player.controller.directive` (the AI proxy is read-only). A null or invalid return keeps the last valid directive. The strategic AI also owns chat and trade for that player.
