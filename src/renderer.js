@@ -714,35 +714,50 @@ export function isEntityMoving(entityId) {
 
 const moveAnimationWaiters = [];
 const moveAnimationEndCallbacks = [];
+const MOVE_ANIMATION_WAIT_TIMEOUT_MS = 30000;
 
 /**
  * Resolves once no entity move animations are running. Used by the AI
  * pacing hook (onActionDone) so the next AI action waits until every mesh
- * has caught up with its logical position.
+ * has caught up with its logical position. A timeout keeps a stuck or
+ * background-paused animation from blocking the turn forever.
  */
-export function waitForMoveAnimations() {
+export function waitForMoveAnimations(timeoutMs = MOVE_ANIMATION_WAIT_TIMEOUT_MS) {
   if (entityMoveStates.size === 0) return Promise.resolve();
-  return new Promise(resolve => moveAnimationWaiters.push(resolve));
+  return new Promise(resolve => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      const index = moveAnimationWaiters.indexOf(finish);
+      if (index !== -1) moveAnimationWaiters.splice(index, 1);
+      console.warn(`[renderer] move animation wait timed out after ${timeoutMs}ms`);
+      finish();
+    }, timeoutMs);
+    moveAnimationWaiters.push(finish);
+  });
 }
 
 /**
- * Registers a callback invoked with the entity id whenever a move animation
- * finishes naturally (not when cancelled). Used by the input layer to
- * re-select a unit after its walk completes.
+ * Registers a callback invoked with `(entityId, finished)` whenever a move
+ * animation ends. `finished` is false for cancellations. Used by the input
+ * layer to re-select a unit after its walk completes.
  */
 export function onMoveAnimationEnd(callback) {
   moveAnimationEndCallbacks.push(callback);
 }
 
 function notifyMoveAnimationEnded(entityId, finished) {
-  if (finished) {
-    for (const cb of moveAnimationEndCallbacks) {
-      try { cb(entityId); } catch (e) { console.error('[renderer] move-end callback failed:', e); }
-    }
+  for (const cb of moveAnimationEndCallbacks) {
+    try { cb(entityId, finished); } catch (e) { console.error('[renderer] move-end callback failed:', e); }
   }
   if (entityMoveStates.size === 0 && moveAnimationWaiters.length > 0) {
     const waiters = moveAnimationWaiters.splice(0);
-    for (const resolve of waiters) resolve();
+    for (const finish of waiters) finish();
   }
 }
 

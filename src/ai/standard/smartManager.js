@@ -207,7 +207,7 @@ async function handleCriticalDeficits(player, gameState, manifest, myEntities, e
 
             const startingCell = { q: builder.q, r: builder.r };
             helper.aiLog(player, 'build', `STABILIZE: Using ${builder.name} at (${builder.q},${builder.r}) to build ${helper.camelToTitle(target)}${step.directTarget !== target ? ` (prerequisite for ${helper.camelToTitle(step.directTarget)})` : ''} to resolve ${need.res} shortage.`);
-            const { ordersUsed } = helper.build(gameState, builder, target);
+            const { ordersUsed } = await helper.build(gameState, builder, target);
             if (ordersUsed > 0) {
                 involvedCells.push(startingCell, builder.cell);
                 return true;
@@ -310,7 +310,7 @@ async function handleCombatAndThreats(player, gameState, manifest, myEntities, i
 
                 const startingCell = { q: warrior.q, r: warrior.r };
                 helper.aiLog(player, 'combat', `Retaliating: Deploying closer unit ${warrior.name} at (${warrior.q},${warrior.r}) (dist: ${dist}, AP: ${warrior.actionPoints}) against revenge target ${target.name} at (${target.q},${target.r}).`);
-                const { ordersUsed } = helper.attack(gameState, warrior, target, player.orders);
+                const { ordersUsed } = await helper.attack(gameState, warrior, target, player.orders);
                 if (ordersUsed > 0) {
                     const status = target.destroyed || target.health <= 0
                         ? 'TARGET DESTROYED'
@@ -360,7 +360,7 @@ async function handleCombatAndThreats(player, gameState, manifest, myEntities, i
 
                     const startingCell = { q: warrior.q, r: warrior.r };
                     helper.aiLog(player, 'combat', `Tactical Strike: Deploying closer unit ${warrior.name} at (${warrior.q},${warrior.r}) (dist: ${dist}, AP: ${warrior.actionPoints}) targeting ${target.owner?.name || 'Enemy'}'s ${target.name} at (${target.q},${target.r}).`);
-                    const { ordersUsed } = helper.attack(gameState, warrior, target, player.orders);
+                    const { ordersUsed } = await helper.attack(gameState, warrior, target, player.orders);
                     if (ordersUsed > 0) {
                         const status = target.destroyed || target.health <= 0
                             ? 'TARGET DESTROYED'
@@ -390,7 +390,7 @@ async function handleCombatAndThreats(player, gameState, manifest, myEntities, i
                     const cost = player.getSpawnCost(target);
                     if (player.hasResources && player.hasResources(cost)) {
                         helper.aiLog(player, 'combat', `Threat Defense: Lack military to engage threats! Spawning military defender ${helper.camelToTitle(target)} via ${builder.name} at (${builder.q},${builder.r}).`);
-                        const { ordersUsed } = helper.build(gameState, builder, target);
+                        const { ordersUsed } = await helper.build(gameState, builder, target);
                         if (ordersUsed > 0) return true;
                     }
                 }
@@ -412,7 +412,7 @@ async function handleCombatAndThreats(player, gameState, manifest, myEntities, i
 
                         const startingCell = { q: fighter.q, r: fighter.r };
                         helper.aiLog(player, 'warn', `Emergency Defense: Adjacent enemy ${adj.name} at (${adj.q},${adj.r})! Fighting back with ${fighter.name} at (${fighter.q},${fighter.r}) (AP: ${fighter.actionPoints}).`);
-                        const { ordersUsed } = helper.attack(gameState, fighter, adj, player.orders);
+                        const { ordersUsed } = await helper.attack(gameState, fighter, adj, player.orders);
                         if (ordersUsed > 0) {
                             const status = adj.destroyed || adj.health <= 0
                                 ? 'TARGET DESTROYED'
@@ -453,7 +453,7 @@ async function handleHeavyRepairs(player, gameState, myEntities, involvedCells, 
         for (const target of myTargets) {
             const startingCell = { q: repairer.q, r: repairer.r };
             helper.aiLog(player, 'build', `Repairing critical damage: ${repairer.name} at (${repairer.q},${repairer.r}) restoring ${target.name} at (${target.q},${target.r}) (HP: ${Math.round(target.health)}/${target.maxHealth})`);
-            const { ordersUsed } = helper.support(gameState, repairer, target, "Repair", player.orders);
+            const { ordersUsed } = await helper.support(gameState, repairer, target, "Repair", player.orders);
             if (ordersUsed > 0) {
                 involvedCells.push(startingCell, repairer.cell);
                 return true;
@@ -567,7 +567,7 @@ async function handleProactiveGrowth(player, gameState, manifest, myEntities, ev
     for (const { builder, targetName, roi } of scored) {
         const startingCell = { q: builder.q, r: builder.r };
         helper.aiLog(player, 'build', `Proactive Expansion: ${builder.name} at (${builder.q},${builder.r}) building ${helper.camelToTitle(targetName)} (ROI: ${roi.toFixed(2)}).`);
-        const { ordersUsed } = helper.build(gameState, builder, targetName);
+        const { ordersUsed } = await helper.build(gameState, builder, targetName);
         if (ordersUsed > 0) {
             involvedCells.push(startingCell, builder.cell);
             return true;

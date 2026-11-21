@@ -206,42 +206,42 @@ export class AdaptiveManager extends BaseManager {
             let actionLabel = null;
 
             // 1. Immediate self-defence: kill or evade an adjacent/attacking enemy.
-            if (this.attemptEmergencyDefense(econ, involvedCells)) {
+            if (await this.attemptEmergencyDefense(econ, involvedCells)) {
                 actionLabel = 'Emergency defence';
             }
             // 2. Resource deadlock prevention.
-            else if (this.attemptCriticalDeficits(econ, involvedCells)) {
+            else if (await this.attemptCriticalDeficits(econ, involvedCells)) {
                 actionLabel = 'Critical deficit recovery';
             }
             // 3. General combat under stance rules.
-            else if (this.attemptCombat(econ, involvedCells)) {
+            else if (await this.attemptCombat(econ, involvedCells)) {
                 actionLabel = 'Combat';
             }
             // 4. Retreat vulnerable non-combat units away from threats.
-            else if (this.attemptRetreats(econ, involvedCells, false)) {
+            else if (await this.attemptRetreats(econ, involvedCells, false)) {
                 actionLabel = 'Retreat';
             }
             // 5. Heavy repairs only.
-            else if (this.attemptRepairs(econ, involvedCells)) {
+            else if (await this.attemptRepairs(econ, involvedCells)) {
                 actionLabel = 'Repair';
             }
             // 6. Directive goals, in priority order.
-            else if (this.processGoals(econ, involvedCells)) {
+            else if (await this.processGoals(econ, involvedCells)) {
                 actionLabel = 'Directive goal';
             }
             // 7. If exploration is the weakest pillar, spend at least one
             // action on it before build orders consume the whole turn.
             else if (this.shouldPrioritizeExploration(econ)
-                && this.attemptExploration(econ, involvedCells, { excludeSupport: true })) {
+                && (await this.attemptExploration(econ, involvedCells, { excludeSupport: true }))) {
                 this.turnState.prioritizedExplorations += 1;
                 actionLabel = 'Prioritized exploration';
             }
             // 8. Proactive economic/military growth.
-            else if (this.attemptProactiveBuild(econ, { involvedCells })) {
+            else if (await this.attemptProactiveBuild(econ, { involvedCells })) {
                 actionLabel = 'Proactive growth';
             }
             // 9. Exploration.
-            else if (this.attemptExploration(econ, involvedCells)) {
+            else if (await this.attemptExploration(econ, involvedCells)) {
                 actionLabel = 'Exploration';
             }
 
@@ -631,7 +631,7 @@ export class AdaptiveManager extends BaseManager {
 
     // ==================== Actions ====================
 
-    executeBuild(builder, targetName, category, reason, involvedCells) {
+    async executeBuild(builder, targetName, category, reason, involvedCells) {
         if (!builder || !builder.active) return 0;
         if (this.getBuildCharges(builder) <= 0) return 0;
 
@@ -649,7 +649,7 @@ export class AdaptiveManager extends BaseManager {
             + `| Target: ${this.helper.camelToTitle(targetName)} | Cost: ${costText} | Reason: ${reason}`
         );
 
-        const result = this.helper.build(this.gameState, builder, targetName);
+        const result = await this.helper.build(this.gameState, builder, targetName);
         const used = ordersUsedFrom(result);
         if (used > 0) {
             // B15: log the BUILT cell, not the builder's cell — the UI
@@ -667,14 +667,14 @@ export class AdaptiveManager extends BaseManager {
         return used;
     }
 
-    attemptCriticalDeficits(econ, involvedCells) {
+    async attemptCriticalDeficits(econ, involvedCells) {
         if (!econ.urgent || econ.urgent.length === 0) return false;
 
         for (const need of econ.urgent) {
             // A damaged producer of this resource is producing nothing (yields
             // stop at <=95% HP). Repairing it is cheaper than building a
             // replacement, so try that before spawning anything new.
-            if (this.attemptRepairForResource(need.res, involvedCells)) {
+            if (await this.attemptRepairForResource(need.res, involvedCells)) {
                 return true;
             }
 
@@ -744,7 +744,7 @@ export class AdaptiveManager extends BaseManager {
                     ? `${this.helper.camelToTitle(step.targetName)} (prerequisite for ${this.helper.camelToTitle(step.finalTarget)})`
                     : this.helper.camelToTitle(step.targetName);
 
-                const used = this.executeBuild(
+                const used = await this.executeBuild(
                     step.builder,
                     step.targetName,
                     'econ',
@@ -961,13 +961,13 @@ export class AdaptiveManager extends BaseManager {
         });
     }
 
-    attemptEmergencyDefense(econ, involvedCells) {
+    async attemptEmergencyDefense(econ, involvedCells) {
         const own = this.getActiveEntities();
         const foreign = this.getVisibleForeignEntities();
         if (own.length === 0 || foreign.length === 0) return false;
 
         const immediate = this.getImmediateThreats(own, foreign);
-        return this.respondToImmediateThreats(immediate, econ, involvedCells);
+        return await this.respondToImmediateThreats(immediate, econ, involvedCells);
     }
 
     /**
@@ -1016,7 +1016,7 @@ export class AdaptiveManager extends BaseManager {
     }
 
     /** Attack the most urgent immediate threat, else save adjacent vulnerable units. */
-    respondToImmediateThreats(immediate, econ, involvedCells) {
+    async respondToImmediateThreats(immediate, econ, involvedCells) {
         for (const item of immediate) {
             const target = item.entity;
             const candidates = this.selectAttackers(target, { emergency: true });
@@ -1036,7 +1036,7 @@ export class AdaptiveManager extends BaseManager {
 
             for (const attacker of candidates) {
                 const from = { q: attacker.q, r: attacker.r };
-                const result = this.helper.attack(this.gameState, attacker, target, 1);
+                const result = await this.helper.attack(this.gameState, attacker, target, 1);
                 const used = ordersUsedFrom(result);
                 if (used > 0) {
                     involvedCells.push(from, attacker.cell);
@@ -1052,7 +1052,7 @@ export class AdaptiveManager extends BaseManager {
         }
 
         // No attack was possible: try to save vulnerable adjacent units instead.
-        return this.attemptRetreats(econ, involvedCells, true);
+        return await this.attemptRetreats(econ, involvedCells, true);
     }
 
     isFavorableEngagement(target, foreign, powerRatio, requireKill) {
@@ -1106,7 +1106,7 @@ export class AdaptiveManager extends BaseManager {
         return this.isFavorableEngagement(target, foreign, this.config.offensivePowerRatio, false);
     }
 
-    attemptCombat(econ, involvedCells) {
+    async attemptCombat(econ, involvedCells) {
         const own = this.getActiveEntities();
         const foreign = this.getVisibleForeignEntities();
         if (foreign.length === 0) return false;
@@ -1120,7 +1120,7 @@ export class AdaptiveManager extends BaseManager {
         if (!hasCombat) {
             // No military at all: if threatened, spend this action on a defender.
             if (summary.hasThreats) {
-                return this.attemptProactiveBuild(econ, {
+                return await this.attemptProactiveBuild(econ, {
                     category: 'military',
                     defensive: true,
                     involvedCells,
@@ -1221,7 +1221,7 @@ export class AdaptiveManager extends BaseManager {
         }
 
         targets.sort((a, b) => b.priority - a.priority);
-        if (this.engageCombatTargets(targets, involvedCells)) return true;
+        if (await this.engageCombatTargets(targets, involvedCells)) return true;
 
         // Only workers/repairers are combat-capable but none was suitable for
         // offensive action. If threatened, invest this action in a real defender.
@@ -1230,7 +1230,7 @@ export class AdaptiveManager extends BaseManager {
             && asNumber(entity.actionPoints, 0) > 0
         );
         if (!hasDedicated && summary.hasThreats) {
-            return this.attemptProactiveBuild(econ, {
+            return await this.attemptProactiveBuild(econ, {
                 category: 'military',
                 defensive: true,
                 involvedCells,
@@ -1249,7 +1249,7 @@ export class AdaptiveManager extends BaseManager {
     }
 
     /** Attack the highest-priority target any candidate can engage. True if an order was spent. */
-    engageCombatTargets(targets, involvedCells) {
+    async engageCombatTargets(targets, involvedCells) {
         for (const item of targets) {
             const target = item.entity;
             const candidates = this.selectAttackers(target, { emergency: item.isThreat });
@@ -1265,7 +1265,7 @@ export class AdaptiveManager extends BaseManager {
 
             for (const attacker of candidates) {
                 const from = { q: attacker.q, r: attacker.r };
-                const result = this.helper.attack(this.gameState, attacker, target, 1);
+                const result = await this.helper.attack(this.gameState, attacker, target, 1);
                 const used = ordersUsedFrom(result);
                 if (used > 0) {
                     involvedCells.push(from, attacker.cell);
@@ -1370,7 +1370,7 @@ export class AdaptiveManager extends BaseManager {
         return ratio <= threshold;
     }
 
-    attemptRepairs(econ, involvedCells) {
+    async attemptRepairs(econ, involvedCells) {
         const own = this.getActiveEntities();
         const foreign = this.getVisibleForeignEntities();
         const allies = foreign
@@ -1413,7 +1413,7 @@ export class AdaptiveManager extends BaseManager {
                 )
                 .sort((a, b) => this.helper.distance(a, target) - this.helper.distance(b, target));
             if (candidates.length === 0) continue;
-            if (this.executeRepairAttempt(target, candidates, involvedCells) > 0) return true;
+            if (await this.executeRepairAttempt(target, candidates, involvedCells) > 0) return true;
         }
 
         return false;
@@ -1423,7 +1423,7 @@ export class AdaptiveManager extends BaseManager {
      * Repairs an active damaged producer of `res` before a replacement is
      * spawned for a deficit. Returns true if an order was spent repairing.
      */
-    attemptRepairForResource(res, involvedCells) {
+    async attemptRepairForResource(res, involvedCells) {
         const own = this.getActiveEntities();
         const repairers = own.filter(entity =>
             this.helper.isRepairer(entity) && asNumber(entity.actionPoints, 0) > 0
@@ -1449,13 +1449,13 @@ export class AdaptiveManager extends BaseManager {
                 )
                 .sort((a, b) => this.helper.distance(a, target) - this.helper.distance(b, target));
             if (candidates.length === 0) continue;
-            if (this.executeRepairAttempt(target, candidates, involvedCells) > 0) return true;
+            if (await this.executeRepairAttempt(target, candidates, involvedCells) > 0) return true;
         }
 
         return false;
     }
 
-    executeRepairAttempt(target, candidates, involvedCells) {
+    async executeRepairAttempt(target, candidates, involvedCells) {
         for (const repairer of candidates) {
             const from = { q: repairer.q, r: repairer.r };
             this.helper.aiLog(
@@ -1468,7 +1468,7 @@ export class AdaptiveManager extends BaseManager {
             // B7: maxOrders 2, not 1 — with 1 order, support() could move the
             // repairer adjacent but never repair in the same call, so the unit
             // ping-ponged between retreat (step 4, outranks repair) and repair.
-            const result = this.helper.support(this.gameState, repairer, target, 'Repair', 2);
+            const result = await this.helper.support(this.gameState, repairer, target, 'Repair', 2);
             const used = ordersUsedFrom(result);
             if (used > 0) {
                 involvedCells.push(from, repairer.cell);
@@ -1552,7 +1552,7 @@ export class AdaptiveManager extends BaseManager {
         return !this.helper.getCellsArray().some(cell => cell && !this.player.isExplored(cell.q, cell.r));
     }
 
-    processGoals(econ, involvedCells) {
+    async processGoals(econ, involvedCells) {
         const goals = this.turnState.directive?.goals || [];
 
         for (const goal of goals) {
@@ -1611,7 +1611,7 @@ export class AdaptiveManager extends BaseManager {
 
             if (goal.type === 'buildEconomy' || goal.type === 'buildMilitary') {
                 const category = goal.type === 'buildEconomy' ? 'economy' : 'military';
-                if (this.attemptProactiveBuild(econ, {
+                if (await this.attemptProactiveBuild(econ, {
                     category,
                     goal,
                     involvedCells,
@@ -1714,7 +1714,7 @@ export class AdaptiveManager extends BaseManager {
         return false;
     }
 
-    attemptProactiveBuild(econ, options = {}) {
+    async attemptProactiveBuild(econ, options = {}) {
         const involvedCells = options.involvedCells || [];
         const category = options.category || null;
         const goal = options.goal || null;
@@ -1767,8 +1767,8 @@ export class AdaptiveManager extends BaseManager {
             );
 
             const used = goal
-                ? this.executeBuildWithGoal(candidate.builder, candidate.targetName, goal, involvedCells)
-                : this.executeBuild(
+                ? await this.executeBuildWithGoal(candidate.builder, candidate.targetName, goal, involvedCells)
+                : await this.executeBuild(
                     candidate.builder,
                     candidate.targetName,
                     'build',
@@ -1847,7 +1847,7 @@ export class AdaptiveManager extends BaseManager {
      * direction or target coordinate. Falls back to all valid candidates when
      * the goal cannot be satisfied geometrically.
      */
-    executeBuildWithGoal(builder, targetName, goal, involvedCells) {
+    async executeBuildWithGoal(builder, targetName, goal, involvedCells) {
         const actions = builder.getActions ? builder.getActions() : [];
         const expectedName = `Build ${this.helper.camelToTitle(targetName)}`;
         const buildAction = actions.find(action =>
@@ -1912,6 +1912,11 @@ export class AdaptiveManager extends BaseManager {
         if (this.helper.distance(builder, best.cell) !== 1) return ordersUsed;
 
         const check = buildAction.canDo(best.cell, null);
+        if (check?.possible) {
+            if (ordersUsed > 0) {
+                await this.helper.onActionDone(this.gameState, [start, builder.cell], `in position to build ${targetName}`);
+            }
+        }
         if (check?.possible && buildAction.do(best.cell, null)) {
             involvedCells.push(start, best.cell);
             this.helper.aiLog(

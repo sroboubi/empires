@@ -154,6 +154,11 @@ function markActionPending(seen) {
   if (pacing) pacing.pending = true;
 }
 
+function clearPendingAction(seen) {
+  const pacing = pacingByManager.get(seen);
+  if (pacing) pacing.pending = false;
+}
+
 // Did an action-executing call actually do something? Failed attempts
 // (0 orders used, action.do() === false) change nothing and need no pacing.
 // Helper action methods return { ordersUsed, ... }; moveAlongPath returns
@@ -806,9 +811,10 @@ function createHelperProxy(helper, ownPlayer, aiName, seen = new WeakMap(), prox
         // and applyResourceYieldBonus are engine-internal.
         if (!HELPER_METHODS.has(prop)) return undefined;
         return function (...args) {
+          const isAction = ACTION_HELPER_METHODS.has(prop);
           // Pacing: an action-executing call may not run while a previous
           // action is still pending (onActionDone not yet called/awaited).
-          if (ACTION_HELPER_METHODS.has(prop)) assertNoPendingAction(seen, aiName, `helper.${String(prop)}`);
+          if (isAction) assertNoPendingAction(seen, aiName, `helper.${String(prop)}`);
           if (['attack', 'build', 'support', 'explore'].includes(prop)) {
             const sourceEntity = unwrap(args[1]);
             // P6: a missing owner counts as not-owned (barbarians are
@@ -857,16 +863,43 @@ function createHelperProxy(helper, ownPlayer, aiName, seen = new WeakMap(), prox
             if (u === target.gameState && proxiedGameState) return proxiedGameState;
             return u;
           });
-          const result = val.apply(target, realArgs);
+
+          // Mark before the call so an async helper cannot be raced by a
+          // second action while its promise is still pending.
+          if (isAction) markActionPending(seen);
+
+          let result;
+          try {
+            result = val.apply(target, realArgs);
+          } catch (err) {
+            if (isAction) clearPendingAction(seen);
+            throw err;
+          }
+
           if (prop === 'onActionDone') {
             // Clear the pacing flag once the pacing wait settles — the AI
             // must await this call before executing another action.
             return Promise.resolve(result).then(
-              (v) => { const p = pacingByManager.get(seen); if (p) p.pending = false; return v; },
-              (e) => { const p = pacingByManager.get(seen); if (p) p.pending = false; throw e; }
+              (v) => { clearPendingAction(seen); return v; },
+              (e) => { clearPendingAction(seen); throw e; }
             );
           }
-          if (ACTION_HELPER_METHODS.has(prop) && actionExecuted(result)) markActionPending(seen);
+
+          if (isAction) {
+            if (result && typeof result.then === 'function') {
+              // Async helper (attack/build/support may wait for animations
+              // between internal steps). Mark pending after it resolves only
+              // if it actually changed state.
+              return result.then(
+                (value) => {
+                  if (!actionExecuted(value)) clearPendingAction(seen);
+                  return deepWrap(value, aiName, seen, ownPlayer);
+                },
+                (err) => { clearPendingAction(seen); throw err; }
+              );
+            }
+            if (!actionExecuted(result)) clearPendingAction(seen);
+          }
           return deepWrap(result, aiName, seen, ownPlayer);
         };
       }
@@ -931,5 +964,22 @@ export function createAiManager(ManagerClass, player, helper) {
 
   const manager = new ManagerClass(proxiedPlayer, proxiedHelper);
   manager.gameState = proxiedGameState;
+
+  // Clear any leaked pending action at turn boundaries. A successful action
+  // followed by an exception before onActionDone must not disable this
+  // manager for every later turn.
+  for (const method of ['processTurn', 'runStrategicTurn']) {
+    const original = manager[method];
+    if (typeof original !== 'function') continue;
+    manager[method] = async function (...args) {
+      clearPendingAction(seen);
+      try {
+        return await original.apply(this, args);
+      } finally {
+        clearPendingAction(seen);
+      }
+    };
+  }
+
   return manager;
 }

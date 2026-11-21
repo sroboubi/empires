@@ -241,7 +241,7 @@ export async function manageBarbarians(config, helper) {
           if (verdict === 'ignore') continue;
         }
         console.debug(`[Barbarians] ${entity.name} at (${entity.q}, ${entity.r}) attacking ${targetEnemy.name} (Owner: ${targetEnemy.owner?.name || 'neutral'}) at (${targetEnemy.q}, ${targetEnemy.r})`);
-        const res = helper.attack(gameState, entity, targetEnemy, Infinity);
+        const res = await helper.attack(gameState, entity, targetEnemy, Infinity);
         if (res && res.ordersUsed > 0) {
           attacked = true;
           await helper.onActionDone(gameState, [entity.cell, targetEnemy.cell], `${entity.name} attacked ${targetEnemy.name}`);

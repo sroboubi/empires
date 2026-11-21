@@ -164,7 +164,7 @@ export class MenuHarness extends LlmBaseManager {
                 continue;
             }
 
-            const outcome = executeMenuAction(this.gameState, this.player, action, this.helper);
+            const outcome = await executeMenuAction(this.gameState, this.player, action, this.helper);
             if (outcome.ordersUsed === 0) {
                 lastResponseError = outcome.result.message;
                 lastFailedLabel = label;

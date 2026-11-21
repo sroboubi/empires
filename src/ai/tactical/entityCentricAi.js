@@ -1193,10 +1193,10 @@ export class EntityCentricAI extends BaseManager {
     let result;
     switch (action) {
       case 'attack':
-        result = helper.attack(gameState, entity, candidate.target, 2);
+        result = await helper.attack(gameState, entity, candidate.target, 2);
         break;
       case 'build':
-        result = helper.build(gameState, entity, candidate.targetName);
+        result = await helper.build(gameState, entity, candidate.targetName);
         break;
       case 'explore':
         result = helper.explore(gameState, entity, null, false, null);
@@ -1205,7 +1205,7 @@ export class EntityCentricAI extends BaseManager {
         result = this.executeFlee(entity, candidate.threat);
         break;
       case 'guard':
-        result = this.executeGuard(entity, candidate.target, candidate.threat);
+        result = await this.executeGuard(entity, candidate.target, candidate.threat);
         break;
       default:
         return false;
@@ -1255,11 +1255,11 @@ export class EntityCentricAI extends BaseManager {
    * Guard: if the threat can be struck, strike it; otherwise move toward
    * the entity that requested support.
    */
-  executeGuard(entity, requester, threat) {
+  async executeGuard(entity, requester, threat) {
     const helper = this.helper;
     const gameState = this.gameState;
     if (threat && this.canStrike(entity, threat)) {
-      return helper.attack(gameState, entity, threat, 2);
+      return await helper.attack(gameState, entity, threat, 2);
     }
     if (requester?.cell) {
       const moveAction = entity.getActions ? entity.getActions().find(a => a.name === 'Move') : null;

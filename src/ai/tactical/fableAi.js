@@ -844,16 +844,15 @@ export default class FableAi extends BaseManager {
         const { helper, gameState, player } = this;
         const { u, t } = o;
         const projects = this.memory.projects;
+        const startCell = { q: u.e.q, r: u.e.r };
+        let moved = false;
         if (site.path.length > 0) {
-            const moved = helper.moveAlongPath(player, u.e, this.moveAction(u), site.path, gameState, 'build',
+            moved = helper.moveAlongPath(player, u.e, this.moveAction(u), site.path, gameState, 'build',
                 `heading to build ${t.name} at (${site.pos.q},${site.pos.r})`);
             if (!moved) {
                 projects.delete(u.id);
                 return 'could not move toward the site (path blocked or not enough AP)';
             }
-            // Pacing contract: the move must complete (onActionDone) before
-            // the Build action below may execute.
-            await helper.onActionDone(gameState, [u.e.cell], `heading to build ${t.name}`);
         }
         projects.set(u.id, { type: t.name, q: site.pos.q, r: site.pos.r });   // stays until built or invalid
         if (helper.distance(u.e, site.cell) !== 1) return null;                // still travelling
@@ -861,6 +860,11 @@ export default class FableAi extends BaseManager {
         const action = this.buildAction(u, t);
         const check = action ? action.canDo(site.cell, null) : { possible: false, reason: 'no such build action' };
         if (!check.possible) return check.reason;
+        // The move is a separate visible action; let it finish before the
+        // Build action below. Move-only steps are paced by the caller.
+        if (moved) {
+            await helper.onActionDone(gameState, [startCell, u.e.cell], `heading to build ${t.name}`);
+        }
         projects.delete(u.id);
         return action.do(site.cell, null) ? null : 'build action refused';
     }
@@ -930,8 +934,8 @@ export default class FableAi extends BaseManager {
                 out.push({
                     key: `attack:${u.id}:${f.id}`, unit: u, category: 'combat', value, orders,
                     text: `${this.tag(u)} attacks ${this.tag(f)}: ${why}${f.attackedUs ? ', it attacked us' : ''}; ${plan}`,
-                    run: () => {
-                        const result = helper.attack(gameState, u.e, f.e, Math.max(1, Math.min(player.orders, orders)));
+                    run: async () => {
+                        const result = await helper.attack(gameState, u.e, f.e, Math.max(1, Math.min(player.orders, orders)));
                         return result.ordersUsed > 0 ? null : (result.result?.message || 'attack not possible');
                     },
                 });
@@ -962,8 +966,8 @@ export default class FableAi extends BaseManager {
                 out.push({
                     key: `repair:${u.id}:${a.id}`, unit: u, category: 'build', value, orders: d > 1 ? 2 : 1,
                     text: `${this.tag(u)} repairs ${this.tag(a)} (${Math.round(a.hp)}/${a.maxHp} HP${idle ? ', not yielding' : ''}${heavy ? ', heavily damaged' : ''})`,
-                    run: () => {
-                        const result = helper.support(gameState, u.e, a.e, ACTION.repair, 2);
+                    run: async () => {
+                        const result = await helper.support(gameState, u.e, a.e, ACTION.repair, 2);
                         return result.ordersUsed > 0 ? null : (result.result?.message || 'repair not possible');
                     },
                 });

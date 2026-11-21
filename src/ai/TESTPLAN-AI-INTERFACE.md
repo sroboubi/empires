@@ -90,7 +90,7 @@ const ai = await p1.getAiManager();
    - **Expected**: Throws `Error: [AI Interface] Illegal action: AI '<name>' attempted to execute action "Move" on entity "<enemyName>" owned by another player.`
 
 3. **Helper Action Ownership Check (Gap 4)**:
-   - **Action**: Run `ai.helper.attack(ai.gameState, enemy, unit);`
+   - **Action**: Run `await ai.helper.attack(ai.gameState, enemy, unit);`
    - **Expected**: Throws `Error: [AI Interface] Illegal action: AI '<name>' cannot command entity "<enemyName>" owned by another player.`
 
 ---

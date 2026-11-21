@@ -297,10 +297,11 @@ export default class ApexAi extends FableAi {
             .sort((a, b) => (b.ap * b.type.sight) - (a.ap * a.type.sight));
         for (const u of candidates) {
             const before = this.player.orders;
+            const startCell = { q: u.e.q, r: u.e.r };
             const failure = this.runExplore(ctx, u, false);
             if (this.player.orders < before) {
                 // Pacing contract: complete the action before returning.
-                await this.helper.onActionDone(this.gameState, [u.e.cell], 'Fallback explore');
+                await this.helper.onActionDone(this.gameState, [startCell, u.e.cell], 'Fallback explore');
                 return true;
             }
             this.turn.failed.set(`explore:${u.id}`, failure || 'no exploration progress');
@@ -738,8 +739,8 @@ export default class ApexAi extends FableAi {
                 out.push({
                     key: `attack:${u.id}:${f.id}`, unit: u, category: 'combat', value, orders,
                     text: `${this.tag(u)} attacks ${this.tag(f)}: ${why}${f.attackedUs ? ', it attacked us' : ''}; ${plan}`,
-                    run: () => {
-                        const result = helper.attack(gameState, u.e, f.e, maxOrders);
+                    run: async () => {
+                        const result = await helper.attack(gameState, u.e, f.e, maxOrders);
                         return result.ordersUsed > 0 ? null : (result.result?.message || 'attack not possible');
                     },
                 });

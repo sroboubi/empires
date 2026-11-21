@@ -108,10 +108,11 @@ async function init() {
     initRenderer(canvas);
     // Re-select a unit whose move animation just finished, if the player
     // has not selected anything else in the meantime.
-    onMoveAnimationEnd((entityId) => {
+    onMoveAnimationEnd((entityId, finished) => {
       const entity = pendingReselectEntity;
       if (!entity || entity.id !== entityId) return;
       pendingReselectEntity = null;
+      if (!finished) return;
       if (selectedEntity || !gameState) return;
       const activePlayer = gameState.activePlayer;
       if (!activePlayer || activePlayer.isAI) return;

@@ -248,8 +248,9 @@ function moveUnitToward(gameState, player, unit, dest, helper) {
  * Execute a menu action. Same {ordersUsed, result} shape as the actions in
  * ../../actions.js. Chat and end-turn are handled by the harness (they need
  * the harness's chat flow / history wiring).
+ * Async because helper attack/support/build may wait between internal steps.
  */
-export function executeMenuAction(gameState, player, action, helper) {
+export async function executeMenuAction(gameState, player, action, helper) {
     const fail = (message) => ({ ordersUsed: 0, result: { status: 'failed', message } });
     const unit = action.actorId ? findEntity(gameState, action.actorId) : null;
     if (action.verb !== 'end' && action.verb !== 'chat') {
@@ -261,15 +262,15 @@ export function executeMenuAction(gameState, player, action, helper) {
         case 'attack': {
             const target = findEntity(gameState, action.targetId);
             if (!target) return fail(`Target entity not found: ${action.targetId}`);
-            return helper.attack(gameState, unit, target, maxOrders);
+            return await helper.attack(gameState, unit, target, maxOrders);
         }
         case 'repair': {
             const target = findEntity(gameState, action.targetId);
             if (!target) return fail(`Target entity not found: ${action.targetId}`);
-            return helper.support(gameState, unit, target, 'Repair', maxOrders);
+            return await helper.support(gameState, unit, target, 'Repair', maxOrders);
         }
         case 'build':
-            return helper.build(gameState, unit, action.itemName);
+            return await helper.build(gameState, unit, action.itemName);
         case 'explore':
             return helper.explore(gameState, unit, null, true);
         case 'move':

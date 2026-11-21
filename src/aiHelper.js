@@ -522,7 +522,12 @@ export class AiHelper {
 
     // ==================== AI logic: actions ====================
 
-    attack(gameState, sourceEntity, targetEntity, maxOrders = 1) {
+    /**
+     * Multi-step combat. Internal reposition moves are paced with
+     * onActionDone before the next attack; the final action is paced by the
+     * caller after this method returns.
+     */
+    async attack(gameState, sourceEntity, targetEntity, maxOrders = 1) {
         const fail = (message) => ({ ordersUsed: 0, result: { status: 'failed', message } });
         if (!gameState || !sourceEntity || !targetEntity || maxOrders <= 0) return fail('Invalid attack parameters.');
         if (!sourceEntity.active) return fail(`${sourceEntity.name} is not active.`);
@@ -551,6 +556,17 @@ export class AiHelper {
         this.aiLog(attackerPlayer, 'combat', `Engaging Target: ${sourceEntity.name}#${sourceEntity.id?.slice(-4)} (${attackerPlayer.name}) at (${sourceEntity.q},${sourceEntity.r}) [HP:${Math.round(sourceEntity.health)}/${sourceEntity.maxHealth}, AP:${sourceEntity.actionPoints}] attacking ${targetPlayer.name}'s ${targetEntity.name}#${targetEntity.id?.slice(-4)} at (${targetEntity.q},${targetEntity.r}) [HP:${Math.round(targetEntity.health)}/${targetEntity.maxHealth}, Dist:${initialDist} hexes, MaxOrders:${availableOrders}].`);
 
         let lastCheckReason = 'Target unreachable or insufficient AP';
+
+        // Wait for the previous internal step's animation before the next
+        // attack/reposition. The final step is paced by the caller's
+        // onActionDone after attack() returns.
+        let pacingCells = null;
+        const paceNextAction = async () => {
+            if (!pacingCells) return;
+            const cells = pacingCells;
+            pacingCells = null;
+            await this.onActionDone(gameState, cells, 'Combat');
+        };
 
         while (ordersUsed < availableOrders && sourceEntity.active && !targetEntity.destroyed && targetEntity.health > 0) {
             const currentAttackCheck = attackAction.canDo(targetCell, targetEntity);
@@ -586,9 +602,12 @@ export class AiHelper {
 
             if (isCurrentPossible && currentMult > 1.0) {
                 const prevHealth = targetEntity.health;
+                const attackFrom = { q: sourceEntity.q, r: sourceEntity.r };
+                await paceNextAction();
                 const didAttack = attackAction.do(targetCell, targetEntity);
                 if (didAttack) {
                     ordersUsed++;
+                    pacingCells = [attackFrom, { q: sourceEntity.q, r: sourceEntity.r }, targetCell];
                     const damageDealt = Math.max(0, prevHealth - targetEntity.health);
                     totalDamage += damageDealt;
                     attacksLanded++;
@@ -655,8 +674,11 @@ export class AiHelper {
 
                 if (bestMoveCell && bestMoveMult > currentMult) {
                     const fromCoord = `(${sourceEntity.q},${sourceEntity.r})`;
+                    const moveFrom = { q: sourceEntity.q, r: sourceEntity.r };
+                    await paceNextAction();
                     if (moveAction.do(bestMoveCell, null)) {
                         ordersUsed++;
+                        pacingCells = [moveFrom, { q: sourceEntity.q, r: sourceEntity.r }];
                         movedCloser = true;
                         this.aiLog(attackerPlayer, 'combat', `Repositioning: ${sourceEntity.name} moved from ${fromCoord} to (${bestMoveCell.q},${bestMoveCell.r}) for better attack multiplier (${bestMoveMult.toFixed(2)}x vs ${currentMult.toFixed(2)}x). AP left: ${sourceEntity.actionPoints}. Order used: ${ordersUsed}/${availableOrders}.`);
                         moved = true;
@@ -683,8 +705,11 @@ export class AiHelper {
                     const currentDist = this.distance(sourceEntity, targetCell);
                     if (closestCell && closestDist < currentDist) {
                         const fromCoord = `(${sourceEntity.q},${sourceEntity.r})`;
+                        const moveFrom = { q: sourceEntity.q, r: sourceEntity.r };
+                        await paceNextAction();
                         if (moveAction.do(closestCell, null)) {
                             ordersUsed++;
+                            pacingCells = [moveFrom, { q: sourceEntity.q, r: sourceEntity.r }];
                             movedCloser = true;
                             this.aiLog(attackerPlayer, 'combat', `Repositioning: ${sourceEntity.name} moved from ${fromCoord} to (${closestCell.q},${closestCell.r}) to close distance on ${targetEntity.name} (dist: ${closestDist}). AP left: ${sourceEntity.actionPoints}. Order used: ${ordersUsed}/${availableOrders}.`);
                             moved = true;
@@ -696,9 +721,12 @@ export class AiHelper {
 
             if (isCurrentPossible) {
                 const prevHealth = targetEntity.health;
+                const attackFrom = { q: sourceEntity.q, r: sourceEntity.r };
+                await paceNextAction();
                 const didAttack = attackAction.do(targetCell, targetEntity);
                 if (didAttack) {
                     ordersUsed++;
+                    pacingCells = [attackFrom, { q: sourceEntity.q, r: sourceEntity.r }, targetCell];
                     const damageDealt = Math.max(0, prevHealth - targetEntity.health);
                     totalDamage += damageDealt;
                     attacksLanded++;
@@ -742,7 +770,12 @@ export class AiHelper {
         return { ordersUsed, result };
     }
 
-    build(gameState, sourceEntity, targetName,
+    /**
+     * Async: when the builder has to walk to the site, onActionDone drains
+     * that move before the build action lands. Move-only steps are paced by
+     * the caller.
+     */
+    async build(gameState, sourceEntity, targetName,
         maxDistance = this.getConfig().buildMaxDistance ?? 10,
         distancePenalty = this.getConfig().buildDistancePenalty ?? 0.2) {
         const fail = (message) => ({ ordersUsed: 0, result: { status: 'failed', message } });
@@ -775,6 +808,7 @@ export class AiHelper {
         this.aiLog(owner || 'AI', 'build', `Build ${canonicalName}: ${candidates.length} candidate site(s), chose (${best.cell.q},${best.cell.r}) dist ${best.dist} expected yield ${best.yield.toFixed(1)} (penalty ${distancePenalty}).`);
 
         let ordersUsed = 0;
+        const startCell = { q: sourceEntity.q, r: sourceEntity.r };
 
         if (best.stage.path.length > 0) {
             const availableAP = sourceEntity.actionPoints ?? 0;
@@ -807,6 +841,11 @@ export class AiHelper {
 
         const checkBuild = buildAction.canDo(best.cell, null);
         if (checkBuild && checkBuild.possible) {
+            if (ordersUsed > 0) {
+                // The move is a separate visible action; let its animation
+                // finish before the structure appears.
+                await this.onActionDone(gameState, [startCell, sourceEntity.cell], `in position to build ${canonicalName}`);
+            }
             if (buildAction.do(best.cell, null)) {
                 this.aiLog(owner || 'AI', 'build', `Built ${canonicalName} at (${best.cell.q},${best.cell.r}).`);
                 return { ordersUsed: ordersUsed + 1, result: { status: 'completed', message: `Built ${canonicalName} at (${best.cell.q},${best.cell.r}).` } };
@@ -819,7 +858,11 @@ export class AiHelper {
         }
     }
 
-    support(gameState, sourceEntity, targetEntity, actionName = null, maxOrders = 1) {
+    /**
+     * Async: when the supporter has to walk adjacent first, onActionDone
+     * drains that move before the support action lands.
+     */
+    async support(gameState, sourceEntity, targetEntity, actionName = null, maxOrders = 1) {
         const fail = (message) => ({ ordersUsed: 0, result: { status: 'failed', message } });
         if (!gameState || !sourceEntity || !targetEntity || !sourceEntity.active) return fail('Invalid entities or source not active.');
         if (targetEntity.destroyed) return fail('Target is destroyed.');
@@ -841,6 +884,7 @@ export class AiHelper {
 
         const moveAction = actions.find(a => a.name === "Move");
         const targetCell = targetEntity.cell;
+        const startCell = { q: sourceEntity.q, r: sourceEntity.r };
 
         const tryAct = () => {
             if (!supportAction) return { ordersUsed: 0, result: { status: 'completed', message: `${sourceEntity.name} moved adjacent to ${targetEntity.name}.` } };
@@ -867,6 +911,9 @@ export class AiHelper {
                 if (checkMove && checkMove.possible) {
                     if (moveAction.do(adjCell, null)) {
                         if (supportAction && availableOrders > 1) {
+                            // Arrival is a separate visible move; let it finish
+                            // before the support action lands.
+                            await this.onActionDone(gameState, [startCell, sourceEntity.cell, targetCell], `in position to support ${targetEntity.name}`);
                             const actResult = tryAct();
                             const totalOrders = 1 + actResult.ordersUsed;
                             if (actResult.result.status === 'completed') {
