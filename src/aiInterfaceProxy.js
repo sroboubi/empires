@@ -132,6 +132,10 @@ const HELPER_METHODS = new Set([
 // onActionDone before executing another action, so a human sees each action
 // happen sequentially instead of in a flash. Reads and chat/trade calls are
 // allowed while an action is pending; only a second action is blocked.
+// onActionDone also waits for any in-flight action-helper calls to complete
+// before clearing the flag, so firing helper.attack() without awaiting it
+// still serializes correctly — the helper is part of the AI interface, and
+// onActionDone means "wait until whatever needs to happen happens".
 const ACTION_HELPER_METHODS = new Set(['attack', 'build', 'support', 'explore', 'moveAlongPath']);
 
 // Per-manager pacing state, keyed by the manager's `seen` cache (the one
@@ -157,6 +161,34 @@ function markActionPending(seen) {
 function clearPendingAction(seen) {
   const pacing = pacingByManager.get(seen);
   if (pacing) pacing.pending = false;
+}
+
+// Track an in-flight async action-helper call so onActionDone can wait for
+// it to complete before clearing the pending flag.
+function trackInFlightAction(seen, promise) {
+  const pacing = pacingByManager.get(seen);
+  if (!pacing) return;
+  pacing.inFlight.add(promise);
+  const done = () => pacing.inFlight.delete(promise);
+  promise.then(done, done);
+}
+
+async function waitForInFlightActions(seen) {
+  const pacing = pacingByManager.get(seen);
+  if (!pacing) return;
+  while (pacing.inFlight.size > 0) {
+    await Promise.allSettled([...pacing.inFlight]);
+  }
+}
+
+// Full pacing reset at turn boundaries: drop the pending flag and stop
+// tracking any leaked in-flight calls.
+function resetPacing(seen) {
+  const pacing = pacingByManager.get(seen);
+  if (pacing) {
+    pacing.pending = false;
+    pacing.inFlight.clear();
+  }
 }
 
 // Did an action-executing call actually do something? Failed attempts
@@ -877,19 +909,32 @@ function createHelperProxy(helper, ownPlayer, aiName, seen = new WeakMap(), prox
           }
 
           if (prop === 'onActionDone') {
-            // Clear the pacing flag once the pacing wait settles — the AI
-            // must await this call before executing another action.
-            return Promise.resolve(result).then(
-              (v) => { clearPendingAction(seen); return v; },
-              (e) => { clearPendingAction(seen); throw e; }
-            );
+            // Wait for any in-flight action-helper calls to complete first,
+            // so an AI that fired helper.attack() without awaiting it still
+            // gets full serialization: the helper finishes, animations
+            // drain, then the pending flag clears. The helper's own
+            // internal pacing calls the real onActionDone directly and
+            // never waits here, so this cannot self-deadlock.
+            return (async () => {
+              await waitForInFlightActions(seen);
+              try {
+                const v = await result;
+                clearPendingAction(seen);
+                return v;
+              } catch (e) {
+                clearPendingAction(seen);
+                throw e;
+              }
+            })();
           }
 
           if (isAction) {
             if (result && typeof result.then === 'function') {
               // Async helper (attack/build/support may wait for animations
-              // between internal steps). Mark pending after it resolves only
-              // if it actually changed state.
+              // between internal steps). Track it as in-flight so
+              // onActionDone waits for it; clear the pending flag after it
+              // resolves only if it actually changed nothing.
+              trackInFlightAction(seen, result);
               return result.then(
                 (value) => {
                   if (!actionExecuted(value)) clearPendingAction(seen);
@@ -951,7 +996,7 @@ export function createAiManager(ManagerClass, player, helper) {
   const seen = new WeakMap();
   // Pacing contract: after an action-executing call, this manager must
   // call and await onActionDone before executing another action.
-  pacingByManager.set(seen, { pending: false });
+  pacingByManager.set(seen, { pending: false, inFlight: new Set() });
   const proxiedPlayer = createPlayerProxy(player, aiName, seen);
   const rawGameState = helper.getGameState();
   const proxiedGameState = createGameStateProxy(rawGameState, player, aiName, seen);
@@ -972,11 +1017,11 @@ export function createAiManager(ManagerClass, player, helper) {
     const original = manager[method];
     if (typeof original !== 'function') continue;
     manager[method] = async function (...args) {
-      clearPendingAction(seen);
+      resetPacing(seen);
       try {
         return await original.apply(this, args);
       } finally {
-        clearPendingAction(seen);
+        resetPacing(seen);
       }
     };
   }

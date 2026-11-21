@@ -1074,6 +1074,41 @@ await asyncTest('pacing: async helper action stays pending until onActionDone', 
     await mgr.helper.onActionDone(gs, null, 'async action 2');
 });
 
+await asyncTest('pacing: onActionDone waits for an un-awaited helper call to complete', async () => {
+    const { gs, mgr, unit, helper } = pacingFixture();
+    const order = [];
+    helper.attack = async () => {
+        await new Promise(r => setTimeout(r, 10));
+        order.push('attack done');
+        return { ordersUsed: 1, result: { status: 'completed' } };
+    };
+    // Fire without awaiting, then await onActionDone: it must not resolve
+    // until the helper call has fully completed.
+    mgr.helper.attack(gs, unit, unit, 1);
+    await mgr.helper.onActionDone(gs, null, 'un-awaited attack');
+    order.push('onActionDone done');
+    assertEqual(order, ['attack done', 'onActionDone done'], 'onActionDone waits for the in-flight helper');
+    // Flag cleared after the wait: the next action is allowed.
+    await mgr.helper.attack(gs, unit, unit, 1);
+    await mgr.helper.onActionDone(gs, null, 'second attack');
+});
+
+await asyncTest('pacing: action while helper in flight and onActionDone not awaited throws', async () => {
+    const { gs, mgr, unit, helper } = pacingFixture();
+    helper.attack = async () => {
+        await new Promise(r => setTimeout(r, 10));
+        return { ordersUsed: 1, result: { status: 'completed' } };
+    };
+    mgr.helper.attack(gs, unit, unit, 1); // un-awaited, still in flight
+    mgr.helper.onActionDone(gs, null, 'not awaited'); // also un-awaited
+    // The flag clears only after the in-flight helper settles, so an
+    // immediate second action still throws.
+    let threw = false;
+    try { mgr.helper.attack(gs, unit, unit, 1); } catch (e) { threw = /Pacing violation/.test(e.message); }
+    assert(threw, 'second action before onActionDone settles must throw');
+    await mgr.helper.onActionDone(gs, null, 'cleanup');
+});
+
 await asyncTest('pacing: failed async helper action clears its own pending flag', async () => {
     const { gs, mgr, unit, helper } = pacingFixture();
     helper.attack = async () => ({ ordersUsed: 0, result: { status: 'failed' } });
