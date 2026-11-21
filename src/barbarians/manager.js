@@ -2,11 +2,12 @@ import { reconcileEntities } from '../renderer.js';
 
 /**
  * Barbarian attack sequence (game code, intentionally separate from the AI
- * action composite). Uses raw entities/actions; the caller handles pacing by
+ * action composite). Uses raw entities/actions; internal steps are paced
+ * with onActionDone between them, and the caller paces the final step by
  * awaiting helper.onActionDone() after the call. Free to diverge from the AI
  * combat logic as barbarian behaviour evolves.
  */
-function barbarianAttack(gameState, helper, sourceEntity, targetEntity, maxOrders = 1) {
+async function barbarianAttack(gameState, helper, sourceEntity, targetEntity, maxOrders = 1) {
     const fail = (message) => ({ ordersUsed: 0, result: { status: 'failed', message } });
     if (!gameState || !sourceEntity || !targetEntity || maxOrders <= 0) return fail('Invalid attack parameters.');
     if (!sourceEntity.active) return fail(`${sourceEntity.name} is not active.`);
@@ -35,6 +36,17 @@ function barbarianAttack(gameState, helper, sourceEntity, targetEntity, maxOrder
     helper.aiLog(attackerPlayer, 'combat', `Engaging Target: ${sourceEntity.name}#${sourceEntity.id?.slice(-4)} (${attackerPlayer.name}) at (${sourceEntity.q},${sourceEntity.r}) [HP:${Math.round(sourceEntity.health)}/${sourceEntity.maxHealth}, AP:${sourceEntity.actionPoints}] attacking ${targetPlayer.name}'s ${targetEntity.name}#${targetEntity.id?.slice(-4)} at (${targetEntity.q},${targetEntity.r}) [HP:${Math.round(targetEntity.health)}/${targetEntity.maxHealth}, Dist:${initialDist} hexes, MaxOrders:${availableOrders}].`);
 
     let lastCheckReason = 'Target unreachable or insufficient AP';
+
+    // Wait for the previous internal step's animation before the next
+    // attack/reposition. The final step is paced by the caller's
+    // onActionDone after barbarianAttack() returns.
+    let pacingCells = null;
+    const paceNextAction = async () => {
+        if (!pacingCells) return;
+        const cells = pacingCells;
+        pacingCells = null;
+        await helper.onActionDone(gameState, cells, 'Combat');
+    };
 
 
     while (ordersUsed < availableOrders && sourceEntity.active && !targetEntity.destroyed && targetEntity.health > 0) {
@@ -72,9 +84,11 @@ function barbarianAttack(gameState, helper, sourceEntity, targetEntity, maxOrder
         if (isCurrentPossible && currentMult > 1.0) {
             const prevHealth = targetEntity.health;
             const attackFrom = { q: sourceEntity.q, r: sourceEntity.r };
+            await paceNextAction();
             const didAttack = attackAction.do(targetCell, targetEntity);
             if (didAttack) {
                 ordersUsed++;
+                pacingCells = [attackFrom, { q: sourceEntity.q, r: sourceEntity.r }, targetCell];
                 const damageDealt = Math.max(0, prevHealth - targetEntity.health);
                 totalDamage += damageDealt;
                 attacksLanded++;
@@ -142,8 +156,10 @@ function barbarianAttack(gameState, helper, sourceEntity, targetEntity, maxOrder
             if (bestMoveCell && bestMoveMult > currentMult) {
                 const fromCoord = `(${sourceEntity.q},${sourceEntity.r})`;
                 const moveFrom = { q: sourceEntity.q, r: sourceEntity.r };
+                await paceNextAction();
                 if (moveAction.do(bestMoveCell, null)) {
                     ordersUsed++;
+                    pacingCells = [moveFrom, { q: sourceEntity.q, r: sourceEntity.r }];
                     movedCloser = true;
                     helper.aiLog(attackerPlayer, 'combat', `Repositioning: ${sourceEntity.name} moved from ${fromCoord} to (${bestMoveCell.q},${bestMoveCell.r}) for better attack multiplier (${bestMoveMult.toFixed(2)}x vs ${currentMult.toFixed(2)}x). AP left: ${sourceEntity.actionPoints}. Order used: ${ordersUsed}/${availableOrders}.`);
                     moved = true;
@@ -171,8 +187,10 @@ function barbarianAttack(gameState, helper, sourceEntity, targetEntity, maxOrder
                 if (closestCell && closestDist < currentDist) {
                     const fromCoord = `(${sourceEntity.q},${sourceEntity.r})`;
                     const moveFrom = { q: sourceEntity.q, r: sourceEntity.r };
+                    await paceNextAction();
                     if (moveAction.do(closestCell, null)) {
                         ordersUsed++;
+                        pacingCells = [moveFrom, { q: sourceEntity.q, r: sourceEntity.r }];
                         movedCloser = true;
                         helper.aiLog(attackerPlayer, 'combat', `Repositioning: ${sourceEntity.name} moved from ${fromCoord} to (${closestCell.q},${closestCell.r}) to close distance on ${targetEntity.name} (dist: ${closestDist}). AP left: ${sourceEntity.actionPoints}. Order used: ${ordersUsed}/${availableOrders}.`);
                         moved = true;
@@ -185,9 +203,11 @@ function barbarianAttack(gameState, helper, sourceEntity, targetEntity, maxOrder
         if (isCurrentPossible) {
             const prevHealth = targetEntity.health;
             const attackFrom = { q: sourceEntity.q, r: sourceEntity.r };
+            await paceNextAction();
             const didAttack = attackAction.do(targetCell, targetEntity);
             if (didAttack) {
                 ordersUsed++;
+                pacingCells = [attackFrom, { q: sourceEntity.q, r: sourceEntity.r }, targetCell];
                 const damageDealt = Math.max(0, prevHealth - targetEntity.health);
                 totalDamage += damageDealt;
                 attacksLanded++;
@@ -472,7 +492,7 @@ export async function manageBarbarians(config, helper) {
           if (verdict === 'ignore') continue;
         }
         console.debug(`[Barbarians] ${entity.name} at (${entity.q}, ${entity.r}) attacking ${targetEnemy.name} (Owner: ${targetEnemy.owner?.name || 'neutral'}) at (${targetEnemy.q}, ${targetEnemy.r})`);
-        const res = barbarianAttack(gameState, helper, entity, targetEnemy, Infinity);
+        const res = await barbarianAttack(gameState, helper, entity, targetEnemy, Infinity);
         if (res && res.ordersUsed > 0) {
           attacked = true;
           await helper.onActionDone(gameState, [entity.cell, targetEnemy.cell], `${entity.name} attacked ${targetEnemy.name}`);
