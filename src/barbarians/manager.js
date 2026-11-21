@@ -1,6 +1,257 @@
 import { reconcileEntities } from '../renderer.js';
 
 /**
+ * Barbarian attack sequence (game code, intentionally separate from the AI
+ * action composite). Uses raw entities/actions; internal steps are paced
+ * with onActionDone between them, and the caller paces the final step by
+ * awaiting helper.onActionDone() after the call. Free to diverge from the AI
+ * combat logic as barbarian behaviour evolves.
+ */
+async function barbarianAttack(gameState, helper, sourceEntity, targetEntity, maxOrders = 1) {
+    const fail = (message) => ({ ordersUsed: 0, result: { status: 'failed', message } });
+    if (!gameState || !sourceEntity || !targetEntity || maxOrders <= 0) return fail('Invalid attack parameters.');
+    if (!sourceEntity.active) return fail(`${sourceEntity.name} is not active.`);
+
+    const availableOrders = Math.min(maxOrders, sourceEntity.owner ? sourceEntity.owner.orders : maxOrders);
+    if (availableOrders <= 0) return fail('No orders available.');
+
+    const actions = sourceEntity.getActions ? sourceEntity.getActions() : [];
+    const attackAction = actions.find(a => a.name === "Attack");
+    if (!attackAction) return fail(`${sourceEntity.name} cannot attack.`);
+
+    const moveAction = actions.find(a => a.name === "Move");
+    const targetCell = targetEntity.cell;
+    let ordersUsed = 0;
+    let totalDamage = 0;
+    let attacksLanded = 0;
+    let movedCloser = false;
+
+    const attackerPlayer = sourceEntity.owner || { name: 'Barbarian' };
+    const targetPlayer = targetEntity.owner || { name: 'Neutral' };
+    const initialDist = helper.distance(sourceEntity.cell || sourceEntity, targetEntity.cell || targetEntity);
+
+    const attackMultiplier = (cell) => helper.calculateAttackMultiplier(
+        gameState, cell, sourceEntity.damage.elevationAdjustment, targetEntity, sourceEntity);
+
+    helper.aiLog(attackerPlayer, 'combat', `Engaging Target: ${sourceEntity.name}#${sourceEntity.id?.slice(-4)} (${attackerPlayer.name}) at (${sourceEntity.q},${sourceEntity.r}) [HP:${Math.round(sourceEntity.health)}/${sourceEntity.maxHealth}, AP:${sourceEntity.actionPoints}] attacking ${targetPlayer.name}'s ${targetEntity.name}#${targetEntity.id?.slice(-4)} at (${targetEntity.q},${targetEntity.r}) [HP:${Math.round(targetEntity.health)}/${targetEntity.maxHealth}, Dist:${initialDist} hexes, MaxOrders:${availableOrders}].`);
+
+    let lastCheckReason = 'Target unreachable or insufficient AP';
+
+    // Wait for the previous internal step's animation before the next
+    // attack/reposition. The final step is paced by the caller's
+    // onActionDone after barbarianAttack() returns.
+    let pacingCells = null;
+    const paceNextAction = async () => {
+        if (!pacingCells) return;
+        const cells = pacingCells;
+        pacingCells = null;
+        await helper.onActionDone(gameState, cells, 'Combat');
+    };
+
+
+    while (ordersUsed < availableOrders && sourceEntity.active && !targetEntity.destroyed && targetEntity.health > 0) {
+        const currentAttackCheck = attackAction.canDo(targetCell, targetEntity);
+        const isCurrentPossible = currentAttackCheck && currentAttackCheck.possible;
+        if (currentAttackCheck && !currentAttackCheck.possible) {
+            lastCheckReason = currentAttackCheck.reason;
+        }
+        // G3: the multiplier at the current cell, whether or not the attack
+        // is affordable right now. Treating "unaffordable" as 0 made any
+        // in-range cell look better, so the unit repositioned after every
+        // hit and ping-ponged instead of attacking.
+        const currentMult = attackMultiplier(sourceEntity.cell).total;
+        const costFunc = sourceEntity.getMovementCost.bind(sourceEntity);
+        // Dry-run attack cost from a candidate cell (same formula as
+        // entity.js Attack canDo, without moving there first).
+        // Leader twist (Phase 25): the attacker's adjusted attack-cost
+        // scale, from the owning player's getAttackCost, matching canDo.
+        const attackCostScale = sourceEntity.owner
+            ? sourceEntity.owner.getAttackCost(sourceEntity.name)
+            : (sourceEntity.attackCostScale ?? 1);
+        const attackCostFrom = (cell) => {
+            const exh = sourceEntity.state?.battleExhaustion ?? 1;
+            if (sourceEntity.range && typeof sourceEntity.range === 'object') {
+                return Math.ceil(attackCostScale * exh * helper.distance(cell, targetCell));
+            }
+            const pathRes = helper.movementCostTo(cell, targetCell, costFunc, { allowDetours: true });
+            // A best-effort path's cost is the cost to the closest
+            // reachable cell, NOT to the target — an unreachable target
+            // must look unaffordable, not cheap.
+            if (!pathRes || !pathRes.reached) return Infinity;
+            return Math.ceil(attackCostScale * exh * pathRes.cost);
+        };
+
+        if (isCurrentPossible && currentMult > 1.0) {
+            const prevHealth = targetEntity.health;
+            const attackFrom = { q: sourceEntity.q, r: sourceEntity.r };
+            await paceNextAction();
+            const didAttack = attackAction.do(targetCell, targetEntity);
+            if (didAttack) {
+                ordersUsed++;
+                pacingCells = [attackFrom, { q: sourceEntity.q, r: sourceEntity.r }, targetCell];
+                const damageDealt = Math.max(0, prevHealth - targetEntity.health);
+                totalDamage += damageDealt;
+                attacksLanded++;
+                const isDestroyed = targetEntity.destroyed || targetEntity.health <= 0;
+                const statusMsg = isDestroyed
+                    ? `TARGET DESTROYED!`
+                    : `Target HP remaining: ${Math.round(targetEntity.health)}/${targetEntity.maxHealth}`;
+                helper.aiLog(attackerPlayer, 'combat', `Attack Result [Hit]: ${sourceEntity.name}#${sourceEntity.id?.slice(-4)} attacked ${targetPlayer.name}'s ${targetEntity.name}#${targetEntity.id?.slice(-4)} for ${damageDealt.toFixed(1)} dmg (multiplier: ${currentMult.toFixed(2)}x). ${statusMsg}. Attacker AP left: ${sourceEntity.actionPoints}. Order used: ${ordersUsed}/${availableOrders}.`);
+                continue;
+            } else {
+                helper.aiLog(attackerPlayer, 'warn', `Attack Action Failed: ${sourceEntity.name} attempted attack on ${targetEntity.name} at (${targetCell.q},${targetCell.r}) but action.do() returned false.`);
+                break;
+            }
+        }
+
+        let moved = false;
+        if (moveAction && sourceEntity.actionPoints > 0) {
+            const pathResult = helper.movementCostTo(sourceEntity.cell, targetCell, costFunc, { allowDetours: true });
+            // Detour mode never returns null (except invalid input) and
+            // already returns a best-effort path toward the target when
+            // it is unreachable, so no BFS fallback is needed here.
+            let pathCells = pathResult ? pathResult.path : [];
+            const candidateCells = new Set();
+            for (const nb of helper.getNeighbors(sourceEntity.q, sourceEntity.r)) candidateCells.add(nb);
+            for (const cell of pathCells) {
+                for (const nb of helper.getNeighbors(cell.q, cell.r)) candidateCells.add(nb);
+            }
+            const candidates = Array.from(candidateCells);
+            let bestMoveCell = null;
+            let bestMoveMult = -1;
+
+            for (const candCell of candidates) {
+                const occupant = gameState.getEntityAt(candCell.q, candCell.r);
+                if (occupant) continue;
+                const checkMove = moveAction.canDo(candCell, null);
+                if (!checkMove || !checkMove.possible) continue;
+
+                const dist = helper.distance(candCell, targetCell);
+                let inRange = false;
+                if (sourceEntity.range && typeof sourceEntity.range === 'object') {
+                    const minD = sourceEntity.range.minCells || 1;
+                    const maxD = sourceEntity.range.maxCells || 1;
+                    if (dist >= minD && dist <= maxD) {
+                        const sight = helper.getSightAndTrajectory(candCell, targetCell);
+                        inRange = sight.visible || (sight.maxObstructionDelta < (sourceEntity.range.arcHeight || 0));
+                    }
+                } else {
+                    inRange = (dist === 1);
+                }
+
+                if (inRange) {
+                    // G3: only reposition if the attack is still affordable
+                    // AFTER the move — otherwise the unit burns an order
+                    // moving to a cell it can't attack from.
+                    const apAfterMove = sourceEntity.actionPoints - checkMove.cost;
+                    if (apAfterMove < attackCostFrom(candCell)) continue;
+                    const mult = attackMultiplier(candCell).total;
+                    if (mult > bestMoveMult) {
+                        bestMoveMult = mult;
+                        bestMoveCell = candCell;
+                    }
+                }
+            }
+
+            if (bestMoveCell && bestMoveMult > currentMult) {
+                const fromCoord = `(${sourceEntity.q},${sourceEntity.r})`;
+                const moveFrom = { q: sourceEntity.q, r: sourceEntity.r };
+                await paceNextAction();
+                if (moveAction.do(bestMoveCell, null)) {
+                    ordersUsed++;
+                    pacingCells = [moveFrom, { q: sourceEntity.q, r: sourceEntity.r }];
+                    movedCloser = true;
+                    helper.aiLog(attackerPlayer, 'combat', `Repositioning: ${sourceEntity.name} moved from ${fromCoord} to (${bestMoveCell.q},${bestMoveCell.r}) for better attack multiplier (${bestMoveMult.toFixed(2)}x vs ${currentMult.toFixed(2)}x). AP left: ${sourceEntity.actionPoints}. Order used: ${ordersUsed}/${availableOrders}.`);
+                    moved = true;
+                }
+            }
+
+            if (!moved && !isCurrentPossible) {
+                let closestCell = null;
+                let closestDist = Infinity;
+                for (const candCell of candidates) {
+                    const occupant = gameState.getEntityAt(candCell.q, candCell.r);
+                    if (occupant) continue;
+                    const checkMove = moveAction.canDo(candCell, null);
+                    if (!checkMove || !checkMove.possible) continue;
+                    const dist = helper.distance(candCell, targetCell);
+                    if (dist < closestDist) {
+                        closestDist = dist;
+                        closestCell = candCell;
+                    }
+                }
+                // G4: only move if the candidate is actually closer than
+                // where we stand — otherwise the unit sidesteps (or steps
+                // away) and bounces back next iteration.
+                const currentDist = helper.distance(sourceEntity, targetCell);
+                if (closestCell && closestDist < currentDist) {
+                    const fromCoord = `(${sourceEntity.q},${sourceEntity.r})`;
+                    const moveFrom = { q: sourceEntity.q, r: sourceEntity.r };
+                    await paceNextAction();
+                    if (moveAction.do(closestCell, null)) {
+                        ordersUsed++;
+                        pacingCells = [moveFrom, { q: sourceEntity.q, r: sourceEntity.r }];
+                        movedCloser = true;
+                        helper.aiLog(attackerPlayer, 'combat', `Repositioning: ${sourceEntity.name} moved from ${fromCoord} to (${closestCell.q},${closestCell.r}) to close distance on ${targetEntity.name} (dist: ${closestDist}). AP left: ${sourceEntity.actionPoints}. Order used: ${ordersUsed}/${availableOrders}.`);
+                        moved = true;
+                    }
+                }
+            }
+        }
+        if (moved) continue;
+
+        if (isCurrentPossible) {
+            const prevHealth = targetEntity.health;
+            const attackFrom = { q: sourceEntity.q, r: sourceEntity.r };
+            await paceNextAction();
+            const didAttack = attackAction.do(targetCell, targetEntity);
+            if (didAttack) {
+                ordersUsed++;
+                pacingCells = [attackFrom, { q: sourceEntity.q, r: sourceEntity.r }, targetCell];
+                const damageDealt = Math.max(0, prevHealth - targetEntity.health);
+                totalDamage += damageDealt;
+                attacksLanded++;
+                const isDestroyed = targetEntity.destroyed || targetEntity.health <= 0;
+                const statusMsg = isDestroyed
+                    ? `TARGET DESTROYED!`
+                    : `Target HP remaining: ${Math.round(targetEntity.health)}/${targetEntity.maxHealth}`;
+                helper.aiLog(attackerPlayer, 'combat', `Attack Result [Hit]: ${sourceEntity.name}#${sourceEntity.id?.slice(-4)} attacked ${targetPlayer.name}'s ${targetEntity.name}#${targetEntity.id?.slice(-4)} from current position for ${damageDealt.toFixed(1)} dmg (multiplier: ${currentMult.toFixed(2)}x). ${statusMsg}. Attacker AP left: ${sourceEntity.actionPoints}. Order used: ${ordersUsed}/${availableOrders}.`);
+                continue;
+            } else {
+                helper.aiLog(attackerPlayer, 'warn', `Attack Action Failed: ${sourceEntity.name} attempted attack on ${targetEntity.name} from current position but action.do() returned false.`);
+                break;
+            }
+        }
+        break;
+    }
+
+    const targetDead = targetEntity.destroyed || targetEntity.health <= 0;
+    if (ordersUsed > 0) {
+        const finalStatus = targetDead
+            ? 'TARGET DESTROYED'
+            : `Target survived (HP: ${Math.round(targetEntity.health)}/${targetEntity.maxHealth})`;
+        helper.aiLog(attackerPlayer, 'combat', `Attack Sequence Complete: ${sourceEntity.name} used ${ordersUsed} order(s) against ${targetPlayer.name}'s ${targetEntity.name}. Result: ${finalStatus}. Attacker AP left: ${sourceEntity.actionPoints}.`);
+    } else {
+        helper.aiLog(attackerPlayer, 'detail', `Attack Sequence Incomplete (0 orders used): ${sourceEntity.name} could not attack ${targetEntity.name} (${lastCheckReason}).`);
+    }
+
+    let result;
+    const targetLabel = `${targetPlayer.name}'s ${targetEntity.name}`;
+    if (attacksLanded > 0 && targetDead) {
+        result = { status: 'completed', message: `Destroyed ${targetLabel} (${attacksLanded} attack(s), ${totalDamage.toFixed(0)} total damage).` };
+    } else if (attacksLanded > 0) {
+        result = { status: 'completed', message: `Attacked ${targetLabel} ${attacksLanded} time(s) for ${totalDamage.toFixed(0)} total damage; target at ${Math.round(targetEntity.health)}/${targetEntity.maxHealth} HP.` };
+    } else if (movedCloser) {
+        result = { status: 'partial', message: `Moved closer to ${targetLabel} but could not attack (${lastCheckReason}).` };
+    } else {
+        const apRounded = sourceEntity.actionPoints !== undefined ? Math.round(sourceEntity.actionPoints * 10) / 10 : null;
+        const apInfo = apRounded !== null ? ` ${sourceEntity.name} has ${apRounded} AP remaining.` : '';
+        result = { status: 'failed', message: `Could not attack ${targetLabel} (${lastCheckReason}).${apInfo}` };
+    }
+    return { ordersUsed, result };
+}
+
+/**
  * Returns all border cells on the hex grid (cells with fewer than 6 neighbors).
  * @param {Object} helper - AiHelper instance
  * @returns {Array<Object>}
@@ -241,7 +492,7 @@ export async function manageBarbarians(config, helper) {
           if (verdict === 'ignore') continue;
         }
         console.debug(`[Barbarians] ${entity.name} at (${entity.q}, ${entity.r}) attacking ${targetEnemy.name} (Owner: ${targetEnemy.owner?.name || 'neutral'}) at (${targetEnemy.q}, ${targetEnemy.r})`);
-        const res = helper.attack(gameState, entity, targetEnemy, Infinity);
+        const res = await barbarianAttack(gameState, helper, entity, targetEnemy, Infinity);
         if (res && res.ordersUsed > 0) {
           attacked = true;
           await helper.onActionDone(gameState, [entity.cell, targetEnemy.cell], `${entity.name} attacked ${targetEnemy.name}`);

@@ -13,6 +13,8 @@
  * unit "Move" action) — the same ones attack() already uses for staging.
  * No engine rules change.
  */
+import { ActionApi } from '../../actions.js';
+
 function dist(a, b, helper) {
     const ac = a.cell || a, bc = b.cell || b;
     return helper.distance(ac, bc);
@@ -237,7 +239,8 @@ function moveUnitToward(gameState, player, unit, dest, helper) {
         if (path.length === 0) return fail(`No walkable path toward target.`);
     }
 
-    const moved = helper.moveAlongPath(player, unit, moveAction, path, gameState, 'move',
+    const api = new ActionApi(player, gameState, helper);
+    const moved = api.moveAlongPath(unit, moveAction, path, 'move',
         `menu move for ${player.name}`);
     if (!moved) return fail(`Could not move ${entLabel(unit, player)}.`);
     helper.aiLog(player, 'move', `Menu: moved ${entLabel(unit, player)}.`);
@@ -248,9 +251,11 @@ function moveUnitToward(gameState, player, unit, dest, helper) {
  * Execute a menu action. Same {ordersUsed, result} shape as the actions in
  * ../../actions.js. Chat and end-turn are handled by the harness (they need
  * the harness's chat flow / history wiring).
+ * Async because the action composites may wait between internal steps.
  */
-export function executeMenuAction(gameState, player, action, helper) {
+export async function executeMenuAction(gameState, player, action, helper) {
     const fail = (message) => ({ ordersUsed: 0, result: { status: 'failed', message } });
+    const api = new ActionApi(player, gameState, helper);
     const unit = action.actorId ? findEntity(gameState, action.actorId) : null;
     if (action.verb !== 'end' && action.verb !== 'chat') {
         if (!unit) return fail(`Actor entity not found: ${action.actorId}`);
@@ -261,17 +266,17 @@ export function executeMenuAction(gameState, player, action, helper) {
         case 'attack': {
             const target = findEntity(gameState, action.targetId);
             if (!target) return fail(`Target entity not found: ${action.targetId}`);
-            return helper.attack(gameState, unit, target, maxOrders);
+            return await api.attack(unit, target, maxOrders);
         }
         case 'repair': {
             const target = findEntity(gameState, action.targetId);
             if (!target) return fail(`Target entity not found: ${action.targetId}`);
-            return helper.support(gameState, unit, target, 'Repair', maxOrders);
+            return await api.support(unit, target, 'Repair', maxOrders);
         }
         case 'build':
-            return helper.build(gameState, unit, action.itemName);
+            return await api.build(unit, action.itemName);
         case 'explore':
-            return helper.explore(gameState, unit, null, true);
+            return api.explore(unit, null, true);
         case 'move':
             return moveUnitToward(gameState, player, unit, action, helper);
         default:

@@ -712,6 +712,55 @@ export function isEntityMoving(entityId) {
   return entityMoveStates.has(entityId);
 }
 
+const moveAnimationWaiters = [];
+const moveAnimationEndCallbacks = [];
+const MOVE_ANIMATION_WAIT_TIMEOUT_MS = 30000;
+
+/**
+ * Resolves once no entity move animations are running. Used by the AI
+ * pacing hook (onActionDone) so the next AI action waits until every mesh
+ * has caught up with its logical position. A timeout keeps a stuck or
+ * background-paused animation from blocking the turn forever.
+ */
+export function waitForMoveAnimations(timeoutMs = MOVE_ANIMATION_WAIT_TIMEOUT_MS) {
+  if (entityMoveStates.size === 0) return Promise.resolve();
+  return new Promise(resolve => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      const index = moveAnimationWaiters.indexOf(finish);
+      if (index !== -1) moveAnimationWaiters.splice(index, 1);
+      console.warn(`[renderer] move animation wait timed out after ${timeoutMs}ms`);
+      finish();
+    }, timeoutMs);
+    moveAnimationWaiters.push(finish);
+  });
+}
+
+/**
+ * Registers a callback invoked with `(entityId, finished)` whenever a move
+ * animation ends. `finished` is false for cancellations. Used by the input
+ * layer to re-select a unit after its walk completes.
+ */
+export function onMoveAnimationEnd(callback) {
+  moveAnimationEndCallbacks.push(callback);
+}
+
+function notifyMoveAnimationEnded(entityId, finished) {
+  for (const cb of moveAnimationEndCallbacks) {
+    try { cb(entityId, finished); } catch (e) { console.error('[renderer] move-end callback failed:', e); }
+  }
+  if (entityMoveStates.size === 0 && moveAnimationWaiters.length > 0) {
+    const waiters = moveAnimationWaiters.splice(0);
+    for (const finish of waiters) finish();
+  }
+}
+
 /**
  * Starts (or appends to) an entity's move animation. The effect walks each
  * leg in order, facing the next cell, for MOVE_TIME_PER_CELL * cell cost
@@ -812,6 +861,7 @@ function finishEntityMoveAnimation(entityId) {
     disposeEntityMesh(state.group);
     delete entityMeshMap[entityId];
   }
+  notifyMoveAnimationEnded(entityId, true);
 }
 
 /**
@@ -826,6 +876,7 @@ function cancelEntityMoveAnimation(entityId) {
     const index = activeEffects.indexOf(state.effect);
     if (index !== -1) activeEffects.splice(index, 1);
   }
+  notifyMoveAnimationEnded(entityId, false);
 }
 
 /** Clears every running move animation. */

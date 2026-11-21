@@ -121,11 +121,48 @@ const HELPER_METHODS = new Set([
   'isMilitary', 'getEntitiesByCapability', 'getEntitiesSortedByPower',
   'getEntitiesSortedByEffectiveness', 'findClosestEntity',
   'findPathTowardsUnexplored', 'selectCandidateCombatUnits',
-  'attack', 'build', 'support', 'explore', 'moveAlongPath', 'chat', 'initiateTrade',
+  'chat', 'initiateTrade',
   // Phase 26: trade mechanics live on the helper; any AI may call them.
   'reviewTrades', 'maybeInitiateTrade',
   'onActionDone', 'getDirections8',
 ]);
+
+// Tracks whether the manager has an action whose onActionDone has not yet
+// completed. Direct action.do() calls set it; onActionDone clears it. This is
+// the pacing contract that makes AI actions resolve one at a time.
+//
+// Per-manager pacing state, keyed by the manager's `seen` cache (the one
+// object that identifies a manager's whole proxy tree). Registered by
+// createAiManager; proxies built outside it have no entry and are not paced.
+const pacingByManager = new WeakMap();
+
+function assertNoPendingAction(seen, aiName, what) {
+  const pacing = pacingByManager.get(seen);
+  if (pacing && pacing.pending) {
+    throw new Error(
+      `[AI Interface] Pacing violation: AI '${aiName}' attempted ${what} while a previous action is still pending. ` +
+      `Call and await helper.onActionDone after every action before executing another.`
+    );
+  }
+}
+
+function markActionPending(seen) {
+  const pacing = pacingByManager.get(seen);
+  if (pacing) pacing.pending = true;
+}
+
+function clearPendingAction(seen) {
+  const pacing = pacingByManager.get(seen);
+  if (pacing) pacing.pending = false;
+}
+
+// Did an action-executing call actually do something? Failed attempts
+// (0 orders used, action.do() === false) change nothing and need no pacing.
+function actionExecuted(result) {
+  if (result === true) return true;
+  if (typeof result === 'number') return result > 0;
+  return !!(result && typeof result === 'object' && result.ordersUsed > 0);
+}
 
 function isEntityObject(obj) {
   return obj !== null && typeof obj === 'object' &&
@@ -207,7 +244,21 @@ function wrapActionsWithOwnership(actions, entityTarget, entityName, aiName, see
         }
       });
     }
-    return wrappedAction;
+    // Own actions: executing one sets the pacing flag — the AI must call
+    // onActionDone before executing another action.
+    return new Proxy(wrappedAction, {
+      get(actTarget, actProp) {
+        if (actProp === 'do') {
+          return (...args) => {
+            assertNoPendingAction(seen, aiName, `action '${action.name}'`);
+            const result = Reflect.get(actTarget, 'do').apply(actTarget, args);
+            if (actionExecuted(result)) markActionPending(seen);
+            return result;
+          };
+        }
+        return Reflect.get(actTarget, actProp);
+      }
+    });
   });
 }
 
@@ -755,27 +806,6 @@ function createHelperProxy(helper, ownPlayer, aiName, seen = new WeakMap(), prox
         // and applyResourceYieldBonus are engine-internal.
         if (!HELPER_METHODS.has(prop)) return undefined;
         return function (...args) {
-          if (['attack', 'build', 'support', 'explore'].includes(prop)) {
-            const sourceEntity = unwrap(args[1]);
-            // P6: a missing owner counts as not-owned (barbarians are
-            // ownerless) — the old check passed them through.
-            const ownerId = sourceEntity ? (sourceEntity.owner?.id ?? sourceEntity.ownerId) : undefined;
-            if (sourceEntity && ownerId !== ownPlayer.id) {
-              throw new Error(
-                `[AI Interface] Illegal action: AI '${aiName}' cannot command entity '${sourceEntity.name}' owned by another player.`
-              );
-            }
-          }
-          if (prop === 'moveAlongPath') {
-            const player = unwrap(args[0]);
-            const unit = unwrap(args[1]);
-            const unitOwnerId = unit ? (unit.owner?.id ?? unit.ownerId) : undefined;
-            if ((player && player.id !== ownPlayer.id) || (unit && unitOwnerId !== ownPlayer.id)) {
-              throw new Error(
-                `[AI Interface] Illegal action: AI '${aiName}' cannot move entity owned by another player.`
-              );
-            }
-          }
           // P5: chat must be initiated as yourself — an AI can't spend
           // another player's orders or speak as them.
           if (prop === 'chat') {
@@ -803,7 +833,19 @@ function createHelperProxy(helper, ownPlayer, aiName, seen = new WeakMap(), prox
             if (u === target.gameState && proxiedGameState) return proxiedGameState;
             return u;
           });
-          return deepWrap(val.apply(target, realArgs), aiName, seen, ownPlayer);
+
+          const result = val.apply(target, realArgs);
+
+          if (prop === 'onActionDone') {
+            // Clear the pacing flag once the pacing wait settles — the AI
+            // must await this call before executing another action.
+            return Promise.resolve(result).then(
+              (v) => { clearPendingAction(seen); return v; },
+              (e) => { clearPendingAction(seen); throw e; }
+            );
+          }
+
+          return deepWrap(result, aiName, seen, ownPlayer);
         };
       }
       if (val !== null && typeof val === 'object') {
@@ -852,6 +894,9 @@ export function createAiManager(ManagerClass, player, helper) {
   // transparently — e.g. unit.owner === this.player is true when they wrap
   // the same underlying player.
   const seen = new WeakMap();
+  // Pacing contract: after an action-executing call, this manager must
+  // call and await onActionDone before executing another action.
+  pacingByManager.set(seen, { pending: false });
   const proxiedPlayer = createPlayerProxy(player, aiName, seen);
   const rawGameState = helper.getGameState();
   const proxiedGameState = createGameStateProxy(rawGameState, player, aiName, seen);
@@ -864,5 +909,22 @@ export function createAiManager(ManagerClass, player, helper) {
 
   const manager = new ManagerClass(proxiedPlayer, proxiedHelper);
   manager.gameState = proxiedGameState;
+
+  // Clear any leaked pending action at turn boundaries. A successful action
+  // followed by an exception before onActionDone must not disable this
+  // manager for every later turn.
+  for (const method of ['processTurn', 'runStrategicTurn']) {
+    const original = manager[method];
+    if (typeof original !== 'function') continue;
+    manager[method] = async function (...args) {
+      clearPendingAction(seen);
+      try {
+        return await original.apply(this, args);
+      } finally {
+        clearPendingAction(seen);
+      }
+    };
+  }
+
   return manager;
 }

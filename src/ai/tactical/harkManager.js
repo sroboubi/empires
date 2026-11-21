@@ -371,13 +371,13 @@ export class HarkManager extends AdaptiveManager {
         return this.sortForEngagement(chosen, target);
     }
 
-    /** helper.attack with B2 failure bookkeeping. Returns orders used. */
-    engage(attacker, target, label, ownerName, involvedCells) {
+    /** actions.attack with B2 failure bookkeeping. Returns orders used. */
+    async engage(attacker, target, label, ownerName, involvedCells) {
         const from = { q: attacker.q, r: attacker.r };
         // Strike pool (canStrikeThisTurn) includes move-then-attack units,
         // which need 2 orders; with maxOrders=1 they spent the order moving
-        // and never struck. helper.attack caps by the player's actual orders.
-        const result = this.helper.attack(this.gameState, attacker, target, Math.min(2, num(this.player.orders)));
+        // and never struck. actions.attack caps by the player's actual orders.
+        const result = await this.actions.attack(attacker, target, Math.min(2, num(this.player.orders)));
         const used = ordersUsedFrom(result);
         if (used > 0) {
             involvedCells.push(from, attacker.cell);
@@ -400,7 +400,7 @@ export class HarkManager extends AdaptiveManager {
      * (1) strike any immediate threat a unit can hit now, (2) save vulnerable
      * units standing next to a threat, (3) advance units that cannot strike yet.
      */
-    respondToImmediateThreats(immediate, econ, involvedCells) {
+    async respondToImmediateThreats(immediate, econ, involvedCells) {
         if (immediate.length === 0) return false;
 
         for (const item of immediate) {
@@ -415,16 +415,16 @@ export class HarkManager extends AdaptiveManager {
                 + `| Stance: ${item.stance} | Strikers: [${strikers.map(unit => `${unit.name}#${shortId(unit)}`).join(', ')}]`
             );
             for (const attacker of strikers) {
-                if (this.engage(attacker, target, 'Emergency strike', item.ownerName, involvedCells) > 0) return true;
+                if (await this.engage(attacker, target, 'Emergency strike', item.ownerName, involvedCells) > 0) return true;
             }
         }
 
-        if (this.attemptRetreats(econ, involvedCells, true)) return true;
+        if (await this.attemptRetreats(econ, involvedCells, true)) return true;
 
         for (const item of immediate) {
             const target = item.entity;
             for (const unit of this.selectAttackers(target, { advance: true })) {
-                if (this.engage(unit, target, 'Emergency advance', item.ownerName, involvedCells) > 0) return true;
+                if (await this.engage(unit, target, 'Emergency advance', item.ownerName, involvedCells) > 0) return true;
             }
         }
         return false;
@@ -465,7 +465,7 @@ export class HarkManager extends AdaptiveManager {
      * the adaptive opportunistic pool (which closes distance itself). Then an
      * advance pass (B2) closes distance on threats nobody can hit yet.
      */
-    engageCombatTargets(targets, involvedCells) {
+    async engageCombatTargets(targets, involvedCells) {
         for (const item of targets) {
             const target = item.entity;
             const candidates = this.selectAttackers(target, { emergency: item.isThreat });
@@ -478,14 +478,14 @@ export class HarkManager extends AdaptiveManager {
                 + `| Candidates: [${candidates.map(unit => `${unit.name}#${shortId(unit)}@(${unit.q},${unit.r})`).join(', ')}]`
             );
             for (const attacker of candidates) {
-                if (this.engage(attacker, target, 'Engagement', item.ownerName, involvedCells) > 0) return true;
+                if (await this.engage(attacker, target, 'Engagement', item.ownerName, involvedCells) > 0) return true;
             }
         }
 
         for (const item of targets) {
             if (!item.isThreat) continue;
             for (const unit of this.selectAttackers(item.entity, { advance: true })) {
-                if (this.engage(unit, item.entity, 'Advance on threat', item.ownerName, involvedCells) > 0) return true;
+                if (await this.engage(unit, item.entity, 'Advance on threat', item.ownerName, involvedCells) > 0) return true;
             }
         }
         return false;
@@ -624,7 +624,7 @@ export class HarkManager extends AdaptiveManager {
     }
 
     /** Move to (if needed) and build at a specific site. Returns orders used. */
-    buildAtSite(builder, targetName, site, category, reason, involvedCells) {
+    async buildAtSite(builder, targetName, site, category, reason, involvedCells) {
         const actions = builder.getActions ? builder.getActions() : [];
         const expected = `build ${this.helper.camelToTitle(targetName)}`.toLowerCase();
         const buildAction = actions.find(action =>
@@ -645,8 +645,8 @@ export class HarkManager extends AdaptiveManager {
         let used = 0;
         if (site.stage.path.length > 0) {
             if (!moveAction || num(builder.actionPoints) <= 0) return 0;
-            const moved = this.helper.moveAlongPath(
-                this.player, builder, moveAction, site.stage.path, this.gameState, category,
+            const moved = this.actions.moveAlongPath(
+                builder, moveAction, site.stage.path, category,
                 `moving to build ${this.helper.camelToTitle(targetName)} at (${site.cell.q},${site.cell.r})`
             );
             if (!moved) return 0;
@@ -657,6 +657,9 @@ export class HarkManager extends AdaptiveManager {
         if (this.helper.distance(builder, site.cell) !== 1) return used;
 
         const check = buildAction.canDo(site.cell, null);
+        if (check?.possible && used > 0) {
+            await this.helper.onActionDone(this.gameState, [start, builder.cell], `in position to build ${targetName}`);
+        }
         if (check?.possible && buildAction.do(site.cell, null)) {
             involvedCells.push(start, site.cell);
             this.helper.aiLog(this.player, category, `Build result | ${builder.name}#${shortId(builder)} -> ${this.helper.camelToTitle(targetName)} at (${site.cell.q},${site.cell.r})`);
@@ -665,15 +668,15 @@ export class HarkManager extends AdaptiveManager {
         return used;
     }
 
-    executeBuild(builder, targetName, category, reason, involvedCells) {
+    async executeBuild(builder, targetName, category, reason, involvedCells) {
         if (!builder || !builder.active || this.getBuildCharges(builder) <= 0) return 0;
         if (this.getRestrictedStructures().length === 0) {
-            return super.executeBuild(builder, targetName, category, reason, involvedCells);
+            return await super.executeBuild(builder, targetName, category, reason, involvedCells);
         }
         const { candidates } = this.helper.findBuildCandidates(this.gameState, builder, targetName);
         const allowed = this.filterBuildCandidates(candidates || []);
         if (allowed.length === (candidates || []).length) {
-            return super.executeBuild(builder, targetName, category, reason, involvedCells);
+            return await super.executeBuild(builder, targetName, category, reason, involvedCells);
         }
         if (allowed.length === 0) {
             const key = `${builder.id}:${targetName}`;
@@ -688,7 +691,7 @@ export class HarkManager extends AdaptiveManager {
             }
             return 0;
         }
-        return this.buildAtSite(builder, targetName, this.pickBuildSite(allowed), category, reason, involvedCells);
+        return await this.buildAtSite(builder, targetName, this.pickBuildSite(allowed), category, reason, involvedCells);
     }
 }
 

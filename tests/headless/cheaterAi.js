@@ -6,6 +6,8 @@
  * Each probe records PASS (blocked as expected) or FAIL (hole!).
  * Throws if any probe fails. Results reset every turn.
  */
+import { ActionApi } from '../../src/ai/actions.js';
+
 function probe(results, name, fn, expectBlocked) {
   try {
     const val = fn();
@@ -230,11 +232,6 @@ export default class CheaterAi {
     });
 
     // --- 12. P5/P6: helper ownership guards ---
-    if (probeTarget) {
-      probe(results, 'helper.attack on foreign entity throws', () => {
-        helper.attack(gs, probeTarget, me.getEntities()[0], 1);
-      }, 'throw');
-    }
     probe(results, 'helper.chat as another player throws', () => {
       helper.chat(opponent, me, 'hello');
     }, 'throw');
@@ -297,10 +294,14 @@ export default class CheaterAi {
             const check = moveAction.canDo(cell, null);
             if (!check?.possible) break;
             if (!moveAction.do(cell, null)) break;
+            // Pacing contract: onActionDone after every action.
+            await helper.onActionDone(gs, [cell], 'Cheater move');
           }
         }
       } else {
-        helper.explore(gs, swordsman);
+        const actions = new ActionApi(me, gs, helper);
+        actions.explore(swordsman);
+        await helper.onActionDone(gs, null, 'Cheater explore');
       }
     }
     return { ordersUsed: 0, result: { status: 'completed', message: 'red-team scan done' } };

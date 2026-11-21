@@ -1133,6 +1133,7 @@ export default class OpusAI extends BaseManager {
         const action = b.builds.get(this.buildActionName(type));
         let used = 0;
         const from = this.where(b);
+        const startCell = { q: b.e.q, r: b.e.r };
         if (site.stage !== K(b.q, b.r)) {
             const path = this.pathTo(this.unitReachFull(b), site.stage);
             const moved = await this.moveUnit(b, path, `walking to build ${type} at (${site.q},${site.r}) [plan ${o.plan.chain.join('>')}, value ${o.value.toFixed(2)}]`);
@@ -1148,7 +1149,10 @@ export default class OpusAI extends BaseManager {
             this.failed.set(`build:${b.id}:${type}:${K(site.q, site.r)}`, chk?.reason);
             return used;
         }
-        if (action.do(cell, null)) {
+        if (chk?.possible && used > 0) {
+            await this.helper.onActionDone(this.gameState, [startCell, b.e.cell], `in position to build ${type}`);
+        }
+        if (chk?.possible && action.do(cell, null)) {
             used++;
             this.mem.plans.delete(b.id);
             const c = this.cells.get(K(site.q, site.r));
@@ -1235,7 +1239,7 @@ export default class OpusAI extends BaseManager {
     async execAttack(u, t, orders, value, plan, team) {
         const from = this.where(u);
         const hpBefore = t.e.health;
-        const res = this.helper.attack(this.gameState, u.e, t.e, orders);
+        const res = await this.actions.attack(u.e, t.e, orders);
         this.log(`ATTACK ${this.label(t)} with ${u.name} from ${from} (stance ${this.stanceOf(t.ownerId)}, threat ${t.risk.toFixed(2)}, value ${value.toFixed(2)}, plan ${plan.hits} hit(s) from (${plan.pos}), team damage ${Math.round(team)}): ${res?.result?.message} [hp ${Math.round(hpBefore)} -> ${t.e.destroyed ? 0 : Math.round(t.e.health)}]`);
         return res?.ordersUsed || 0;
     }
@@ -1281,7 +1285,7 @@ export default class OpusAI extends BaseManager {
                     kind: 'repair', key: `repair:${rp.id}:${t.id}`, value: v, orders: adj ? 1 : 2,
                     exec: async () => {
                         const from = this.where(rp);
-                        const res = this.helper.support(this.gameState, rp.e, t.e, 'Repair', adj ? 1 : 2);
+                        const res = await this.actions.support(rp.e, t.e, 'Repair', adj ? 1 : 2);
                         this.log(`REPAIR ${this.label(t)} hp ${Math.round(t.hp)}/${t.maxHp} by ${rp.name} from ${from} (value ${v.toFixed(2)}${lostYield ? ', restores yields' : ''}${heavy ? (threatened ? ', under attack' : ', heavily damaged') : ''}): ${res?.result?.message}`);
                         return res?.ordersUsed || 0;
                     },
@@ -1457,7 +1461,7 @@ export default class OpusAI extends BaseManager {
         const cells = [];
         for (const k of path) { const [q, r] = parseK(k); const c = this.helper.getCell(q, r); if (c) cells.push(c); }
         const from = this.where(u);
-        const used = this.helper.moveAlongPath(this.player, u.e, u.move, cells, this.gameState, 'explore', why);
+        const used = this.actions.moveAlongPath(u.e, u.move, cells, 'explore', why);
         if (used) this.log(`MOVE ${u.name}#${String(u.id).split('_').pop()} ${from} -> (${u.e.q},${u.e.r}): ${why}`);
         return used;
     }

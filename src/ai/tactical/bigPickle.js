@@ -53,7 +53,7 @@ const DEFAULT_BIG_PICKLE_CONFIG = {
 
     // --- Combat tempo -----------------------------------------------------
     // Two orders allow a unit to move into range and attack in one sequence.
-    // helper.attack() spends nothing when the target is unreachable, so this
+    // actions.attack() spends nothing when the target is unreachable, so this
     // does not burn orders on hopeless targets.
     combatOrders: 2,
     emergencyCombatOrders: 2,
@@ -233,42 +233,42 @@ export class BigPickleManager extends AdaptiveManager {
             let actionLabel = null;
 
             // 1. Immediate self-defence: kill or evade an adjacent/attacking enemy.
-            if (this.attemptEmergencyDefense(econ, involvedCells)) {
+            if (await this.attemptEmergencyDefense(econ, involvedCells)) {
                 actionLabel = 'Emergency defence';
             }
             // 2. Resource deadlock prevention (build, repair, or scrap).
-            else if (this.attemptCriticalDeficits(econ, involvedCells)) {
+            else if (await this.attemptCriticalDeficits(econ, involvedCells)) {
                 actionLabel = 'Critical deficit recovery';
             }
             // 3. General combat under stance rules.
-            else if (this.attemptCombat(econ, involvedCells)) {
+            else if (await this.attemptCombat(econ, involvedCells)) {
                 actionLabel = 'Combat';
             }
             // 4. Retreat vulnerable non-combat units away from threats.
-            else if (this.attemptRetreats(econ, involvedCells, false)) {
+            else if (await this.attemptRetreats(econ, involvedCells, false)) {
                 actionLabel = 'Retreat';
             }
             // 5. Heavy repairs only.
-            else if (this.attemptRepairs(econ, involvedCells)) {
+            else if (await this.attemptRepairs(econ, involvedCells)) {
                 actionLabel = 'Repair';
             }
             // 6. Directive goals, in priority order.
-            else if (this.processGoals(econ, involvedCells)) {
+            else if (await this.processGoals(econ, involvedCells)) {
                 actionLabel = 'Directive goal';
             }
             // 7. If exploration is the weakest pillar, spend at least one
             // action on it before build orders consume the whole turn.
             else if (this.shouldPrioritizeExploration(econ)
-                && this.attemptExploration(econ, involvedCells, { excludeSupport: true })) {
+                && (await this.attemptExploration(econ, involvedCells, { excludeSupport: true }))) {
                 this.turnState.prioritizedExplorations += 1;
                 actionLabel = 'Prioritized exploration';
             }
             // 8. Proactive economic/military growth (including prerequisites).
-            else if (this.attemptProactiveBuild(econ, { involvedCells })) {
+            else if (await this.attemptProactiveBuild(econ, { involvedCells })) {
                 actionLabel = 'Proactive growth';
             }
             // 9. Exploration.
-            else if (this.attemptExploration(econ, involvedCells)) {
+            else if (await this.attemptExploration(econ, involvedCells)) {
                 actionLabel = 'Exploration';
             }
 
@@ -475,13 +475,13 @@ export class BigPickleManager extends AdaptiveManager {
      * Emergency defence must consider threats to inactive assets too, so pass
      * every owned entity into detection (response still uses active units).
      */
-    attemptEmergencyDefense(econ, involvedCells) {
+    async attemptEmergencyDefense(econ, involvedCells) {
         const own = this.getOwnEntities();
         const foreign = this.getVisibleForeignEntities();
         if (own.length === 0 || foreign.length === 0) return false;
 
         const immediate = this.getImmediateThreats(own, foreign);
-        return this.respondToImmediateThreats(immediate, econ, involvedCells);
+        return await this.respondToImmediateThreats(immediate, econ, involvedCells);
     }
 
     /**
@@ -564,7 +564,7 @@ export class BigPickleManager extends AdaptiveManager {
     }
 
     /** Attack the most urgent immediate threat, else save adjacent vulnerable units. */
-    respondToImmediateThreats(immediate, econ, involvedCells) {
+    async respondToImmediateThreats(immediate, econ, involvedCells) {
         for (const item of immediate) {
             const target = item.entity;
             const candidates = this.selectAttackers(target, { emergency: true });
@@ -583,8 +583,7 @@ export class BigPickleManager extends AdaptiveManager {
 
             for (const attacker of candidates) {
                 const from = { q: attacker.q, r: attacker.r };
-                const result = this.helper.attack(
-                    this.gameState,
+                const result = await this.actions.attack(
                     attacker,
                     target,
                     this.getCombatOrderBudget(true)
@@ -603,11 +602,11 @@ export class BigPickleManager extends AdaptiveManager {
         }
 
         // No attack was possible: try to save vulnerable adjacent units instead.
-        return this.attemptRetreats(econ, involvedCells, true);
+        return await this.attemptRetreats(econ, involvedCells, true);
     }
 
     /** Attack the highest-priority target any candidate can engage. */
-    engageCombatTargets(targets, involvedCells) {
+    async engageCombatTargets(targets, involvedCells) {
         for (const item of targets) {
             const target = item.entity;
             const candidates = this.selectAttackers(target, { emergency: item.isThreat });
@@ -622,8 +621,7 @@ export class BigPickleManager extends AdaptiveManager {
 
             for (const attacker of candidates) {
                 const from = { q: attacker.q, r: attacker.r };
-                const result = this.helper.attack(
-                    this.gameState,
+                const result = await this.actions.attack(
                     attacker,
                     target,
                     this.getCombatOrderBudget(item.isThreat)
@@ -673,8 +671,8 @@ export class BigPickleManager extends AdaptiveManager {
 
     // ==================== Deadlock escape ====================
 
-    attemptCriticalDeficits(econ, involvedCells) {
-        if (super.attemptCriticalDeficits(econ, involvedCells)) return true;
+    async attemptCriticalDeficits(econ, involvedCells) {
+        if (await super.attemptCriticalDeficits(econ, involvedCells)) return true;
         if (!econ?.urgent || econ.urgent.length === 0) return false;
         return this.attemptScrapping(econ, involvedCells);
     }
@@ -863,7 +861,7 @@ export class BigPickleManager extends AdaptiveManager {
      * prerequisite chain (village -> worker -> farm, barracks -> swordsman...)
      * and ranks that step by downstream value per unit of resource spent.
      */
-    attemptProactiveBuild(econ, options = {}) {
+    async attemptProactiveBuild(econ, options = {}) {
         const involvedCells = options.involvedCells || [];
         const category = options.category || null;
         const goal = options.goal || null;
@@ -980,8 +978,8 @@ export class BigPickleManager extends AdaptiveManager {
             );
 
             const used = goal
-                ? this.executeBuildWithGoal(candidate.builder, candidate.targetName, goal, involvedCells)
-                : this.executeBuild(candidate.builder, candidate.targetName, 'build', reason, involvedCells);
+                ? await this.executeBuildWithGoal(candidate.builder, candidate.targetName, goal, involvedCells)
+                : await this.executeBuild(candidate.builder, candidate.targetName, 'build', reason, involvedCells);
 
             if (used > 0) {
                 if (candidate.finalTarget && candidate.finalTarget !== candidate.targetName) {
@@ -1138,8 +1136,7 @@ export class BigPickleManager extends AdaptiveManager {
 
             for (const entry of ranked) {
                 const from = { q: explorer.q, r: explorer.r };
-                const result = this.helper.explore(
-                    this.gameState,
+                const result = this.actions.explore(
                     explorer,
                     entry.direction,
                     false,
@@ -1168,8 +1165,7 @@ export class BigPickleManager extends AdaptiveManager {
         // take a directional path (still respects per-turn claimed cells).
         for (const explorer of explorers) {
             const from = { q: explorer.q, r: explorer.r };
-            const result = this.helper.explore(
-                this.gameState,
+            const result = this.actions.explore(
                 explorer,
                 null,
                 false,

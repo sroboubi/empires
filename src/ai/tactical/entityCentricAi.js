@@ -1193,19 +1193,19 @@ export class EntityCentricAI extends BaseManager {
     let result;
     switch (action) {
       case 'attack':
-        result = helper.attack(gameState, entity, candidate.target, 2);
+        result = await this.actions.attack(entity, candidate.target, 2);
         break;
       case 'build':
-        result = helper.build(gameState, entity, candidate.targetName);
+        result = await this.actions.build(entity, candidate.targetName);
         break;
       case 'explore':
-        result = helper.explore(gameState, entity, null, false, null);
+        result = this.actions.explore(entity, null, false, null);
         break;
       case 'flee':
         result = this.executeFlee(entity, candidate.threat);
         break;
       case 'guard':
-        result = this.executeGuard(entity, candidate.target, candidate.threat);
+        result = await this.executeGuard(entity, candidate.target, candidate.threat);
         break;
       default:
         return false;
@@ -1255,11 +1255,11 @@ export class EntityCentricAI extends BaseManager {
    * Guard: if the threat can be struck, strike it; otherwise move toward
    * the entity that requested support.
    */
-  executeGuard(entity, requester, threat) {
+  async executeGuard(entity, requester, threat) {
     const helper = this.helper;
     const gameState = this.gameState;
     if (threat && this.canStrike(entity, threat)) {
-      return helper.attack(gameState, entity, threat, 2);
+      return await this.actions.attack(entity, threat, 2);
     }
     if (requester?.cell) {
       const moveAction = entity.getActions ? entity.getActions().find(a => a.name === 'Move') : null;
@@ -1273,7 +1273,7 @@ export class EntityCentricAI extends BaseManager {
       // adjacent if the cell itself is occupied.
       const res = helper.findPathTowardsUnexplored(entity, gameState, this.player, null, [requester.cell]);
       if (!res || !res.path || res.path.length === 0) return null;
-      const moved = helper.moveAlongPath(this.player, entity, moveAction, res.path, gameState, 'guard', `Guard ${requester.name}`);
+      const moved = this.actions.moveAlongPath(entity, moveAction, res.path, 'guard', `Guard ${requester.name}`);
       return { ordersUsed: moved ? 1 : 0 };
     }
     return null;
@@ -1289,7 +1289,7 @@ export class EntityCentricAI extends BaseManager {
     const gameState = this.gameState;
     const maxAP = asNumber(entity.maxActionPoints, asNumber(entity.actionPoints, 0));
     const cells = helper.findReachableCells(gameState, entity, Math.ceil(maxAP) + this.config.reachStepMargin);
-    if (cells.size <= 1) return helper.explore(gameState, entity, null, false, null);
+    if (cells.size <= 1) return this.actions.explore(entity, null, false, null);
 
     const protectors = this.getMyUnits().filter(u =>
       u.id !== entity.id && helper.isCombatCapable(u)
@@ -1307,7 +1307,7 @@ export class EntityCentricAI extends BaseManager {
       }
       if (score > bestScore) { bestScore = score; best = cell; }
     }
-    if (!best) return helper.explore(gameState, entity, null, false, null);
+    if (!best) return this.actions.explore(entity, null, false, null);
     // B1: move directly along the path to the best cell. explore's 5th
     // argument is an ignore-list, not a destination — passing the best cell
     // there made the unit walk toward the fog (possibly toward the enemy)
@@ -1315,11 +1315,11 @@ export class EntityCentricAI extends BaseManager {
     // so take the path to the best cell and move along it; moveAlongPath
     // returns 1/0, so wrap it in {ordersUsed} for executeCandidate.
     const moveAction = entity.getActions ? entity.getActions().find(a => a.name === 'Move') : null;
-    if (!moveAction) return helper.explore(gameState, entity, null, false, null);
+    if (!moveAction) return this.actions.explore(entity, null, false, null);
     const entry = cells.get(`${best.q},${best.r}`);
     const path = entry?.path || [];
-    if (path.length === 0) return helper.explore(gameState, entity, null, false, null);
-    const moved = helper.moveAlongPath(this.player, entity, moveAction, path, gameState, 'flee', `Flee from ${threat?.name || 'threat'}`);
+    if (path.length === 0) return this.actions.explore(entity, null, false, null);
+    const moved = this.actions.moveAlongPath(entity, moveAction, path, 'flee', `Flee from ${threat?.name || 'threat'}`);
     return { ordersUsed: moved ? 1 : 0 };
   }
 
