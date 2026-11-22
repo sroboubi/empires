@@ -131,6 +131,9 @@ function configuredPlayerTitle(p) {
 function configTable(game) {
   const s = game.settings || {};
   const playerList = (game.settings.players || []).map(configuredPlayerTitle).join(', ');
+  const barbarians = s.barbarians
+    ? `enabled (max ${s.barbarians.maxNumber ?? '—'}, aggression ${s.barbarians.aggression ?? '—'})`
+    : 'disabled';
   return table(['Setting', 'Value'], [
     ['Game ID', game.id],
     ['Iterations', game.iterations],
@@ -139,9 +142,26 @@ function configTable(game) {
     ['Seed', game.seed ?? '—'],
     ['Seed strategy', game.seedStrategy || 'increment'],
     ['Players', playerList || '—'],
-    ['Barbarians', s.barbarians ? 'enabled' : 'disabled'],
+    ['Barbarians', barbarians],
     ['Win condition', s.winCondition ? `absolute ${s.winCondition.absoluteScore ?? '—'}, relative ${s.winCondition.relativeScore ?? '—'}` : 'none'],
   ]);
+}
+
+function matrixSummary(game) {
+  if (!game.matrixSelection || game.matrixSelection.length === 0) return '—';
+  return game.matrixSelection.map(item => `${item.path}=${item.label}`).join('; ');
+}
+
+function matrixTable(game) {
+  if (!game.matrixSelection || game.matrixSelection.length === 0) return null;
+  return table(
+    ['Path', 'Option', 'Resolved value'],
+    game.matrixSelection.map(item => [
+      item.path,
+      item.label,
+      code(JSON.stringify(item.value)),
+    ])
+  );
 }
 
 function outcomeRows(runs) {
@@ -248,12 +268,19 @@ export function renderSummary({ suite, games, runsByGame, outputDir, startedAt, 
 
   lines.push('## Game settings');
   lines.push('');
+  const hasMatrix = games.some(game => game.matrixSelection?.length);
+  const settingsHeaders = ['Game', 'Iterations', 'Turns', 'Map', 'Seed'];
+  if (hasMatrix) settingsHeaders.push('Matrix');
+  settingsHeaders.push('Players');
   lines.push(table(
-    ['Game', 'Iterations', 'Turns', 'Map', 'Seed', 'Players'],
+    settingsHeaders,
     games.map(game => {
       const s = game.settings || {};
       const players = (s.players || []).map(configuredPlayerTitle).join(', ');
-      return [game.id, game.iterations, s.turns ?? '—', s.mapSize ?? '—', game.seed ?? '—', players || '—'];
+      const row = [game.id, game.iterations, s.turns ?? '—', s.mapSize ?? '—', game.seed ?? '—'];
+      if (hasMatrix) row.push(matrixSummary(game));
+      row.push(players || '—');
+      return row;
     })
   ));
   lines.push('');
@@ -375,6 +402,13 @@ export function renderGameReport({ game, runs, logFile }) {
   if (game.description) lines.push(game.description, '');
   lines.push(configTable(game));
   lines.push('');
+  const matrix = matrixTable(game);
+  if (matrix) {
+    lines.push('## Matrix values');
+    lines.push('');
+    lines.push(matrix);
+    lines.push('');
+  }
 
   lines.push('## Iterations');
   lines.push('');
@@ -816,15 +850,18 @@ export function renderRunReport({ game, run }) {
 
     lines.push(`## ${playerTitle(p)} — resources per round`);
     lines.push('');
-    const rounds = [...new Set([
-      ...Object.keys(p.producedByRound || {}),
-      ...Object.keys(p.consumedByRound || {}),
-    ])].sort((a, b) => Number(a) - Number(b));
+    // Resource flows live in the timeline (one snapshot per round), so they
+    // are not duplicated on each player in the raw metrics JSON.
+    const resourceTimeline = (metrics.timeline || [])
+      .filter(entry => entry.players?.[id])
+      .map(entry => ({
+        round: entry.round,
+        produced: entry.players[id].produced || {},
+        consumed: entry.players[id].consumed || {},
+      }));
     lines.push(table(
       ['Round', 'Produced', 'Consumed', 'Net', 'Breakdown (produced / consumed)'],
-      rounds.map(round => {
-        const produced = p.producedByRound?.[round] || {};
-        const consumed = p.consumedByRound?.[round] || {};
+      resourceTimeline.map(({ round, produced, consumed }) => {
         const producedTotal = sum(Object.values(produced));
         const consumedTotal = sum(Object.values(consumed));
         const breakdown = [

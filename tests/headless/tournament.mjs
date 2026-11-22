@@ -30,7 +30,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const SUITE_ONLY_KEYS = new Set([
   'name', 'description', 'outputDir', 'iterations', 'seedStrategy', 'seedStep',
-  'seed', 'concurrency', 'timeoutMs', 'logPatterns', 'report', 'games',
+  'seed', 'concurrency', 'timeoutMs', 'logPatterns', 'report', 'games', 'matrix',
   'failFast', 'saveFullLogs', 'maxLogMatches', 'perRunReports', 'defaults',
   'id', 'slug', 'settings', 'label',
 ]);
@@ -50,17 +50,50 @@ function parseArgs() {
     perRun: null,
   };
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--config' && args[i + 1]) opts.config = args[++i];
-    else if (args[i] === '--out' && args[i + 1]) opts.out = args[++i];
-    else if (args[i] === '--iterations' && args[i + 1]) opts.iterations = Number(args[++i]);
-    else if (args[i] === '--turns' && args[i + 1]) opts.turns = Number(args[++i]);
-    else if (args[i] === '--seed' && args[i + 1]) opts.seed = args[++i];
-    else if (args[i] === '--concurrency' && args[i + 1]) opts.concurrency = Number(args[++i]);
-    else if (args[i] === '--game' && args[i + 1]) opts.games.push(args[++i]);
-    else if (args[i] === '--fail-fast') opts.failFast = true;
-    else if (args[i] === '--full-logs') opts.fullLogs = true;
-    else if (args[i] === '--no-full-logs') opts.fullLogs = false;
-    else if (args[i] === '--no-per-run') opts.perRun = false;
+    const arg = args[i];
+    if (!arg.startsWith('--')) {
+      throw new Error(`Unexpected argument "${arg}". Use named options, e.g. --turns N.`);
+    }
+    const eq = arg.indexOf('=');
+    const name = eq === -1 ? arg : arg.slice(0, eq);
+    const inline = eq === -1 ? null : arg.slice(eq + 1);
+    const takeValue = () => {
+      if (inline !== null) {
+        if (inline === '') throw new Error(`${name} requires a value`);
+        return inline;
+      }
+      if (i + 1 >= args.length || args[i + 1].startsWith('--')) {
+        throw new Error(`${name} requires a value`);
+      }
+      return args[++i];
+    };
+    switch (name) {
+      case '--config': opts.config = takeValue(); break;
+      case '--out': opts.out = takeValue(); break;
+      case '--iterations': opts.iterations = Number(takeValue()); break;
+      case '--turns': opts.turns = Number(takeValue()); break;
+      case '--seed': opts.seed = takeValue(); break;
+      case '--concurrency': opts.concurrency = Number(takeValue()); break;
+      case '--game': opts.games.push(takeValue()); break;
+      case '--fail-fast':
+        if (inline !== null) throw new Error('--fail-fast does not take a value');
+        opts.failFast = true;
+        break;
+      case '--full-logs':
+        if (inline !== null) throw new Error('--full-logs does not take a value');
+        opts.fullLogs = true;
+        break;
+      case '--no-full-logs':
+        if (inline !== null) throw new Error('--no-full-logs does not take a value');
+        opts.fullLogs = false;
+        break;
+      case '--no-per-run':
+        if (inline !== null) throw new Error('--no-per-run does not take a value');
+        opts.perRun = false;
+        break;
+      default:
+        throw new Error(`Unknown option "${name}"`);
+    }
   }
   return opts;
 }
@@ -84,6 +117,130 @@ function deepMerge(base, override) {
     out[key] = key in out ? deepMerge(out[key], value) : deepClone(value);
   }
   return out;
+}
+
+function isPlainObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function pathParts(path) {
+  if (typeof path !== 'string' || path.trim() === '') {
+    throw new Error('Matrix paths must be non-empty dotted strings, e.g. "mapSize" or "initialization.orders.max"');
+  }
+  const parts = path.split('.').map(part => part.trim());
+  if (parts.some(part => part === '')) {
+    throw new Error(`Invalid matrix path "${path}"`);
+  }
+  return parts;
+}
+
+function isArrayIndex(part) {
+  return /^\d+$/.test(part);
+}
+
+/** Set a value at a dot path, creating intermediate objects/arrays. */
+function setAtPath(target, path, value) {
+  const parts = pathParts(path);
+  let cursor = target;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const part = parts[i];
+    const nextIsIndex = isArrayIndex(parts[i + 1]);
+    if (Array.isArray(cursor)) {
+      if (!isArrayIndex(part)) throw new Error(`Matrix path "${path}" expected an array index at "${part}"`);
+      const index = Number(part);
+      if (cursor[index] === undefined || cursor[index] === null) {
+        cursor[index] = nextIsIndex ? [] : {};
+      }
+      cursor = cursor[index];
+    } else {
+      if (!isPlainObject(cursor)) {
+        throw new Error(`Matrix path "${path}" cannot descend through "${parts.slice(0, i).join('.')}"`);
+      }
+      if (cursor[part] === undefined || cursor[part] === null) {
+        cursor[part] = nextIsIndex ? [] : {};
+      }
+      cursor = cursor[part];
+    }
+  }
+  const last = parts[parts.length - 1];
+  if (Array.isArray(cursor)) {
+    if (!isArrayIndex(last)) throw new Error(`Matrix path "${path}" expected an array index at "${last}"`);
+    cursor[Number(last)] = deepClone(value);
+  } else {
+    if (!isPlainObject(cursor)) {
+      throw new Error(`Matrix path "${path}" cannot assign through "${parts.slice(0, -1).join('.')}"`);
+    }
+    cursor[last] = deepClone(value);
+  }
+}
+
+function matrixOptionLabel(value, index) {
+  if (value === null) return 'none';
+  if (value === undefined) return 'undefined';
+  if (typeof value === 'object') return String(index);
+  return String(value);
+}
+
+/**
+ * Expand a suite-level matrix into concrete game definitions.
+ *
+ * `matrix` maps a dotted game-setting path to an array of options. The
+ * Cartesian product of all arrays becomes the generated games. Each option
+ * replaces the value at that path (it is not deep-merged), so an object
+ * option such as a barbarian config is used exactly as written.
+ */
+function expandMatrix(suite, baseSettings) {
+  if (!isPlainObject(suite.matrix)) {
+    throw new Error('"matrix" must be an object mapping dotted setting paths to arrays of options');
+  }
+  if (Array.isArray(suite.games) && suite.games.length > 0) {
+    throw new Error('Use either "matrix" or "games", not both');
+  }
+  const entries = Object.entries(suite.matrix);
+  if (entries.length === 0) throw new Error('"matrix" must define at least one path');
+  for (const [path, options] of entries) {
+    pathParts(path);
+    if (!Array.isArray(options) || options.length === 0) {
+      throw new Error(`Matrix path "${path}" must be a non-empty array of options`);
+    }
+  }
+
+  let combinations = [[]];
+  for (const [path, options] of entries) {
+    const next = [];
+    for (const combination of combinations) {
+      for (let index = 0; index < options.length; index++) {
+        next.push([...combination, { path, value: options[index], index }]);
+      }
+    }
+    combinations = next;
+  }
+
+  return combinations.map(combination => {
+    const settings = deepClone(baseSettings);
+    const matrixValues = {};
+    const matrixSelection = [];
+    const idParts = [];
+    for (const item of combination) {
+      setAtPath(settings, item.path, item.value);
+      matrixValues[item.path] = deepClone(item.value);
+      const label = matrixOptionLabel(item.value, item.index);
+      matrixSelection.push({
+        path: item.path,
+        label,
+        index: item.index,
+        value: deepClone(item.value),
+      });
+      idParts.push(`${slugify(item.path)}-${slugify(label)}`);
+    }
+    return {
+      id: idParts.join('__'),
+      description: `Matrix: ${matrixSelection.map(item => `${item.path}=${item.label}`).join(', ')}`,
+      settings,
+      matrixValues,
+      matrixSelection,
+    };
+  });
 }
 
 function slugify(text) {
@@ -130,22 +287,33 @@ function redactSecrets(value) {
 
 function normalizeSuite(suite, opts) {
   const suiteDefaults = deepMerge(settingsFrom(suite), suite.defaults || {});
-  const gameDefs = Array.isArray(suite.games) && suite.games.length > 0
-    ? suite.games
-    : [{ id: 'default' }];
+  const hasMatrix = suite.matrix !== undefined && suite.matrix !== null;
+  const gameDefs = hasMatrix
+    ? expandMatrix(suite, suiteDefaults)
+    : (Array.isArray(suite.games) && suite.games.length > 0
+      ? suite.games.map(game => ({ game }))
+      : [{ game: { id: suite.id || 'default' } }]);
 
   const usedSlugs = new Set();
-  const games = gameDefs.map((game, index) => {
-    const id = game.id || `game-${index + 1}`;
+  const games = gameDefs.map((entry, index) => {
+    const game = entry.game || {};
+    const id = entry.id || game.id || `game-${index + 1}`;
     let slug = slugify(id);
     let suffix = 2;
     while (usedSlugs.has(slug)) slug = `${slugify(id)}-${suffix++}`;
     usedSlugs.add(slug);
-    const gameDefaults = deepMerge(deepMerge(settingsFrom(game), game.defaults || {}), game.settings || {});
-    let settings = deepMerge(suiteDefaults, gameDefaults);
+
+    let settings;
+    if (entry.settings) {
+      settings = deepClone(entry.settings);
+    } else {
+      const gameDefaults = deepMerge(deepMerge(settingsFrom(game), game.defaults || {}), game.settings || {});
+      settings = deepMerge(suiteDefaults, gameDefaults);
+    }
 
     const iterations = opts.iterations ?? game.iterations ?? suite.iterations ?? 1;
-    const turns = opts.turns ?? game.turns ?? suite.turns ?? settings.turns ?? 5;
+    // settings.turns comes before suite.turns so a matrix can vary turns.
+    const turns = opts.turns ?? game.turns ?? settings.turns ?? suite.turns ?? 5;
     const baseSeed = opts.seed !== null && opts.seed !== undefined
       ? opts.seed
       : (game.seed ?? suite.seed ?? null);
@@ -158,7 +326,7 @@ function normalizeSuite(suite, opts) {
     return {
       id,
       slug,
-      description: game.description || null,
+      description: entry.description || game.description || null,
       iterations: Math.max(1, Number(iterations) || 1),
       turns,
       seed: baseSeed,
@@ -166,15 +334,17 @@ function normalizeSuite(suite, opts) {
       seedStep,
       logPatterns: game.logPatterns ?? suite.logPatterns ?? suite.report?.logPatterns ?? [],
       settings,
+      matrixValues: entry.matrixValues || null,
+      matrixSelection: entry.matrixSelection || null,
       suite,
     };
   });
 
   const filtered = opts.games.length > 0
-    ? games.filter(game => opts.games.includes(game.id))
+    ? games.filter(game => opts.games.includes(game.id) || opts.games.includes(game.slug))
     : games;
   if (filtered.length === 0) {
-    throw new Error(`No games matched --game filter: ${opts.games.join(', ')}`);
+    throw new Error(`No games matched --game filter: ${opts.games.join(', ')}. Available: ${games.map(game => game.id).join(', ')}`);
   }
   return filtered;
 }
@@ -301,6 +471,8 @@ async function main() {
       id: game.id, iterations: game.iterations, turns: game.turns,
       seed: game.seed, seedStrategy: game.seedStrategy, seedStep: game.seedStep,
       logPatterns: game.logPatterns,
+      matrixValues: game.matrixValues,
+      matrixSelection: game.matrixSelection,
       settings: game.settings,
     })),
   }), null, 2) + '\n');
@@ -308,7 +480,10 @@ async function main() {
   console.log(`[suite] ${suiteName}`);
   console.log(`[suite] config: ${configPath}`);
   console.log(`[suite] output: ${outDir}`);
-  console.log(`[suite] games: ${games.map(g => `${g.id} x${g.iterations}`).join(', ')}`);
+  console.log(`[suite] games: ${games.length} (${games.reduce((sum, game) => sum + game.iterations, 0)} runs)`);
+  if (games.length <= 20) {
+    console.log(`[suite] ids: ${games.map(g => `${g.id} x${g.iterations}`).join(', ')}`);
+  }
   console.log(`[suite] concurrency: ${concurrency}${logPatterns.length ? `; log patterns: ${logPatterns.join(', ')}` : ''}`);
 
   const runsByGame = Object.fromEntries(games.map(game => [game.id, []]));

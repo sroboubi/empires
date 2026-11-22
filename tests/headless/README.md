@@ -24,6 +24,9 @@ npm test -- 20 --config mygame.json
 
 # Reproducible game: the same seed gives the same map and the same game
 npm test -- 20 --seed 42
+
+# An explicit CLI turn count overrides config.turns
+npm test -- 20 --config mygame.json
 ```
 
 ## AI controller suite (tournaments)
@@ -45,6 +48,11 @@ npm run test:suite -- --out results/my-run
 
 # Run only one configured game, or use more CPU:
 npm run test:suite -- --game standard-vs-apex --concurrency 4
+
+# Tactical AI pilots and the full matrix
+npm run test:suite:tactical-pilot
+npm run test:suite:tactical-pilot-matrix
+npm run test:suite:tactical-matrix
 ```
 
 The suite config is a superset of the single-game config. Top-level fields
@@ -97,6 +105,63 @@ are defaults; each entry in `games` overrides them:
   ]
 }
 ```
+
+**Matrix expansion.** Instead of listing every combination in `games`, a
+suite can define a `matrix`. Each key is a dotted path into the game
+settings and each value is an array of options; the runner takes the
+Cartesian product:
+
+```json
+{
+  "turns": 500,
+  "iterations": 10,
+  "seed": 1000,
+  "defaults": { "winCondition": { "absoluteScore": 1000, "relativeScore": 2 } },
+  "players": [ "..." ],
+  "matrix": {
+    "mapSize": [32, 64, 96, 128],
+    "barbarians": [
+      null,
+      {
+        "horde": { "barbarian": { "min": 2, "max": 4 } },
+        "spawnFrequencyTurns": 5,
+        "maxNumber": 20,
+        "maxAge": 25,
+        "aggression": 1
+      }
+    ]
+  }
+}
+```
+
+- Options **replace** the value at that path; they are not merged. A full
+  barbarian object is therefore used exactly as written. `null` is a valid
+  option and disables barbarians.
+- Array indices work: `"players.0.controller": ["apex", "hark"]`.
+- To use a literal array as one option, double-wrap it:
+  `"players": [[{ "id": 1, "name": "A" }, { "id": 2, "name": "B" }]]`.
+- `matrix` and `games` are mutually exclusive. `matrix` is for game
+  settings; runner fields such as `iterations`, `concurrency`, `seed`,
+  and `outputDir` stay suite-level.
+- Generated IDs use primitive values and object-option indexes, e.g.
+  `mapsize-32__barbarians-none`, `mapsize-32__barbarians-1`. Every game
+  report also prints the exact resolved matrix values. Use
+  `--game <id>` (or the report filename slug, e.g.
+  `mapsize-32-barbarians-none`) to run one generated game.
+- With a suite-level `seed` and `seedStrategy: "increment"`, every generated
+  game uses the same seed sequence (`1000..1009` for 10 iterations). Use
+  `"same"` to replay one seed or omit the seed for random games.
+
+The tactical configs exercise these paths:
+
+```bash
+npm run test:suite:tactical-pilot          # 1 game, 20 turns, default barbarians
+npm run test:suite:tactical-pilot-matrix   # 4 games, 20 turns, 2 maps x 2 barbarian modes
+npm run test:suite:tactical-matrix         # 120 games: 4 maps x 3 barbarian modes x 10 seeds, 500-turn cap
+```
+
+The full matrix is expensive: 7 AIs, 120 games, up to 500 turns. Run the
+pilots first to measure per-game time on your machine before starting it.
 
 **Controllers.** `controller` may be:
 
@@ -325,6 +390,9 @@ generation randomness does not matter: the generated cells are saved.
 | `config.example.json` | Template for game setup (players, map, win conditions, etc.) |
 | `suite.example.json` | Tournament template: multiple AI matchups, iterations, log patterns |
 | `suite.quick.json` | Fast smoke suite used by `npm run test:suite:quick` |
+| `suite.tactical-pilot.json` | One 7-AI, 32-map, default-barbarian, 20-turn smoke game |
+| `suite.tactical-pilot-matrix.json` | Small 2-map x 2-barbarian matrix pilot |
+| `suite.tactical-matrix.json` | Full tactical matrix: 4 maps x 3 barbarian modes x 10 seeds, 500-turn cap |
 | `suite.llm.example.json` | LLM-vs-coded template (needs provider credentials/local model) |
 | `suite.lmstudio.example.json` | LM Studio on the host: model-vs-model and LLM-vs-coded templates |
 

@@ -647,8 +647,6 @@ export class GameMetricsCollector {
       resources: pm.resources || {},
       resourcesProduced: pm.resourcesProduced || {},
       resourcesConsumed: pm.resourcesConsumed || {},
-      producedByRound: pm.producedByRound || {},
-      consumedByRound: pm.consumedByRound || {},
       entities: pm.entities || {},
       entityCount: pm.entityCount || 0,
       peakEntityCount: pm.peakEntityCount || 0,

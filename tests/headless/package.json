@@ -10,7 +10,10 @@
     "test": "node --import ./stubs.mjs --loader ./loader.mjs ./headless.mjs",
     "test:redteam": "node --import ./stubs.mjs --loader ./loader.mjs ./headless.mjs --config cheater-test.json",
     "test:suite": "node --import ./stubs.mjs --loader ./loader.mjs ./tournament.mjs",
-    "test:suite:quick": "node --import ./stubs.mjs --loader ./loader.mjs ./tournament.mjs --config suite.quick.json"
+    "test:suite:quick": "node --import ./stubs.mjs --loader ./loader.mjs ./tournament.mjs --config suite.quick.json",
+    "test:suite:tactical-pilot": "node --import ./stubs.mjs --loader ./loader.mjs ./tournament.mjs --config suite.tactical-pilot.json",
+    "test:suite:tactical-pilot-matrix": "node --import ./stubs.mjs --loader ./loader.mjs ./tournament.mjs --config suite.tactical-pilot-matrix.json",
+    "test:suite:tactical-matrix": "node --import ./stubs.mjs --loader ./loader.mjs ./tournament.mjs --config suite.tactical-matrix.json"
   },
   "keywords": [],
   "author": "",

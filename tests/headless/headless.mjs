@@ -7,7 +7,7 @@
  *   npm test                          # 5 turns, default config (2 AI players)
  *   npm test -- 20                     # 20 turns, default config
  *   npm test -- --config mygame.json   # custom game setup
- *   npm test -- 20 --config mygame.json
+ *   npm test -- 20 --config mygame.json  # CLI 20 overrides config.turns
  *   npm test -- 20 --seed 42          # reproducible game (same seed = same map and same game)
  *
  * Checkpoint / resume (long LLM games outlive single runtime sessions):
@@ -65,7 +65,7 @@ import { GameMetricsCollector } from './metrics.mjs';
 function parseArgs() {
   const args = process.argv.slice(2);
   const opts = {
-    turns: 5, config: null, checkpointDir: null, resume: null, seed: null,
+    turns: 5, turnsSet: false, config: null, checkpointDir: null, resume: null, seed: null,
     reportJson: null, runLabel: null, iteration: null, logPatterns: [],
   };
   for (let i = 0; i < args.length; i++) {
@@ -77,7 +77,10 @@ function parseArgs() {
     else if (args[i] === '--run-label' && args[i + 1]) opts.runLabel = args[++i];
     else if (args[i] === '--iteration' && args[i + 1]) opts.iteration = Number(args[++i]);
     else if (args[i] === '--log-pattern' && args[i + 1]) opts.logPatterns.push(args[++i]);
-    else if (!isNaN(parseInt(args[i]))) opts.turns = parseInt(args[i]);
+    else if (!isNaN(parseInt(args[i]))) {
+      opts.turns = parseInt(args[i]);
+      opts.turnsSet = true;
+    }
   }
   return opts;
 }
@@ -201,7 +204,9 @@ function checkNoNaN(obj, path) {
 async function main() {
   const opts = parseArgs();
   const cfg = loadConfig(opts.config);
-  const TURNS = cfg.turns || opts.turns;
+  // An explicit CLI turn count wins over the config file, matching the
+  // documented `npm test -- 20 --config mygame.json` behaviour.
+  const TURNS = opts.turnsSet ? opts.turns : (cfg.turns || opts.turns);
 
   // Reporting/log capture is opt-in (`--report-json` or a `report` block in
   // the config). The suite driver uses it; ordinary `npm test` runs are
