@@ -9,6 +9,8 @@
   "seedStep": 1,
   "concurrency": 8,
   "timeoutMs": 14400000,
+  "progressMode": "auto",
+  "progressEveryTurns": 10,
   "perRunReports": false,
   "logPatterns": [
     "\\[AiHelper\\]"

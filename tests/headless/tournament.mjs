@@ -9,7 +9,7 @@
  * Usage:
  *   npm run test:suite
  *   npm run test:suite -- --config my-suite.json
- *   node --import ./stubs.mjs --loader ./loader.mjs ./tournament.mjs \
+ *   node --import ./preload.mjs ./tournament.mjs \
  *     --config suite.example.json --iterations 3 --out results/run-1
  *
  * See tests/headless/README.md "AI controller suite" for the config schema
@@ -32,7 +32,7 @@ const SUITE_ONLY_KEYS = new Set([
   'name', 'description', 'outputDir', 'iterations', 'seedStrategy', 'seedStep',
   'seed', 'concurrency', 'timeoutMs', 'logPatterns', 'report', 'games', 'matrix',
   'failFast', 'saveFullLogs', 'maxLogMatches', 'perRunReports', 'defaults',
-  'id', 'slug', 'settings', 'label',
+  'progressEveryTurns', 'progressMode', 'id', 'slug', 'settings', 'label',
 ]);
 
 function parseArgs() {
@@ -404,10 +404,10 @@ function runCommand({ command, args, cwd, env, timeoutMs, onOutput, maxCaptureBy
 
 async function runPool(tasks, concurrency) {
   let index = 0;
-  const workers = Array.from({ length: Math.max(1, Math.min(concurrency, tasks.length)) }, async () => {
+  const workers = Array.from({ length: Math.max(1, Math.min(concurrency, tasks.length)) }, async (_, slot) => {
     while (index < tasks.length) {
       const task = tasks[index++];
-      await task();
+      await task(slot);
     }
   });
   await Promise.all(workers);
@@ -426,6 +426,158 @@ function readMetrics(filePath) {
 function writeFile(filePath, content) {
   mkdirSync(path.dirname(filePath), { recursive: true });
   writeFileSync(filePath, content);
+}
+
+function metricsPlayerLabel(metrics, id) {
+  const player = (metrics.players || []).find(p => String(p.id) === String(id));
+  if (!player) return null;
+  const controller = player.controllerLabel || player.controller;
+  return controller && controller !== player.name
+    ? `${player.name} (${controller})`
+    : player.name;
+}
+
+function progressOutcome(metrics) {
+  const outcome = metrics.outcome || {};
+  const rounds = outcome.roundsPlayed ?? '?';
+  if (outcome.winner) {
+    const label = metricsPlayerLabel(metrics, outcome.winner.id) || outcome.winner.name;
+    return `${label} wins at turn ${rounds}`;
+  }
+  if (outcome.leader) {
+    const label = metricsPlayerLabel(metrics, outcome.leader.id) || outcome.leader.name;
+    const score = outcome.leader.score?.total ?? '?';
+    return `cap at turn ${rounds}; leader ${label}, score ${score}`;
+  }
+  return `finished at turn ${rounds}`;
+}
+
+function progressDots(turns, max = Infinity) {
+  const count = Math.max(0, Number(turns) || 0);
+  const shown = Number.isFinite(max) ? Math.min(count, max) : count;
+  return `${'.'.repeat(shown)}${count > shown ? '…' : ''}`;
+}
+
+function createProgressRenderer({ mode, concurrency, everyTurns }) {
+  const dashboard = mode === 'dashboard' || (mode === 'auto' && process.stdout.isTTY === true);
+  if (mode === 'quiet') {
+    return {
+      start() {},
+      turn() {},
+      finish() {},
+      error(text) { if (text.trim()) process.stderr.write(text); },
+      stop() {},
+    };
+  }
+  if (!dashboard) {
+    const states = Array.from({ length: concurrency }, () => null);
+    return {
+      start(slot, { prefix, seed }) {
+        states[slot] = { prefix };
+        console.log(`${prefix} seed ${seed ?? 'random'}`);
+      },
+      turn(slot, { turns, totalTurns }) {
+        const prefix = states[slot]?.prefix;
+        if (!prefix) return;
+        if (everyTurns > 0 && turns % everyTurns === 0 && turns < totalTurns) {
+          console.log(`${prefix} ${progressDots(turns)} ${turns}/${totalTurns}`);
+        }
+      },
+      finish(slot, { turns, text }) {
+        const prefix = states[slot]?.prefix || 'unknown';
+        states[slot] = null;
+        console.log(`${prefix} ${progressDots(turns)} ${text}`);
+      },
+      error(text) {
+        if (text.trim()) process.stderr.write(text);
+      },
+      stop() {},
+    };
+  }
+
+  const slots = Array.from({ length: concurrency }, () => null);
+  let rendered = false;
+  const width = Math.max(12, Math.min(32, (process.stdout.columns || 100) - 42));
+
+  const row = (slot) => {
+    if (!slot) return '  · idle ·';
+    const total = Math.max(1, slot.totalTurns || 1);
+    const fraction = Math.min(1, Math.max(0, (slot.turns || 0) / total));
+    const filled = Math.round(fraction * width);
+    const bar = `${'•'.repeat(filled)}${'·'.repeat(Math.max(0, width - filled))}`;
+    return `${slot.prefix} ${bar} ${slot.turns || 0}/${slot.totalTurns}`;
+  };
+
+  const writeRows = () => {
+    for (let i = 0; i < slots.length; i++) {
+      process.stdout.write(`\x1b[2K${row(slots[i])}\n`);
+    }
+  };
+
+  const render = () => {
+    if (!rendered) {
+      rendered = true;
+      writeRows();
+      return;
+    }
+    process.stdout.write(`\x1b[${slots.length}A`);
+    writeRows();
+  };
+
+  const printAbove = (line) => {
+    if (!rendered) {
+      console.log(line);
+      return;
+    }
+    process.stdout.write(`\x1b[${slots.length}A`);
+    process.stdout.write(`\x1b[2K${line}\n`);
+    // Re-draw the dashboard below the new line. The extra line scrolls the
+    // terminal by one row, leaving the final/error line in scrollback.
+    writeRows();
+  };
+
+  return {
+    start(slot, { prefix, totalTurns }) {
+      slots[slot] = { prefix, totalTurns, turns: 0 };
+      render();
+    },
+    turn(slot, { turns }) {
+      if (!slots[slot]) return;
+      slots[slot].turns = turns;
+      render();
+    },
+    finish(slot, { turns, text }) {
+      const state = slots[slot] || { prefix: 'unknown' };
+      // The final line sits above the fixed-row dashboard. Cap its dots to
+      // the terminal width so a 500-turn run cannot wrap and corrupt the
+      // cursor math; line mode below prints every dot.
+      const maxDots = Math.max(4, Math.min(60,
+        (process.stdout.columns || 100) - String(state.prefix).length - String(text).length - 2
+      ));
+      const finalLine = `${state.prefix} ${progressDots(turns, maxDots)} ${text}`;
+      slots[slot] = null;
+      if (!rendered) {
+        console.log(finalLine);
+        return;
+      }
+      printAbove(finalLine);
+    },
+    error(text) {
+      for (const line of String(text).split('\n')) {
+        if (line.trim()) printAbove(line);
+      }
+    },
+    stop() {
+      if (!rendered) return;
+      rendered = false;
+      process.stdout.write(`\x1b[${slots.length}A`);
+      for (let i = 0; i < slots.length; i++) {
+        process.stdout.write('\x1b[2K');
+        if (i < slots.length - 1) process.stdout.write('\n');
+      }
+      if (slots.length > 1) process.stdout.write(`\x1b[${slots.length - 1}A`);
+    },
+  };
 }
 
 async function main() {
@@ -459,6 +611,13 @@ async function main() {
   const saveFullLogs = opts.fullLogs ?? suite.saveFullLogs ?? false;
   const perRunReports = opts.perRun ?? suite.perRunReports ?? true;
   const maxLogMatches = suite.maxLogMatches ?? 5000;
+  const progressEveryTurns = Math.max(0, Number(suite.progressEveryTurns ?? 10) || 0);
+  const progressMode = suite.progressMode || 'auto';
+  const progress = createProgressRenderer({
+    mode: progressMode,
+    concurrency,
+    everyTurns: progressEveryTurns,
+  });
 
   // Reproducibility copy (secrets redacted).
   writeFile(path.join(outDir, 'suite.resolved.json'), JSON.stringify(redactSecrets({
@@ -492,7 +651,7 @@ async function main() {
   const tasks = [];
   for (const game of games) {
     for (let i = 0; i < game.iterations; i++) {
-      tasks.push(async () => {
+      tasks.push(async (slot) => {
         if (failFastTriggered && opts.failFast) return;
         const iteration = i + 1;
         const seed = computeSeed(game.seed, game.seedStrategy, i, game.seedStep);
@@ -517,12 +676,27 @@ async function main() {
         mkdirSync(runDir, { recursive: true });
         writeFileSync(configFile, JSON.stringify(childConfig, null, 2) + '\n', { mode: 0o600 });
 
-        console.log(`[suite] start ${game.id} iteration ${iteration}/${game.iterations} (seed ${seed ?? 'random'})`);
+        const progressPrefix = `${game.id} ${iteration}/${game.iterations}`;
+        let turnsSeen = 0;
+        let stdoutBuffer = '';
+        const handleHeadlessLine = (line) => {
+          const match = line.match(/^\[headless\] Turn (\d+) complete/);
+          if (!match) return;
+          const turn = Number(match[1]);
+          if (!Number.isFinite(turn) || turn <= turnsSeen) return;
+          turnsSeen = turn;
+          progress.turn(slot, { turns: turn, totalTurns: game.turns });
+        };
+
+        progress.start(slot, {
+          prefix: progressPrefix,
+          totalTurns: game.turns,
+          seed,
+        });
         const result = await runCommand({
           command: process.execPath,
           args: [
-            '--import', './stubs.mjs',
-            '--loader', './loader.mjs',
+            '--import', './preload.mjs',
             './headless.mjs',
             '--config', configFile,
             '--report-json', metricsFile,
@@ -533,9 +707,17 @@ async function main() {
           env: process.env,
           timeoutMs,
           onOutput: ({ stream, text }) => {
-            if (stream === 'stderr' && text.trim()) process.stderr.write(text);
+            if (stream === 'stderr') {
+              if (text.trim()) progress.error(text);
+              return;
+            }
+            stdoutBuffer += text;
+            const lines = stdoutBuffer.split('\n');
+            stdoutBuffer = lines.pop();
+            for (const line of lines) handleHeadlessLine(line);
           },
         });
+        if (stdoutBuffer) handleHeadlessLine(stdoutBuffer);
 
         const metrics = readMetrics(metricsFile);
         const keepFullOutput = saveFullLogs || result.exitCode !== 0;
@@ -560,16 +742,21 @@ async function main() {
           writeFile(logFile, `# stdout\n${result.stdout}\n\n# stderr\n${result.stderr}\n`);
         }
 
-        const status = metrics
-          ? (result.exitCode === 0 ? 'ok' : `exit ${result.exitCode}`)
-          : 'no metrics';
-        console.log(`[suite] done  ${game.id} iteration ${iteration}: ${status} in ${(result.durationMs / 1000).toFixed(1)}s`);
+        const finalTurns = metrics?.outcome?.roundsPlayed ?? turnsSeen;
+        const finalStatus = metrics ? progressOutcome(metrics) : 'no metrics';
+        const suffix = [
+          finalStatus,
+          result.timedOut ? '[timeout]' : null,
+          result.exitCode !== 0 ? `[exit ${result.exitCode}]` : null,
+        ].filter(Boolean).join(' ');
+        progress.finish(slot, { turns: finalTurns, text: suffix });
         if (result.exitCode !== 0 && opts.failFast) failFastTriggered = true;
       });
     }
   }
 
   await runPool(tasks, concurrency);
+  progress.stop();
   const finishedAt = new Date().toISOString();
 
   for (const game of games) {

@@ -255,6 +255,24 @@ Exit code is non-zero if any iteration failed (assertions, crash, timeout).
 The reports are still written. `timeoutMs` (suite or game level) kills a
 stuck iteration; `concurrency` runs that many child processes at once.
 
+**Progress output.** `progressMode` controls live progress:
+
+- `"auto"` (default) — an in-place dashboard with one row per concurrent
+  worker when stdout is a TTY; prefixed lines when piped.
+- `"dashboard"` — force the in-place dashboard (ANSI cursor control).
+- `"lines"` — one self-contained line per game/heartbeat. With concurrency
+  > 1, lines from different games interleave but each line is complete and
+  prefixed with the game ID and run number.
+- `"quiet"` — no progress; only the final report path.
+
+In line mode, `progressEveryTurns` (default `10`) controls how often a
+partial dot line is printed. A finished game always prints its full result
+line, e.g. `mapsize-32__barbarians-none 1/10 ... opus wins at turn 52`.
+
+The dashboard uses `•`/`·` bars so a 500-turn run still fits one row per
+worker; line mode prints one `.` per completed turn. If your terminal does
+not support ANSI cursor movement, use `"progressMode": "lines"`.
+
 ### LM Studio / local OpenAI-compatible servers
 
 LM Studio on the host listens on port 1234 by default. Inside the sandbox
@@ -317,13 +335,13 @@ checkpoint at every round end and resume after a kill:
 
 ```bash
 # Fresh run with checkpointing (one checkpoint file per run directory)
-node --import ./stubs.mjs --loader ./loader.mjs ./headless.mjs \
+node --import ./preload.mjs ./headless.mjs \
   --config mygame.json --checkpoint-dir ~/workspace/llm-play/checkpoints/my-run
 
 # After a kill: resume with the SAME config file, playing only the
 # remaining rounds. Checkpointing continues into the same directory,
 # so a resumed run survives a second kill the same way.
-node --import ./stubs.mjs --loader ./loader.mjs ./headless.mjs \
+node --import ./preload.mjs ./headless.mjs \
   --config mygame.json --resume ~/workspace/llm-play/checkpoints/my-run
 # (--resume also accepts the checkpoint file itself, and --checkpoint-dir
 # can override where the resumed run writes.)
@@ -383,6 +401,7 @@ generation randomness does not matter: the generated cells are saved.
 | `report.mjs` | Markdown renderers for suite summary, game reports, per-run detail, and logs |
 | `checkpoint.mjs` | Checkpoint/resume: round-end save payloads to disk, resume validation (see above) |
 | `repl.mjs` | Interactive REPL: step turns, inspect state, spawn entities, run AI manually |
+| `preload.mjs` | Node preload: installs `stubs.mjs`, then registers `loader.mjs` via `module.register()` (no deprecated `--experimental-loader` warning) |
 | `stubs.mjs` | Browser API stubs: window, document, AudioContext, fetch (local files), IndexedDB, localStorage |
 | `loader.mjs` | Node module loader: replaces `renderer.js`/`audio.js`/`main.js` with no-ops, redirects esm.sh CDN to node_modules |
 | `renderer-stub.mjs` | Auto-generated no-op exports matching `src/renderer.js` (regenerate if exports change) |
@@ -410,7 +429,7 @@ generation randomness does not matter: the generated cells are saved.
 For poking at the game manually — debugging, balance checks, exploring state:
 
 ```bash
-node --import ./stubs.mjs --loader ./loader.mjs ./repl.mjs [--config game.json]
+node --import ./preload.mjs ./repl.mjs [--config game.json]
 ```
 
 ```

@@ -1,6 +1,7 @@
 /**
  * Node.js module loader that stubs out browser-heavy modules.
- * Usage: node --import ./tests/stubs.mjs --loader ./tests/loader.mjs ./tests/headless.mjs
+ * Usage: node --import ./tests/preload.mjs ./tests/headless.mjs
+ * (preload.mjs installs stubs.mjs and registers this loader via module.register)
  */
 import { pathToFileURL, fileURLToPath } from 'url';
 import path from 'path';
