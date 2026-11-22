@@ -167,6 +167,9 @@ export class GameMetricsCollector {
     this.timeline = [];
     this._timelineRounds = new Map();
     this.lastRecordedRound = null;
+    // One entry per player-turn: engine+AI wall time and the AI manager's
+    // own processTurn() time (plus strategic, when configured).
+    this.turnTimings = [];
 
     this.totals = {
       chatSessions: 0,
@@ -391,6 +394,29 @@ export class GameMetricsCollector {
       (this.gameState?.entities || []).filter(e => !e.owner),
       e => e.name
     );
+  }
+
+  /**
+   * Record one player-turn's timing.
+   * @param {Object} player
+   * @param {{round:number, stepMs:number, aiMs?:number, strategicMs?:number}} timing
+   */
+  recordTurnTiming(player, { round, stepMs, aiMs = 0, strategicMs = 0 }) {
+    const pm = this._pmForPlayer(player);
+    if (!pm) return;
+    const safe = (value) => Math.max(0, Number(value) || 0);
+    const step = safe(stepMs);
+    const ai = safe(aiMs);
+    const strategic = safe(strategicMs);
+    this.turnTimings.push({
+      round: round ?? this.currentRound,
+      playerId: pm.id,
+      name: pm.name,
+      stepMs: step,
+      aiMs: ai,
+      strategicMs: strategic,
+      engineMs: Math.max(0, step - ai - strategic),
+    });
   }
 
   endRound(round = null) {
@@ -634,7 +660,14 @@ export class GameMetricsCollector {
       combats: this._barb.engagements,
     };
 
-    const players = [...this.playerMap.values()].map(pm => ({
+    const players = [...this.playerMap.values()].map(pm => {
+      const timings = this.turnTimings.filter(t => t.playerId === pm.id);
+      const stepMsTotal = timings.reduce((sum, t) => sum + t.stepMs, 0);
+      const aiMsTotal = timings.reduce((sum, t) => sum + t.aiMs, 0);
+      const strategicMsTotal = timings.reduce((sum, t) => sum + t.strategicMs, 0);
+      const engineMsTotal = timings.reduce((sum, t) => sum + t.engineMs, 0);
+      const turns = timings.length;
+      return {
       id: pm.id,
       name: pm.name,
       controller: pm.controller,
@@ -675,7 +708,21 @@ export class GameMetricsCollector {
       tradesInvalid: pm.tradesInvalid || 0,
       tradesFailed: pm.tradesFailed || 0,
       tradesActive: pm.tradesActive || 0,
-    }));
+      timing: {
+        turns,
+        stepMsTotal,
+        aiMsTotal,
+        strategicMsTotal,
+        engineMsTotal,
+        stepAvgMs: turns ? stepMsTotal / turns : 0,
+        aiAvgMs: turns ? aiMsTotal / turns : 0,
+        strategicAvgMs: turns ? strategicMsTotal / turns : 0,
+        engineAvgMs: turns ? engineMsTotal / turns : 0,
+        stepMaxMs: timings.length ? Math.max(...timings.map(t => t.stepMs)) : 0,
+        aiMaxMs: timings.length ? Math.max(...timings.map(t => t.aiMs)) : 0,
+      },
+      };
+    });
 
     const winner = context.winner
       ? {
@@ -714,6 +761,7 @@ export class GameMetricsCollector {
       },
       players,
       timeline: this.timeline,
+      timings: this.turnTimings,
       totals: {
         ...this.totals,
         tradeTypes: this._tradeTypes || {},

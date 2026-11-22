@@ -210,6 +210,43 @@ function aggregatePlayerRows(game, runs, metricsList, extended = true) {
   return rows;
 }
 
+function timingRows(metricsList) {
+  const ids = playerIds(metricsList);
+  const rows = [];
+  for (const id of ids) {
+    const samples = metricsList.map(metrics => playerMap(metrics)[id]).filter(Boolean);
+    const timed = samples.filter(player => player.timing);
+    if (timed.length === 0) continue;
+    const turns = sum(timed.map(player => player.timing.turns || 0));
+    const stepMs = sum(timed.map(player => player.timing.stepMsTotal || 0));
+    const aiMs = sum(timed.map(player => player.timing.aiMsTotal || 0));
+    const strategicMs = sum(timed.map(player => player.timing.strategicMsTotal || 0));
+    const engineMs = sum(timed.map(player => player.timing.engineMsTotal || 0));
+    rows.push([
+      playerTitle(samples[0]),
+      timed.length,
+      turns,
+      turns ? fmt(aiMs / turns, 1) : '—',
+      turns ? fmt(stepMs / turns, 1) : '—',
+      turns ? fmt(strategicMs / turns, 1) : '—',
+      turns ? fmt(engineMs / turns, 1) : '—',
+      fmt(aiMs / 1000, 2),
+      fmt(aiMs / timed.length / 1000, 2),
+      fmt(stepMs / timed.length / 1000, 2),
+      pct(aiMs, stepMs),
+    ]);
+  }
+  return rows;
+}
+
+function timingHeaders() {
+  return [
+    'Player (controller)', 'Runs', 'Turns',
+    'Avg AI ms/turn', 'Avg step ms/turn', 'Avg strategic ms/turn',
+    'Avg engine ms/turn', 'Total AI sec', 'Avg AI sec/run', 'Avg step sec/run', 'AI share',
+  ];
+}
+
 function averageTimelineRows(metricsList, ids, field) {
   const rounds = [...new Set(metricsList.flatMap(metrics =>
     (metrics.timeline || []).map(entry => entry.round)
@@ -262,6 +299,8 @@ export function renderSummary({ suite, games, runsByGame, outputDir, startedAt, 
   lines.push(`- With metrics: ${withMetrics}`);
   lines.push(`- Failures: ${failures.length}`);
   lines.push(`- Suite started: ${startedAt}`);
+  const wallMs = new Date(finishedAt).getTime() - new Date(startedAt).getTime();
+  lines.push(`- Suite wall time: ${(wallMs / 1000).toFixed(1)} s`);
   lines.push('');
   lines.push('Failed iterations are listed below and in each game report, but are excluded from averages.');
   lines.push('');
@@ -345,6 +384,21 @@ export function renderSummary({ suite, games, runsByGame, outputDir, startedAt, 
       ];
     })
   ));
+  lines.push('');
+
+  lines.push('## Average AI timing by game/player');
+  lines.push('');
+  lines.push('`AI` is the controller\'s `processTurn()` time; `step` also includes engine work. `AI share` is AI time / step time.');
+  lines.push('');
+  const timingAggregateRows = [];
+  for (const game of games) {
+    const runs = runsByGame[game.id] || [];
+    const metricsList = metricsRuns(runs);
+    for (const row of timingRows(metricsList)) {
+      timingAggregateRows.push([game.id, ...row]);
+    }
+  }
+  lines.push(table(['Game', ...timingHeaders()], timingAggregateRows));
   lines.push('');
 
   lines.push('## Captured log patterns');
@@ -460,6 +514,16 @@ export function renderGameReport({ game, runs, logFile }) {
       ];
     })
   ));
+  lines.push('');
+
+  lines.push('## Average AI timing by player');
+  lines.push('');
+  lines.push('`AI` is the controller\'s `processTurn()` time; `step` also includes engine work.');
+  lines.push('');
+  const gameTimingRows = timingRows(metricsList);
+  lines.push(gameTimingRows.length
+    ? table(timingHeaders(), gameTimingRows)
+    : 'No timing data recorded.');
   lines.push('');
 
   const lostTypes = collectTypes(metricsList, 'entitiesLostByType');
@@ -726,6 +790,61 @@ export function renderRunReport({ game, run }) {
     })
   ));
   lines.push('');
+
+  const turnTimings = metrics.timings || [];
+  if (turnTimings.length) {
+    lines.push('## Timing by player');
+    lines.push('');
+    lines.push('`AI` is the controller\'s `processTurn()` time; `step` also includes engine work.');
+    lines.push('');
+    lines.push(table(
+      ['Player', 'Turns', 'AI total s', 'Step total s', 'Avg AI ms', 'Avg step ms', 'Max AI ms', 'AI share'],
+      ids.map(id => {
+        const p = players[id];
+        const t = p.timing;
+        if (!t) return [playerTitle(p), '—', '—', '—', '—', '—', '—', '—'];
+        return [
+          playerTitle(p),
+          t.turns,
+          fmt(t.aiMsTotal / 1000, 2),
+          fmt(t.stepMsTotal / 1000, 2),
+          fmt(t.aiAvgMs, 1),
+          fmt(t.stepAvgMs, 1),
+          fmt(t.aiMaxMs, 1),
+          pct(t.aiMsTotal, t.stepMsTotal),
+        ];
+      })
+    ));
+    lines.push('');
+
+    const byRound = new Map();
+    for (const timing of turnTimings) {
+      if (!byRound.has(timing.round)) byRound.set(timing.round, {});
+      byRound.get(timing.round)[String(timing.playerId)] = timing;
+    }
+    const rounds = [...byRound.keys()].sort((a, b) => a - b);
+    lines.push('## Per-turn timing (AI ms / step ms)');
+    lines.push('');
+    lines.push(table(
+      ['Round', ...ids.map(id => `${players[id].name} AI/step`), 'Total AI ms'],
+      rounds.map(round => {
+        const row = [round];
+        let totalAi = 0;
+        for (const id of ids) {
+          const timing = byRound.get(round)[id];
+          if (!timing) {
+            row.push('—');
+          } else {
+            totalAi += timing.aiMs;
+            row.push(`${fmt(timing.aiMs, 1)} / ${fmt(timing.stepMs, 1)}`);
+          }
+        }
+        row.push(fmt(totalAi, 1));
+        return row;
+      })
+    ));
+    lines.push('');
+  }
 
   lines.push('## Entities owned');
   lines.push('');

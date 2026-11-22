@@ -415,6 +415,34 @@ async function main() {
     if (p.controller) await p.getAiManager();
     // Phase 26: same for the strategic manager.
     if (p.strategicController) await p.getStrategicManager();
+    // Timing instrumentation (reporting runs only): wrap the manager
+    // instances so the harness can separate AI compute from engine work.
+    if (collector) {
+      p._lastAiMs = 0;
+      p._lastStrategicMs = 0;
+      if (p.aiManager?.processTurn) {
+        const originalProcessTurn = p.aiManager.processTurn.bind(p.aiManager);
+        p.aiManager.processTurn = async (...args) => {
+          const start = performance.now();
+          try {
+            return await originalProcessTurn(...args);
+          } finally {
+            p._lastAiMs = performance.now() - start;
+          }
+        };
+      }
+      if (p.strategicManager?.runStrategicTurn) {
+        const originalStrategicTurn = p.strategicManager.runStrategicTurn.bind(p.strategicManager);
+        p.strategicManager.runStrategicTurn = async (...args) => {
+          const start = performance.now();
+          try {
+            return await originalStrategicTurn(...args);
+          } finally {
+            p._lastStrategicMs = performance.now() - start;
+          }
+        };
+      }
+    }
   }
 
   assert(gameState.players.length === players.length, `expected ${players.length} players`);
@@ -445,12 +473,24 @@ async function main() {
       // Real Player.step(): refill, entity steps, visibility, scores,
       // then the AI turn (awaited). Errors are logged in step() and
       // rethrown here for the failure count.
+      const stepStart = performance.now();
       try {
         await player.step(() => { });
       } catch (err) {
         console.error(`  ERROR in ${player.name} AI: ${err.message}`);
         failures++;
         failureMessages.push(`${player.name} AI error: ${err.message}`);
+      } finally {
+        if (collector) {
+          collector.recordTurnTiming(player, {
+            round: gameState.currentRound,
+            stepMs: performance.now() - stepStart,
+            aiMs: player._lastAiMs || 0,
+            strategicMs: player._lastStrategicMs || 0,
+          });
+          player._lastAiMs = 0;
+          player._lastStrategicMs = 0;
+        }
       }
 
       // Assertions after each player's turn

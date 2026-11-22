@@ -249,6 +249,10 @@ The Markdown reports include, per run and aggregated across iterations:
   stock (production includes yields, treasure, trade receipts and
   orders-overflow conversions; consumption includes upkeep, build/spawn
   costs and trade sends);
+- timing per player: AI `processTurn()` ms per turn, full player-step ms,
+  strategic ms, engine ms, totals, max turn, and AI share of step time.
+  The summary aggregates this per game/player; per-run reports include a
+  per-turn AI/step timing table;
 - every log line matching `logPatterns`.
 
 Exit code is non-zero if any iteration failed (assertions, crash, timeout).
@@ -267,7 +271,7 @@ stuck iteration; `concurrency` runs that many child processes at once.
 
 In line mode, `progressEveryTurns` (default `10`) controls how often a
 partial dot line is printed. A finished game always prints its full result
-line, e.g. `mapsize-32__barbarians-none 1/10 ... opus wins at turn 52`.
+line, e.g. `mapsize-32__barbarians-none 1/10 ... opus wins at turn 52 [AI 14.2s]`.
 
 The dashboard uses `•`/`·` bars so a 500-turn run still fits one row per
 worker; line mode prints one `.` per completed turn. If your terminal does

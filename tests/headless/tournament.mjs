@@ -440,16 +440,19 @@ function metricsPlayerLabel(metrics, id) {
 function progressOutcome(metrics) {
   const outcome = metrics.outcome || {};
   const rounds = outcome.roundsPlayed ?? '?';
+  let text;
   if (outcome.winner) {
     const label = metricsPlayerLabel(metrics, outcome.winner.id) || outcome.winner.name;
-    return `${label} wins at turn ${rounds}`;
-  }
-  if (outcome.leader) {
+    text = `${label} wins at turn ${rounds}`;
+  } else if (outcome.leader) {
     const label = metricsPlayerLabel(metrics, outcome.leader.id) || outcome.leader.name;
     const score = outcome.leader.score?.total ?? '?';
-    return `cap at turn ${rounds}; leader ${label}, score ${score}`;
+    text = `cap at turn ${rounds}; leader ${label}, score ${score}`;
+  } else {
+    text = `finished at turn ${rounds}`;
   }
-  return `finished at turn ${rounds}`;
+  const aiMs = (metrics.players || []).reduce((sum, player) => sum + (player.timing?.aiMsTotal || 0), 0);
+  return aiMs > 0 ? `${text} [AI ${(aiMs / 1000).toFixed(1)}s]` : text;
 }
 
 function progressDots(turns, max = Infinity) {
