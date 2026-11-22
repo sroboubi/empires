@@ -24,6 +24,293 @@ npm test -- 20 --config mygame.json
 
 # Reproducible game: the same seed gives the same map and the same game
 npm test -- 20 --seed 42
+
+# An explicit CLI turn count overrides config.turns
+npm test -- 20 --config mygame.json
+```
+
+## AI controller suite (tournaments)
+
+`tournament.mjs` runs one or more game settings repeatedly and writes
+Markdown reports you can inspect. Each iteration is a separate
+`headless.mjs` process, so runs cannot leak state into each other. The real
+game and the real AI managers run — nothing in `src/` changes.
+
+```bash
+cd tests/headless
+npm run test:suite:quick   # 2 games x 1 iteration x 5 turns, for a smoke check
+npm run test:suite         # suite.example.json: 2 games x 2 iterations
+npm run test:suite -- --config my-suite.json
+npm run test:suite -- --config my-suite.json --iterations 10 --turns 60
+
+# Exact output directory (otherwise a timestamped folder is created):
+npm run test:suite -- --out results/my-run
+
+# Run only one configured game, or use more CPU:
+npm run test:suite -- --game standard-vs-apex --concurrency 4
+
+# Tactical AI pilots and the full matrix
+npm run test:suite:tactical-pilot
+npm run test:suite:tactical-pilot-matrix
+npm run test:suite:tactical-matrix
+```
+
+The suite config is a superset of the single-game config. Top-level fields
+are defaults; each entry in `games` overrides them:
+
+```json
+{
+  "name": "AI controller comparison",
+  "outputDir": "results",
+  "iterations": 2,
+  "turns": 30,
+  "mapSize": 16,
+  "seed": 1000,
+  "seedStrategy": "increment",
+  "seedStep": 1,
+  "concurrency": 1,
+  "logPatterns": ["\\[AiHelper\\]", "\\[Barbarians\\]"],
+  "defaults": {
+    "winCondition": { "absoluteScore": 1000, "relativeScore": 2 },
+    "initialization": { "orders": { "max": 6, "perTurn": 5 } },
+    "barbarians": null
+  },
+  "players": [
+    { "id": 1, "name": "Blue", "color": "#0000ff", "controller": "standard" },
+    { "id": 2, "name": "Red", "color": "#ff0000", "controller": "apex" }
+  ],
+  "games": [
+    {
+      "id": "standard-vs-apex",
+      "iterations": 5,
+      "players": [
+        { "id": 1, "name": "Blue", "color": "#0000ff", "controller": "standard" },
+        { "id": 2, "name": "Red", "color": "#ff0000", "controller": "apex" }
+      ]
+    },
+    {
+      "id": "hark-vs-entity-barbarians",
+      "players": [
+        { "id": 1, "name": "Blue", "color": "#0000ff", "controller": "hark" },
+        { "id": 2, "name": "Red", "color": "#ff0000", "controller": "entity" }
+      ],
+      "barbarians": {
+        "horde": { "barbarian": { "min": 2, "max": 4 } },
+        "spawnFrequencyTurns": 5,
+        "maxNumber": 20,
+        "maxAge": 25,
+        "aggression": 1
+      }
+    }
+  ]
+}
+```
+
+**Matrix expansion.** Instead of listing every combination in `games`, a
+suite can define a `matrix`. Each key is a dotted path into the game
+settings and each value is an array of options; the runner takes the
+Cartesian product:
+
+```json
+{
+  "turns": 500,
+  "iterations": 10,
+  "seed": 1000,
+  "defaults": { "winCondition": { "absoluteScore": 1000, "relativeScore": 2 } },
+  "players": [ "..." ],
+  "matrix": {
+    "mapSize": [32, 64, 96, 128],
+    "barbarians": [
+      null,
+      {
+        "horde": { "barbarian": { "min": 2, "max": 4 } },
+        "spawnFrequencyTurns": 5,
+        "maxNumber": 20,
+        "maxAge": 25,
+        "aggression": 1
+      }
+    ]
+  }
+}
+```
+
+- Options **replace** the value at that path; they are not merged. A full
+  barbarian object is therefore used exactly as written. `null` is a valid
+  option and disables barbarians.
+- Array indices work: `"players.0.controller": ["apex", "hark"]`.
+- To use a literal array as one option, double-wrap it:
+  `"players": [[{ "id": 1, "name": "A" }, { "id": 2, "name": "B" }]]`.
+- `matrix` and `games` are mutually exclusive. `matrix` is for game
+  settings; runner fields such as `iterations`, `concurrency`, `seed`,
+  and `outputDir` stay suite-level.
+- Generated IDs use primitive values and object-option indexes, e.g.
+  `mapsize-32__barbarians-none`, `mapsize-32__barbarians-1`. Every game
+  report also prints the exact resolved matrix values. Use
+  `--game <id>` (or the report filename slug, e.g.
+  `mapsize-32-barbarians-none`) to run one generated game.
+- With a suite-level `seed` and `seedStrategy: "increment"`, every generated
+  game uses the same seed sequence (`1000..1009` for 10 iterations). Use
+  `"same"` to replay one seed or omit the seed for random games.
+
+The tactical configs exercise these paths:
+
+```bash
+npm run test:suite:tactical-pilot          # 1 game, 20 turns, default barbarians
+npm run test:suite:tactical-pilot-matrix   # 4 games, 20 turns, 2 maps x 2 barbarian modes
+npm run test:suite:tactical-matrix         # 120 games: 4 maps x 3 barbarian modes x 10 seeds, 500-turn cap
+```
+
+The full matrix is expensive: 7 AIs, 120 games, up to 500 turns. Run the
+pilots first to measure per-game time on your machine before starting it.
+
+**Controllers.** `controller` may be:
+
+- a key from `definitions/ai.json` (`standard`, `adaptive`, `bigPickle`,
+  `apex`, `hark`, `entity`, `fable`, `opus`, `llm-json-gemma-4`,
+  `llm-menu-deepseek-4.1`, …) — the same URL/config/provider/leader
+  overlay the browser setup uses;
+- a `{ "key": "apex", "config": { ... } }` object;
+- a raw `{ "url": "./ai/tactical/apexAi.js", "config": {} }` object;
+- legacy `"ai"` (SmartManager) or `"llm"` (menu harness).
+
+Optional per-player `label` controls the report label; `controllerConfig`
+is merged over the registry config. Optional `strategicController` works
+the same way (`"dummy"` or a key from `strategicControllers`).
+
+**Leaders.** A player's leader supplies its description, focus, and twist
+attributes (combat/economy/score multipliers, barbarian aggression, etc.).
+By default the leader is the player `name`, matching the browser setup; use
+the explicit `leader` field to keep a friendly player name:
+
+```json
+{
+  "id": 1,
+  "name": "Blue",
+  "leader": "Anselm",
+  "controller": "standard"
+}
+```
+
+Leader names come from `definitions/leaders.json`: Anselm, Bramble, Dagna,
+Kaida, Meera, Rashid, Samara, Sefu, Temur, Yrsa. An explicit unknown leader
+fails the run. A player whose name/leader matches no leader entry gets no
+twist attributes.
+
+**Iterations and seeds.** `iterations` is per game setting. With
+`seedStrategy: "increment"` (the default), iteration `i` uses
+`seed + i * seedStep`, so each iteration is a different map/game. Use
+`"same"` to replay one seed, or `"random"` to ignore the base seed per
+iteration. LLM players are not deterministic even with the same seed.
+
+**Log capture.** Every console line is tested against `logPatterns`
+(JavaScript regex strings; a game entry can override the suite list).
+Matching lines are stored with their round number and rendered in the
+reports. Raw logs are not kept unless
+`saveFullLogs` is true (or `--full-logs`); the per-iteration stdout is still
+available to the runner and is included on failure. To capture AI helper
+chat lines, for example:
+
+```json
+"logPatterns": ["\\[AiHelper\\]", "\\[AI [^\\]]+\\]\\[(?:warn|combat)\\]"]
+```
+
+Strings are JavaScript regular expressions, so escape literal brackets. For a
+plain-text match use an object instead:
+
+```json
+"logPatterns": [{ "pattern": "[AiHelper]", "literal": true }]
+```
+
+**Output layout.** By default a timestamped folder is created:
+
+```text
+results/<suite>-<timestamp>/
+  summary.md                     # all settings: winners, win rates, averages
+  games/<game>.md                # one setting: averages and over-time tables
+  runs/<game>/iteration-N.md     # one iteration: full detail
+  runs/<game>/iteration-N.metrics.json  # raw metrics (machine-readable)
+  runs/<game>/iteration-N.config.json   # exact config used (mode 0600)
+  logs/<game>.md                 # all regex-matched log lines
+  suite.resolved.json            # suite copy with secrets redacted
+```
+
+The Markdown reports include, per run and aggregated across iterations:
+
+- final scores (military/economic/exploration/total), winner and leader;
+- which controller/model won, win rate, and lead count;
+- final entities of each type, built/lost/killed counts;
+- damage dealt/taken;
+- chats initiated/participated/messages, trades proposed/accepted/
+  countered/rejected/active;
+- barbarian spawns, encounters, targeted/ignored decisions, attacks,
+  player units killed, barbarians killed;
+- score over time (every round, all score categories in per-run detail);
+- gross resource produced/consumed per round and per resource, plus final
+  stock (production includes yields, treasure, trade receipts and
+  orders-overflow conversions; consumption includes upkeep, build/spawn
+  costs and trade sends);
+- timing per player: AI `processTurn()` ms per turn, full player-step ms,
+  strategic ms, engine ms, totals, max turn, and AI share of step time.
+  The summary aggregates this per game/player; per-run reports include a
+  per-turn AI/step timing table;
+- every log line matching `logPatterns`.
+
+Exit code is non-zero if any iteration failed (assertions, crash, timeout).
+The reports are still written. `timeoutMs` (suite or game level) kills a
+stuck iteration; `concurrency` runs that many child processes at once.
+
+**Progress output.** `progressMode` controls live progress:
+
+- `"auto"` (default) — an in-place dashboard with one row per concurrent
+  worker when stdout is a TTY; prefixed lines when piped.
+- `"dashboard"` — force the in-place dashboard (ANSI cursor control).
+- `"lines"` — one self-contained line per game/heartbeat. With concurrency
+  > 1, lines from different games interleave but each line is complete and
+  prefixed with the game ID and run number.
+- `"quiet"` — no progress; only the final report path.
+
+In line mode, `progressEveryTurns` (default `10`) controls how often a
+partial dot line is printed. A finished game always prints its full result
+line, e.g. `mapsize-32__barbarians-none 1/10 ... opus wins at turn 52 [AI 14.2s]`.
+
+The dashboard uses `•`/`·` bars so a 500-turn run still fits one row per
+worker; line mode prints one `.` per completed turn. If your terminal does
+not support ANSI cursor movement, use `"progressMode": "lines"`.
+
+### LM Studio / local OpenAI-compatible servers
+
+LM Studio on the host listens on port 1234 by default. Inside the sandbox
+`localhost` means the sandbox, so point the config at
+`http://host.docker.internal:1234/v1` instead. Enable LM Studio's
+"Serve on Local Network" option if the sandbox cannot reach a loopback-only
+server.
+
+Get the exact model id on the host or from the sandbox after network
+approval:
+
+```bash
+curl -s http://host.docker.internal:1234/v1/models
+```
+
+Copy `suite.lmstudio.example.json`, replace `<MODEL_ID_*>` and
+`<MODEL_NAME_*>` with the ids/names from that response, then:
+
+```bash
+npm run test:suite -- --config suite.lmstudio.json --iterations 1 --turns 5
+```
+
+The example overrides `baseUrl` and `model` per player via
+`controllerConfig`, so `definitions/ai.json` does not need to change. The
+`[LLM Request Error]`, `[LLM Timeout]` and `[Harness]` log patterns surface
+request errors and turn output (avoid capturing every `[LLMClient]` debug
+line unless you want the full model responses in the report).
+The first request to a new host is blocked by the sandbox network policy;
+approve the pending request on the host:
+
+```bash
+sbx policy approval ls
+sbx policy approval inspect <approval-id>
+sbx policy approval respond <approval-id> --option <option-id>
 ```
 
 ## Game setup
@@ -52,13 +339,13 @@ checkpoint at every round end and resume after a kill:
 
 ```bash
 # Fresh run with checkpointing (one checkpoint file per run directory)
-node --import ./stubs.mjs --loader ./loader.mjs ./headless.mjs \
+node --import ./preload.mjs ./headless.mjs \
   --config mygame.json --checkpoint-dir ~/workspace/llm-play/checkpoints/my-run
 
 # After a kill: resume with the SAME config file, playing only the
 # remaining rounds. Checkpointing continues into the same directory,
 # so a resumed run survives a second kill the same way.
-node --import ./stubs.mjs --loader ./loader.mjs ./headless.mjs \
+node --import ./preload.mjs ./headless.mjs \
   --config mygame.json --resume ~/workspace/llm-play/checkpoints/my-run
 # (--resume also accepts the checkpoint file itself, and --checkpoint-dir
 # can override where the resumed run writes.)
@@ -112,14 +399,25 @@ generation randomness does not matter: the generated cells are saved.
 
 | File | Purpose |
 |------|---------|
-| `headless.mjs` | Test driver: creates GameState, 2 AI players, drives turns, asserts |
+| `headless.mjs` | Test driver: creates GameState, 2 AI players, drives turns, asserts, optional metrics JSON |
+| `tournament.mjs` | AI suite runner: reads a suite config, runs iterations in child processes, writes Markdown reports |
+| `metrics.mjs` | Out-of-tree instrumentation: resource flows, kills/losses, chats/trades, barbarian stats, log capture |
+| `report.mjs` | Markdown renderers for suite summary, game reports, per-run detail, and logs |
 | `checkpoint.mjs` | Checkpoint/resume: round-end save payloads to disk, resume validation (see above) |
 | `repl.mjs` | Interactive REPL: step turns, inspect state, spawn entities, run AI manually |
+| `preload.mjs` | Node preload: installs `stubs.mjs`, then registers `loader.mjs` via `module.register()` (no deprecated `--experimental-loader` warning) |
 | `stubs.mjs` | Browser API stubs: window, document, AudioContext, fetch (local files), IndexedDB, localStorage |
 | `loader.mjs` | Node module loader: replaces `renderer.js`/`audio.js`/`main.js` with no-ops, redirects esm.sh CDN to node_modules |
 | `renderer-stub.mjs` | Auto-generated no-op exports matching `src/renderer.js` (regenerate if exports change) |
 | `package.json` | npm deps for the harness only (three, simplex-noise, ajv) — the game itself uses CDN imports and needs no npm |
 | `config.example.json` | Template for game setup (players, map, win conditions, etc.) |
+| `suite.example.json` | Tournament template: multiple AI matchups, iterations, log patterns |
+| `suite.quick.json` | Fast smoke suite used by `npm run test:suite:quick` |
+| `suite.tactical-pilot.json` | One 7-AI, 32-map, default-barbarian, 20-turn smoke game |
+| `suite.tactical-pilot-matrix.json` | Small 2-map x 2-barbarian matrix pilot |
+| `suite.tactical-matrix.json` | Full tactical matrix: 4 maps x 3 barbarian modes x 10 seeds, 500-turn cap |
+| `suite.llm.example.json` | LLM-vs-coded template (needs provider credentials/local model) |
+| `suite.lmstudio.example.json` | LM Studio on the host: model-vs-model and LLM-vs-coded templates |
 
 **Key design decision:** turn flow is shared, not duplicated. The harness drives turns through the real `Player.step()` with a no-op continuation (`player.step(() => {})`); the browser passes its `nextTurn` as the continuation. Setup passes no continuation, so no background AI turn fires at game creation. Rendering, sound, and UI remain stubbed — those need the Modal browser runs.
 
@@ -135,7 +433,7 @@ generation randomness does not matter: the generated cells are saved.
 For poking at the game manually — debugging, balance checks, exploring state:
 
 ```bash
-node --import ./stubs.mjs --loader ./loader.mjs ./repl.mjs [--config game.json]
+node --import ./preload.mjs ./repl.mjs [--config game.json]
 ```
 
 ```

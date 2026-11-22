@@ -1,0 +1,97 @@
+{
+  "name": "LM Studio local models",
+  "description": "Before running, replace <MODEL_ID_1>, <MODEL_ID_2> and <MODEL_NAME_1>, <MODEL_NAME_2> with the ids/names returned by http://host.docker.internal:1234/v1/models.",
+  "outputDir": "results",
+  "iterations": 1,
+  "turns": 10,
+  "mapSize": 12,
+  "seed": 2000,
+  "timeoutMs": 900000,
+  "logPatterns": [
+    "\\[AiHelper\\]",
+    "\\[Harness\\]",
+    "\\[LLM (?:Request Error|Timeout)",
+    "All models and retries failed"
+  ],
+  "defaults": {
+    "winCondition": {
+      "absoluteScore": 1000,
+      "relativeScore": 2
+    },
+    "initialization": {
+      "orders": {
+        "max": 6,
+        "perTurn": 5
+      },
+      "startingResources": {
+        "food": 300,
+        "gems": 5,
+        "gold": 200,
+        "iron": 300,
+        "wood": 300
+      },
+      "startingUnits": {
+        "settler": 1,
+        "swordsman": 1,
+        "worker": 1
+      }
+    },
+    "barbarians": null
+  },
+  "games": [
+    {
+      "id": "lmstudio-vs-apex",
+      "description": "Sanity check: one local LLM against the coded Apex controller.",
+      "players": [
+        {
+          "id": 1,
+          "name": "Blue",
+          "color": "#0000ff",
+          "label": "<MODEL_NAME_1>",
+          "controller": "llm-menu-gemma-4",
+          "controllerConfig": {
+            "baseUrl": "http://host.docker.internal:1234/v1",
+            "model": "<MODEL_ID_1>",
+            "timeoutMs": 180000
+          }
+        },
+        {
+          "id": 2,
+          "name": "Red",
+          "color": "#ff0000",
+          "controller": "apex"
+        }
+      ]
+    },
+    {
+      "id": "lmstudio-model-a-vs-model-b",
+      "description": "Two local LLM models head-to-head.",
+      "players": [
+        {
+          "id": 1,
+          "name": "Blue",
+          "color": "#0000ff",
+          "label": "<MODEL_NAME_1>",
+          "controller": "llm-menu-gemma-4",
+          "controllerConfig": {
+            "baseUrl": "http://host.docker.internal:1234/v1",
+            "model": "<MODEL_ID_1>",
+            "timeoutMs": 180000
+          }
+        },
+        {
+          "id": 2,
+          "name": "Red",
+          "color": "#ff0000",
+          "label": "<MODEL_NAME_2>",
+          "controller": "llm-menu-gemma-4",
+          "controllerConfig": {
+            "baseUrl": "http://host.docker.internal:1234/v1",
+            "model": "<MODEL_ID_2>",
+            "timeoutMs": 180000
+          }
+        }
+      ]
+    }
+  ]
+}

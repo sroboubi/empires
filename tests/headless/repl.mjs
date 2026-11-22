@@ -4,7 +4,7 @@
  * inspect state, spawn entities, run AI, etc.
  *
  * Usage:
- *   node --import ./stubs.mjs --loader ./loader.mjs ./repl.mjs [--config game.json]
+ *   node --import ./preload.mjs ./repl.mjs [--config game.json]
  *
  * Commands:
  *   step [n]          - advance n turns (default 1)

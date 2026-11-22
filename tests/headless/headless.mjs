@@ -7,7 +7,7 @@
  *   npm test                          # 5 turns, default config (2 AI players)
  *   npm test -- 20                     # 20 turns, default config
  *   npm test -- --config mygame.json   # custom game setup
- *   npm test -- 20 --config mygame.json
+ *   npm test -- 20 --config mygame.json  # CLI 20 overrides config.turns
  *   npm test -- 20 --seed 42          # reproducible game (same seed = same map and same game)
  *
  * Checkpoint / resume (long LLM games outlive single runtime sessions):
@@ -26,8 +26,16 @@
  *                      treasure rewards), so a game with AI players replays
  *                      exactly. Omitted = random, as before.
  *   players          - array of {id, name, color, controller, description}
- *                      controller: 'ai' = SmartManager, 'llm' = LLM harness,
- *                      null = human (no AI)
+ *                      controller: a key from definitions/ai.json (e.g.
+ *                      'standard', 'apex', 'llm-menu-deepseek-4.1'),
+ *                      a {url, config} object, 'ai' = SmartManager,
+ *                      'llm' = LLM menu harness, null = human (no AI).
+ *                      Optional label/controllerConfig fields override the
+ *                      report label and merge into the controller config.
+ *                      Optional `leader` selects a leader from
+ *                      definitions/leaders.json (description, focus, twist
+ *                      attributes); when omitted, `name` is used as the
+ *                      leader name, matching the browser setup.
  *   winCondition     - {absoluteScore, relativeScore}
  *   initialization   - {orders: {max, perTurn},
  *                       startingResources: {gold, wood, iron, food, gems},
@@ -38,24 +46,120 @@
  *
  * Any field omitted falls back to definitions/defaultSettings.json.
  * See config.example.json for a template.
+ *
+ * Reporting (used by tournament.mjs):
+ *   --report-json <path>   write per-run metrics JSON (scores, entities,
+ *                          kills/losses, chats/trades, resources, timeline)
+ *   --run-label <text>     label stored in the report
+ *   --iteration <n>        iteration number stored in the report
+ *   --log-pattern <regex>  capture console lines matching regex (repeatable;
+ *                          may also be set via config report.logPatterns)
  */
 import { GameState } from '../../src/gameState.js';
 import { loadGameManifest } from '../../src/manifestLoader.js';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import path from 'path';
 import { saveCheckpoint, loadCheckpoint, resolveCheckpointPath, CHECKPOINT_FILE } from './checkpoint.mjs';
+import { GameMetricsCollector } from './metrics.mjs';
 
 function parseArgs() {
   const args = process.argv.slice(2);
-  const opts = { turns: 5, config: null, checkpointDir: null, resume: null, seed: null };
+  const opts = {
+    turns: 5, turnsSet: false, config: null, checkpointDir: null, resume: null, seed: null,
+    reportJson: null, runLabel: null, iteration: null, logPatterns: [],
+  };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--config' && args[i + 1]) opts.config = args[++i];
     else if (args[i] === '--checkpoint-dir' && args[i + 1]) opts.checkpointDir = args[++i];
     else if (args[i] === '--resume' && args[i + 1]) opts.resume = args[++i];
     else if (args[i] === '--seed' && args[i + 1]) opts.seed = args[++i];
-    else if (!isNaN(parseInt(args[i]))) opts.turns = parseInt(args[i]);
+    else if (args[i] === '--report-json' && args[i + 1]) opts.reportJson = args[++i];
+    else if (args[i] === '--run-label' && args[i + 1]) opts.runLabel = args[++i];
+    else if (args[i] === '--iteration' && args[i + 1]) opts.iteration = Number(args[++i]);
+    else if (args[i] === '--log-pattern' && args[i + 1]) opts.logPatterns.push(args[++i]);
+    else if (!isNaN(parseInt(args[i]))) {
+      opts.turns = parseInt(args[i]);
+      opts.turnsSet = true;
+    }
   }
   return opts;
+}
+
+/**
+ * Resolve a config controller reference to a runtime {url, config} object.
+ * String shortcuts other than the legacy 'ai'/'llm' are looked up in
+ * definitions/ai.json, so a suite config can say "controller": "apex" and get
+ * the same URL/config (provider URL, leader overlay) as the browser setup.
+ */
+function resolveController(def, playerName, aiJson, leadersJson, { registry = 'controllers', legacy = false } = {}) {
+  if (!def) return null;
+  if (typeof def === 'string' && legacy) {
+    if (def === 'ai') return { key: 'standard', url: './ai/standard/smartManager.js', config: {} };
+    if (def === 'llm') return { key: 'llm', url: './ai/llm/menu/harness.js', config: {} };
+  }
+  let key = null;
+  let source = null;
+  if (typeof def === 'string') {
+    key = def;
+    source = def;
+  } else if (typeof def === 'object') {
+    if (!def.url && def.key) {
+      key = def.key;
+      source = aiJson?.[registry]?.[key] || null;
+    } else {
+      source = def;
+    }
+  }
+  if (source && typeof source === 'string') {
+    source = aiJson?.[registry]?.[source] || null;
+    if (!source) {
+      throw new Error(`Unknown controller "${key}" (not found in definitions/ai.json ${registry})`);
+    }
+  }
+  if (!source) return null;
+  const controller = {
+    key: key || source.key || undefined,
+    url: source.url,
+    config: JSON.parse(JSON.stringify(source.config || {})),
+  };
+  if (def && typeof def === 'object') {
+    controller.config = { ...controller.config, ...(def.config || {}) };
+    if (def.description) controller.description = def.description;
+    if (def.focus) controller.focus = [...def.focus];
+    if (def.attributes) controller.attributes = { ...def.attributes };
+  }
+  // Overlay leader description/focus/attributes (Phase 23/25), exactly as
+  // the browser buildController() does.
+  const leader = (leadersJson || []).find(l => l.name === playerName);
+  if (leader) {
+    controller.leader = leader.name;
+    controller.description = leader.description;
+    controller.focus = [...(leader.focus || [])];
+    controller.attributes = leader.attributes ? { ...leader.attributes } : {};
+  } else if (source.description) {
+    controller.description = source.description;
+    controller.focus = source.focus ? [...source.focus] : undefined;
+  }
+  // Provider config -> baseUrl. The API key is never put in the config; the
+  // LLM client resolves it from sessionStorage or the config's apiKey.
+  const provider = aiJson?.providers?.[controller.config.provider];
+  if (provider?.url) controller.config.baseUrl = provider.url;
+  return controller;
+}
+
+function controllerMeta(player) {
+  const c = player.controller;
+  if (!c) return { controller: 'human', controllerLabel: 'human', model: null };
+  const config = c.config || {};
+  const model = config.model ?? config.orderedModels ?? null;
+  const modelLabel = Array.isArray(model) ? model.join(', ') : (model ? String(model) : null);
+  const label = player.label || c.key || modelLabel || (c.url ? path.basename(c.url, '.js') : 'ai');
+  return {
+    controller: c.key || c.url || label,
+    controllerLabel: label,
+    model: modelLabel,
+    leader: c.leader || null,
+  };
 }
 
 function expandEnvVars(obj) {
@@ -79,10 +183,12 @@ function loadConfig(path) {
 }
 
 let failures = 0;
+const failureMessages = [];
 function assert(cond, msg) {
   if (!cond) {
     console.error(`  FAIL: ${msg}`);
     failures++;
+    failureMessages.push(msg);
   }
 }
 function checkNoNaN(obj, path) {
@@ -98,7 +204,34 @@ function checkNoNaN(obj, path) {
 async function main() {
   const opts = parseArgs();
   const cfg = loadConfig(opts.config);
-  const TURNS = cfg.turns || opts.turns;
+  // An explicit CLI turn count wins over the config file, matching the
+  // documented `npm test -- 20 --config mygame.json` behaviour.
+  const TURNS = opts.turnsSet ? opts.turns : (cfg.turns || opts.turns);
+
+  // Reporting/log capture is opt-in (`--report-json` or a `report` block in
+  // the config). The suite driver uses it; ordinary `npm test` runs are
+  // unchanged. Create it before the manifest loads so setup logs are seen.
+  const reportCfg = cfg.report || {};
+  const reportPath = opts.reportJson || reportCfg.jsonPath || null;
+  const logPatterns = [
+    ...(Array.isArray(reportCfg.logPatterns) ? reportCfg.logPatterns : []),
+    ...(Array.isArray(cfg.logPatterns) ? cfg.logPatterns : []),
+    ...opts.logPatterns,
+  ];
+  const collector = (reportPath || logPatterns.length > 0)
+    ? new GameMetricsCollector({
+      logPatterns,
+      runMeta: {
+        label: opts.runLabel || reportCfg.runLabel || cfg.label || null,
+        iteration: opts.iteration ?? reportCfg.iteration ?? null,
+        configPath: opts.config,
+        seed: opts.seed ?? cfg.seed ?? null,
+        turns: TURNS,
+        mapSize: cfg.mapSize ?? null,
+      },
+      maxLogMatches: reportCfg.maxLogMatches ?? cfg.maxLogMatches ?? 5000,
+    })
+    : null;
 
   console.log(`[headless] Loading manifest...`);
   const manifest = await loadGameManifest();
@@ -106,45 +239,85 @@ async function main() {
 
   const ds = manifest.defaultSettings || {};
 
+  // Controller registry (definitions/ai.json) lets configs use the same
+  // controller keys as the browser setup: "controller": "apex",
+  // "controller": "llm-menu-deepseek-4.1", or a {key, config} object.
+  let aiJson = null;
+  let leadersJson = [];
+  try {
+    const [aiRes, leadersRes] = await Promise.all([
+      fetch('./definitions/ai.json'),
+      fetch('./definitions/leaders.json'),
+    ]);
+    if (aiRes.ok) aiJson = await aiRes.json();
+    if (leadersRes.ok) leadersJson = await leadersRes.json();
+  } catch (err) {
+    console.warn(`[headless] Controller registry unavailable: ${err.message}`);
+  }
+
   // Player definitions come from the config in both modes: fresh runs use
   // them for setup, resume uses them to validate the checkpoint and to
   // pick controllers/credentials (see checkpoint.mjs header).
+  // `controllerKey` (the browser setup field) is honoured only when the
+  // config explicitly defines players; the built-in defaultSettings list is
+  // a browser setup template, and treating its 'human'/'llm-*' keys as
+  // headless controllers would make the plain `npm test` run call an LLM.
+  const explicitPlayers = Array.isArray(cfg.players);
   const players = cfg.players || ds.players || [
     { id: 1, name: 'Blue', color: '#0000ff', controller: 'ai', description: '' },
     { id: 2, name: 'Red', color: '#ff0000', controller: 'ai', description: '' },
   ];
-  // Ensure every player has a controller field (null = human/no AI)
-  // Map string shortcuts to controller objects (Player.getAiManager requires controller.url)
+  // Ensure every player has a controller field (null = human/no AI).
+  // String shortcuts ('ai', 'llm', or an ai.json controller key) and
+  // {key, config} objects are resolved to the runtime {url, config} shape
+  // Player.getAiManager() requires. `controllerConfig` is merged as a
+  // per-player override.
   for (const p of players) {
-    if (p.controller === undefined) p.controller = 'ai';
-    if (p.controller === 'ai') {
-      p.controller = { url: './ai/standard/smartManager.js' };
-    } else if (p.controller === 'llm') {
-      // LLM controller needs full config from the config file; if only the
-      // string was given, fall back to the menu harness with local defaults.
-      p.controller = {
-        url: './ai/llm/menu/harness.js',
-        config: p.controllerConfig || {},
-      };
-      delete p.controllerConfig;
+    // Leader selection: an explicit `leader` lets a player keep a friendly
+    // display name (Blue) while using a leader's description/focus/twist
+    // attributes. Without it, the browser convention applies: the player
+    // name IS the leader name.
+    const leaderName = p.leader || p.name;
+    if (p.leader && !(leadersJson || []).some(l => l.name === p.leader)) {
+      throw new Error(`Unknown leader "${p.leader}" for player ${p.name} (not found in definitions/leaders.json)`);
     }
-    // Phase 26: strategic controller (optional). 'dummy' maps to the coded
-    // dummy strategic AI with its default fixed directive; an object is a
-    // built controller ({url, config}) used as-is.
-    if (p.strategicController === 'dummy') {
-      p.strategicController = {
-        key: 'strategic-dummy',
-        url: './ai/strategic/dummyStrategicAi.js',
-        config: {
-          directive: {
-            focus: 'economy',
-            stance: {},
-            goals: [{ type: 'explore', direction: 'NE' }]
-          }
-        },
-      };
+
+    if (p.controller === undefined) {
+      p.controller = (explicitPlayers && p.controllerKey) ? p.controllerKey : 'ai';
     }
+    if (p.controller === 'human' || p.controller === 'none') p.controller = null;
+    if (p.controller) {
+      p.controller = resolveController(p.controller, leaderName, aiJson, leadersJson, { legacy: true });
+      if (p.controller && p.controllerConfig) {
+        p.controller.config = { ...(p.controller.config || {}), ...p.controllerConfig };
+      }
+    }
+    delete p.controllerConfig;
+
+    // Phase 26: strategic controller (optional). 'dummy' is an alias for
+    // the coded strategic AI; other keys resolve through
+    // definitions/ai.json strategicControllers.
+    if (p.strategicController === 'dummy' || p.strategicController?.key === 'dummy') {
+      p.strategicController = 'strategic-dummy';
+    }
+    if (p.strategicController) {
+      const strategicRegistry = aiJson?.strategicControllers ? 'strategicControllers' : 'controllers';
+      p.strategicController = resolveController(
+        p.strategicController, leaderName, aiJson, leadersJson, { registry: strategicRegistry }
+      );
+      if (p.strategicController && p.strategicControllerConfig) {
+        p.strategicController.config = {
+          ...(p.strategicController.config || {}),
+          ...p.strategicControllerConfig,
+        };
+      }
+    }
+    delete p.strategicControllerConfig;
   }
+  const playerMeta = Object.fromEntries(players.map(p => {
+    const meta = controllerMeta(p);
+    return [String(p.id), { id: p.id, name: p.name, ...meta }];
+  }));
 
   // Checkpoint wiring: --resume <dir|file> loads the latest checkpoint;
   // --checkpoint-dir <dir> enables round-end checkpointing. Resuming
@@ -242,10 +415,42 @@ async function main() {
     if (p.controller) await p.getAiManager();
     // Phase 26: same for the strategic manager.
     if (p.strategicController) await p.getStrategicManager();
+    // Timing instrumentation (reporting runs only): wrap the manager
+    // instances so the harness can separate AI compute from engine work.
+    if (collector) {
+      p._lastAiMs = 0;
+      p._lastStrategicMs = 0;
+      if (p.aiManager?.processTurn) {
+        const originalProcessTurn = p.aiManager.processTurn.bind(p.aiManager);
+        p.aiManager.processTurn = async (...args) => {
+          const start = performance.now();
+          try {
+            return await originalProcessTurn(...args);
+          } finally {
+            p._lastAiMs = performance.now() - start;
+          }
+        };
+      }
+      if (p.strategicManager?.runStrategicTurn) {
+        const originalStrategicTurn = p.strategicManager.runStrategicTurn.bind(p.strategicManager);
+        p.strategicManager.runStrategicTurn = async (...args) => {
+          const start = performance.now();
+          try {
+            return await originalStrategicTurn(...args);
+          } finally {
+            p._lastStrategicMs = performance.now() - start;
+          }
+        };
+      }
+    }
   }
 
   assert(gameState.players.length === players.length, `expected ${players.length} players`);
   assert(gameState.entities.length > 0, 'expected starting entities');
+
+  // Metrics are attached after setup and before the first turn, so the
+  // baseline is the starting position and every AI action is counted.
+  if (collector) collector.attach(gameState, playerMeta);
 
   // Run turns headlessly through the real Player.step(), with a no-op
   // continuation: the harness drives advancement itself, so step() must
@@ -255,9 +460,12 @@ async function main() {
   // roundsDone rounds already happened (0 on fresh runs); the loop runs
   // exactly the remaining rounds, so completed rounds are never replayed.
   let roundsRun = 0;
+  let winner = null;
   for (let turn = roundsDone + 1; turn <= TURNS; turn++) {
     roundsRun++;
     console.log(`[headless] --- Turn ${turn} (round ${gameState.currentRound}) ---`);
+    if (collector) collector.beginRound(gameState.currentRound);
+    let roundEnded = false;
     for (let pi = 0; pi < gameState.players.length; pi++) {
       const player = gameState.players[pi];
       gameState.activePlayerIndex = pi;
@@ -265,11 +473,24 @@ async function main() {
       // Real Player.step(): refill, entity steps, visibility, scores,
       // then the AI turn (awaited). Errors are logged in step() and
       // rethrown here for the failure count.
+      const stepStart = performance.now();
       try {
         await player.step(() => { });
       } catch (err) {
         console.error(`  ERROR in ${player.name} AI: ${err.message}`);
         failures++;
+        failureMessages.push(`${player.name} AI error: ${err.message}`);
+      } finally {
+        if (collector) {
+          collector.recordTurnTiming(player, {
+            round: gameState.currentRound,
+            stepMs: performance.now() - stepStart,
+            aiMs: player._lastAiMs || 0,
+            strategicMs: player._lastStrategicMs || 0,
+          });
+          player._lastAiMs = 0;
+          player._lastStrategicMs = 0;
+        }
       }
 
       // Assertions after each player's turn
@@ -280,7 +501,10 @@ async function main() {
       // Round-end (barbarians etc.) when the last player has acted,
       // matching the browser's endTurn wrap.
       if (pi === gameState.players.length - 1) {
+        const finishedRound = gameState.currentRound;
         await gameState.onRoundEnd();
+        if (collector) collector.endRound(finishedRound);
+        roundEnded = true;
       }
 
       // Check win conditions after each player's turn, as the browser
@@ -289,7 +513,16 @@ async function main() {
       if (win) {
         console.log(`[headless] ${win.winner.name} WINS at round ${gameState.currentRound} (score ${win.winner.score.total})`);
         console.log(`[headless] Reasons: ${win.reasons.join('; ')}`);
+        winner = {
+          id: win.winner.id,
+          name: win.winner.name,
+          score: { ...(win.winner.score || {}) },
+          reasons: [...win.reasons],
+        };
         gameState.gameOver = true;
+        // A win before the last player acted leaves the round unfinished:
+        // snapshot it so score-over-time ends on the winning position.
+        if (collector && !roundEnded) collector.endRound(gameState.currentRound);
         break;
       }
     }
@@ -315,6 +548,8 @@ async function main() {
     console.log(`[headless] Turn ${turn} complete: ${gameState.entities.length} entities`);
   }
 
+  if (collector) collector.runMeta.mapSize = gameState.hexGrid?.radius ?? cfg.mapSize ?? null;
+
   // Serialization round-trip (production save path)
   const saved = gameState.serialize();
   assert(typeof saved === 'string' && saved.length > 1000, 'serialize produced output');
@@ -334,6 +569,29 @@ async function main() {
     const rd = restored.players.find(r => String(r.id) === String(p.id));
     assert(JSON.stringify(rd?.controller?.directive) === JSON.stringify(d),
       `${p.name} directive did not survive save/load`);
+  }
+
+  // Optional machine-readable report (consumed by tournament.mjs, which
+  // renders the Markdown report from it). Written before exit so a failing
+  // assertion still leaves a complete metrics file behind.
+  if (collector) {
+    const totalRounds = roundsDone + roundsRun;
+    const report = collector.finalize({
+      winner,
+      gameOver: gameState.gameOver,
+      completedAllTurns: !gameState.gameOver && totalRounds >= TURNS,
+      roundsPlayed: totalRounds,
+      totalTurns: TURNS,
+      resumed: !!resumePath,
+      failures,
+      failureMessages,
+    });
+    if (reportPath) {
+      mkdirSync(path.dirname(path.resolve(reportPath)), { recursive: true });
+      writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n');
+      console.log(`[headless] Metrics report: ${reportPath}`);
+    }
+    collector.dispose();
   }
 
   console.log(failures === 0

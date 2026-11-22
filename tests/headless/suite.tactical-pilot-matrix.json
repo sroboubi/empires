@@ -1,0 +1,112 @@
+{
+  "name": "Tactical AI matrix pilot",
+  "description": "Small matrix: 2 map sizes x 2 barbarian modes x 1 seed = 4 games, 20 turns each. Use this to verify matrix expansion and report output before the full run.",
+  "outputDir": "results",
+  "turns": 20,
+  "iterations": 1,
+  "seed": 1000,
+  "seedStrategy": "increment",
+  "concurrency": 2,
+  "timeoutMs": 1800000,
+  "perRunReports": true,
+  "logPatterns": [
+    "\\[AiHelper\\]"
+  ],
+  "defaults": {
+    "winCondition": {
+      "absoluteScore": 1000,
+      "relativeScore": 2
+    },
+    "initialization": {
+      "orders": {
+        "max": 6,
+        "perTurn": 5
+      },
+      "startingResources": {
+        "food": 300,
+        "gems": 5,
+        "gold": 200,
+        "iron": 300,
+        "wood": 300
+      },
+      "startingUnits": {
+        "settler": 1,
+        "swordsman": 1,
+        "worker": 1
+      }
+    }
+  },
+  "players": [
+    {
+      "id": 1,
+      "name": "Adaptive",
+      "color": "#4e79a7",
+      "controller": "adaptive"
+    },
+    {
+      "id": 2,
+      "name": "Apex",
+      "color": "#f28e2b",
+      "controller": "apex"
+    },
+    {
+      "id": 3,
+      "name": "BigPickle",
+      "color": "#e15759",
+      "controller": "bigPickle"
+    },
+    {
+      "id": 4,
+      "name": "Entity",
+      "color": "#76b7b2",
+      "controller": "entity"
+    },
+    {
+      "id": 5,
+      "name": "Fable",
+      "color": "#59a14f",
+      "controller": "fable"
+    },
+    {
+      "id": 6,
+      "name": "Hark",
+      "color": "#edc948",
+      "controller": "hark"
+    },
+    {
+      "id": 7,
+      "name": "Opus",
+      "color": "#b07aa1",
+      "controller": "opus"
+    }
+  ],
+  "matrix": {
+    "mapSize": [
+      32,
+      64
+    ],
+    "barbarians": [
+      null,
+      {
+        "horde": {
+          "barbarian": {
+            "min": 2,
+            "max": 4
+          },
+          "barbarianChief": {
+            "min": 1,
+            "max": 2
+          },
+          "barbarianPrincess": {
+            "min": 1,
+            "max": 1
+          }
+        },
+        "spawnFrequencyTurns": 5,
+        "maxNumber": 20,
+        "maxAge": 25,
+        "aggression": 1
+      }
+    ]
+  }
+}
