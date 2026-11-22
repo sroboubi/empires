@@ -50,7 +50,8 @@ function playerTitle(pm) {
   if (!pm) return '—';
   const ctrl = pm.controllerLabel || pm.controller || 'human';
   const model = pm.model && pm.model !== ctrl ? ` / ${pm.model}` : '';
-  return `${pm.name} (${ctrl}${model})`;
+  const leader = pm.leader && pm.leader !== pm.name ? `; leader ${pm.leader}` : '';
+  return `${pm.name} (${ctrl}${model}${leader})`;
 }
 
 function winnerTitle(metrics) {
@@ -123,7 +124,8 @@ function configuredPlayerTitle(p) {
   const model = Array.isArray(rawModel) ? rawModel.join(', ') : rawModel;
   const display = p.label || model || key;
   const extra = p.label && model && p.label !== model ? ` / ${model}` : '';
-  return `${p.name} (${display}${extra})`;
+  const leader = p.leader && p.leader !== p.name ? `; leader ${p.leader}` : '';
+  return `${p.name} (${display}${extra}${leader})`;
 }
 
 function configTable(game) {

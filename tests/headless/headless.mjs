@@ -32,6 +32,10 @@
  *                      'llm' = LLM menu harness, null = human (no AI).
  *                      Optional label/controllerConfig fields override the
  *                      report label and merge into the controller config.
+ *                      Optional `leader` selects a leader from
+ *                      definitions/leaders.json (description, focus, twist
+ *                      attributes); when omitted, `name` is used as the
+ *                      leader name, matching the browser setup.
  *   winCondition     - {absoluteScore, relativeScore}
  *   initialization   - {orders: {max, perTurn},
  *                       startingResources: {gold, wood, iron, food, gems},
@@ -125,6 +129,7 @@ function resolveController(def, playerName, aiJson, leadersJson, { registry = 'c
   // the browser buildController() does.
   const leader = (leadersJson || []).find(l => l.name === playerName);
   if (leader) {
+    controller.leader = leader.name;
     controller.description = leader.description;
     controller.focus = [...(leader.focus || [])];
     controller.attributes = leader.attributes ? { ...leader.attributes } : {};
@@ -150,6 +155,7 @@ function controllerMeta(player) {
     controller: c.key || c.url || label,
     controllerLabel: label,
     model: modelLabel,
+    leader: c.leader || null,
   };
 }
 
@@ -262,12 +268,21 @@ async function main() {
   // Player.getAiManager() requires. `controllerConfig` is merged as a
   // per-player override.
   for (const p of players) {
+    // Leader selection: an explicit `leader` lets a player keep a friendly
+    // display name (Blue) while using a leader's description/focus/twist
+    // attributes. Without it, the browser convention applies: the player
+    // name IS the leader name.
+    const leaderName = p.leader || p.name;
+    if (p.leader && !(leadersJson || []).some(l => l.name === p.leader)) {
+      throw new Error(`Unknown leader "${p.leader}" for player ${p.name} (not found in definitions/leaders.json)`);
+    }
+
     if (p.controller === undefined) {
       p.controller = (explicitPlayers && p.controllerKey) ? p.controllerKey : 'ai';
     }
     if (p.controller === 'human' || p.controller === 'none') p.controller = null;
     if (p.controller) {
-      p.controller = resolveController(p.controller, p.name, aiJson, leadersJson, { legacy: true });
+      p.controller = resolveController(p.controller, leaderName, aiJson, leadersJson, { legacy: true });
       if (p.controller && p.controllerConfig) {
         p.controller.config = { ...(p.controller.config || {}), ...p.controllerConfig };
       }
@@ -283,7 +298,7 @@ async function main() {
     if (p.strategicController) {
       const strategicRegistry = aiJson?.strategicControllers ? 'strategicControllers' : 'controllers';
       p.strategicController = resolveController(
-        p.strategicController, p.name, aiJson, leadersJson, { registry: strategicRegistry }
+        p.strategicController, leaderName, aiJson, leadersJson, { registry: strategicRegistry }
       );
       if (p.strategicController && p.strategicControllerConfig) {
         p.strategicController.config = {

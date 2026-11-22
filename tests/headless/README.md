@@ -112,6 +112,25 @@ Optional per-player `label` controls the report label; `controllerConfig`
 is merged over the registry config. Optional `strategicController` works
 the same way (`"dummy"` or a key from `strategicControllers`).
 
+**Leaders.** A player's leader supplies its description, focus, and twist
+attributes (combat/economy/score multipliers, barbarian aggression, etc.).
+By default the leader is the player `name`, matching the browser setup; use
+the explicit `leader` field to keep a friendly player name:
+
+```json
+{
+  "id": 1,
+  "name": "Blue",
+  "leader": "Anselm",
+  "controller": "standard"
+}
+```
+
+Leader names come from `definitions/leaders.json`: Anselm, Bramble, Dagna,
+Kaida, Meera, Rashid, Samara, Sefu, Temur, Yrsa. An explicit unknown leader
+fails the run. A player whose name/leader matches no leader entry gets no
+twist attributes.
+
 **Iterations and seeds.** `iterations` is per game setting. With
 `seedStrategy: "increment"` (the default), iteration `i` uses
 `seed + i * seedStep`, so each iteration is a different map/game. Use
