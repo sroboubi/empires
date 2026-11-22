@@ -26,6 +26,187 @@ npm test -- 20 --config mygame.json
 npm test -- 20 --seed 42
 ```
 
+## AI controller suite (tournaments)
+
+`tournament.mjs` runs one or more game settings repeatedly and writes
+Markdown reports you can inspect. Each iteration is a separate
+`headless.mjs` process, so runs cannot leak state into each other. The real
+game and the real AI managers run — nothing in `src/` changes.
+
+```bash
+cd tests/headless
+npm run test:suite:quick   # 2 games x 1 iteration x 5 turns, for a smoke check
+npm run test:suite         # suite.example.json: 2 games x 2 iterations
+npm run test:suite -- --config my-suite.json
+npm run test:suite -- --config my-suite.json --iterations 10 --turns 60
+
+# Exact output directory (otherwise a timestamped folder is created):
+npm run test:suite -- --out results/my-run
+
+# Run only one configured game, or use more CPU:
+npm run test:suite -- --game standard-vs-apex --concurrency 4
+```
+
+The suite config is a superset of the single-game config. Top-level fields
+are defaults; each entry in `games` overrides them:
+
+```json
+{
+  "name": "AI controller comparison",
+  "outputDir": "results",
+  "iterations": 2,
+  "turns": 30,
+  "mapSize": 16,
+  "seed": 1000,
+  "seedStrategy": "increment",
+  "seedStep": 1,
+  "concurrency": 1,
+  "logPatterns": ["\\[AiHelper\\]", "\\[Barbarians\\]"],
+  "defaults": {
+    "winCondition": { "absoluteScore": 1000, "relativeScore": 2 },
+    "initialization": { "orders": { "max": 6, "perTurn": 5 } },
+    "barbarians": null
+  },
+  "players": [
+    { "id": 1, "name": "Blue", "color": "#0000ff", "controller": "standard" },
+    { "id": 2, "name": "Red", "color": "#ff0000", "controller": "apex" }
+  ],
+  "games": [
+    {
+      "id": "standard-vs-apex",
+      "iterations": 5,
+      "players": [
+        { "id": 1, "name": "Blue", "color": "#0000ff", "controller": "standard" },
+        { "id": 2, "name": "Red", "color": "#ff0000", "controller": "apex" }
+      ]
+    },
+    {
+      "id": "hark-vs-entity-barbarians",
+      "players": [
+        { "id": 1, "name": "Blue", "color": "#0000ff", "controller": "hark" },
+        { "id": 2, "name": "Red", "color": "#ff0000", "controller": "entity" }
+      ],
+      "barbarians": {
+        "horde": { "barbarian": { "min": 2, "max": 4 } },
+        "spawnFrequencyTurns": 5,
+        "maxNumber": 20,
+        "maxAge": 25,
+        "aggression": 1
+      }
+    }
+  ]
+}
+```
+
+**Controllers.** `controller` may be:
+
+- a key from `definitions/ai.json` (`standard`, `adaptive`, `bigPickle`,
+  `apex`, `hark`, `entity`, `fable`, `opus`, `llm-json-gemma-4`,
+  `llm-menu-deepseek-4.1`, …) — the same URL/config/provider/leader
+  overlay the browser setup uses;
+- a `{ "key": "apex", "config": { ... } }` object;
+- a raw `{ "url": "./ai/tactical/apexAi.js", "config": {} }` object;
+- legacy `"ai"` (SmartManager) or `"llm"` (menu harness).
+
+Optional per-player `label` controls the report label; `controllerConfig`
+is merged over the registry config. Optional `strategicController` works
+the same way (`"dummy"` or a key from `strategicControllers`).
+
+**Iterations and seeds.** `iterations` is per game setting. With
+`seedStrategy: "increment"` (the default), iteration `i` uses
+`seed + i * seedStep`, so each iteration is a different map/game. Use
+`"same"` to replay one seed, or `"random"` to ignore the base seed per
+iteration. LLM players are not deterministic even with the same seed.
+
+**Log capture.** Every console line is tested against `logPatterns`
+(JavaScript regex strings; a game entry can override the suite list).
+Matching lines are stored with their round number and rendered in the
+reports. Raw logs are not kept unless
+`saveFullLogs` is true (or `--full-logs`); the per-iteration stdout is still
+available to the runner and is included on failure. To capture AI helper
+chat lines, for example:
+
+```json
+"logPatterns": ["\\[AiHelper\\]", "\\[AI [^\\]]+\\]\\[(?:warn|combat)\\]"]
+```
+
+Strings are JavaScript regular expressions, so escape literal brackets. For a
+plain-text match use an object instead:
+
+```json
+"logPatterns": [{ "pattern": "[AiHelper]", "literal": true }]
+```
+
+**Output layout.** By default a timestamped folder is created:
+
+```text
+results/<suite>-<timestamp>/
+  summary.md                     # all settings: winners, win rates, averages
+  games/<game>.md                # one setting: averages and over-time tables
+  runs/<game>/iteration-N.md     # one iteration: full detail
+  runs/<game>/iteration-N.metrics.json  # raw metrics (machine-readable)
+  runs/<game>/iteration-N.config.json   # exact config used (mode 0600)
+  logs/<game>.md                 # all regex-matched log lines
+  suite.resolved.json            # suite copy with secrets redacted
+```
+
+The Markdown reports include, per run and aggregated across iterations:
+
+- final scores (military/economic/exploration/total), winner and leader;
+- which controller/model won, win rate, and lead count;
+- final entities of each type, built/lost/killed counts;
+- damage dealt/taken;
+- chats initiated/participated/messages, trades proposed/accepted/
+  countered/rejected/active;
+- barbarian spawns, encounters, targeted/ignored decisions, attacks,
+  player units killed, barbarians killed;
+- score over time (every round, all score categories in per-run detail);
+- gross resource produced/consumed per round and per resource, plus final
+  stock (production includes yields, treasure, trade receipts and
+  orders-overflow conversions; consumption includes upkeep, build/spawn
+  costs and trade sends);
+- every log line matching `logPatterns`.
+
+Exit code is non-zero if any iteration failed (assertions, crash, timeout).
+The reports are still written. `timeoutMs` (suite or game level) kills a
+stuck iteration; `concurrency` runs that many child processes at once.
+
+### LM Studio / local OpenAI-compatible servers
+
+LM Studio on the host listens on port 1234 by default. Inside the sandbox
+`localhost` means the sandbox, so point the config at
+`http://host.docker.internal:1234/v1` instead. Enable LM Studio's
+"Serve on Local Network" option if the sandbox cannot reach a loopback-only
+server.
+
+Get the exact model id on the host or from the sandbox after network
+approval:
+
+```bash
+curl -s http://host.docker.internal:1234/v1/models
+```
+
+Copy `suite.lmstudio.example.json`, replace `<MODEL_ID_*>` and
+`<MODEL_NAME_*>` with the ids/names from that response, then:
+
+```bash
+npm run test:suite -- --config suite.lmstudio.json --iterations 1 --turns 5
+```
+
+The example overrides `baseUrl` and `model` per player via
+`controllerConfig`, so `definitions/ai.json` does not need to change. The
+`[LLM Request Error]`, `[LLM Timeout]` and `[Harness]` log patterns surface
+request errors and turn output (avoid capturing every `[LLMClient]` debug
+line unless you want the full model responses in the report).
+The first request to a new host is blocked by the sandbox network policy;
+approve the pending request on the host:
+
+```bash
+sbx policy approval ls
+sbx policy approval inspect <approval-id>
+sbx policy approval respond <approval-id> --option <option-id>
+```
+
 ## Game setup
 
 Game configuration comes from an optional JSON config file (see `config.example.json`):
@@ -112,7 +293,10 @@ generation randomness does not matter: the generated cells are saved.
 
 | File | Purpose |
 |------|---------|
-| `headless.mjs` | Test driver: creates GameState, 2 AI players, drives turns, asserts |
+| `headless.mjs` | Test driver: creates GameState, 2 AI players, drives turns, asserts, optional metrics JSON |
+| `tournament.mjs` | AI suite runner: reads a suite config, runs iterations in child processes, writes Markdown reports |
+| `metrics.mjs` | Out-of-tree instrumentation: resource flows, kills/losses, chats/trades, barbarian stats, log capture |
+| `report.mjs` | Markdown renderers for suite summary, game reports, per-run detail, and logs |
 | `checkpoint.mjs` | Checkpoint/resume: round-end save payloads to disk, resume validation (see above) |
 | `repl.mjs` | Interactive REPL: step turns, inspect state, spawn entities, run AI manually |
 | `stubs.mjs` | Browser API stubs: window, document, AudioContext, fetch (local files), IndexedDB, localStorage |
@@ -120,6 +304,10 @@ generation randomness does not matter: the generated cells are saved.
 | `renderer-stub.mjs` | Auto-generated no-op exports matching `src/renderer.js` (regenerate if exports change) |
 | `package.json` | npm deps for the harness only (three, simplex-noise, ajv) — the game itself uses CDN imports and needs no npm |
 | `config.example.json` | Template for game setup (players, map, win conditions, etc.) |
+| `suite.example.json` | Tournament template: multiple AI matchups, iterations, log patterns |
+| `suite.quick.json` | Fast smoke suite used by `npm run test:suite:quick` |
+| `suite.llm.example.json` | LLM-vs-coded template (needs provider credentials/local model) |
+| `suite.lmstudio.example.json` | LM Studio on the host: model-vs-model and LLM-vs-coded templates |
 
 **Key design decision:** turn flow is shared, not duplicated. The harness drives turns through the real `Player.step()` with a no-op continuation (`player.step(() => {})`); the browser passes its `nextTurn` as the continuation. Setup passes no continuation, so no background AI turn fires at game creation. Rendering, sound, and UI remain stubbed — those need the Modal browser runs.
 

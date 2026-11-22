@@ -1,0 +1,61 @@
+{
+  "name": "LLM controller example",
+  "description": "Template for comparing an LLM controller against a coded one. Requires the provider credentials/local model used below.",
+  "outputDir": "results",
+  "iterations": 1,
+  "turns": 10,
+  "mapSize": 12,
+  "seed": 5000,
+  "logPatterns": [
+    "\\[AiHelper\\]",
+    "\\[Harness\\]",
+    "\\[AI [^\\]]+\\]\\[(?:warn|combat)\\]"
+  ],
+  "defaults": {
+    "winCondition": {
+      "absoluteScore": 1000,
+      "relativeScore": 2
+    },
+    "initialization": {
+      "orders": {
+        "max": 6,
+        "perTurn": 5
+      },
+      "startingResources": {
+        "food": 300,
+        "gems": 5,
+        "gold": 200,
+        "iron": 300,
+        "wood": 300
+      },
+      "startingUnits": {
+        "settler": 1,
+        "swordsman": 1,
+        "worker": 1
+      }
+    },
+    "barbarians": null
+  },
+  "games": [
+    {
+      "id": "deepseek-vs-apex",
+      "players": [
+        {
+          "id": 1,
+          "name": "Blue",
+          "color": "#0000ff",
+          "controller": "llm-menu-deepseek-4.1",
+          "controllerConfig": {
+            "apiKey": "${OPENROUTER_API_KEY}"
+          }
+        },
+        {
+          "id": 2,
+          "name": "Red",
+          "color": "#ff0000",
+          "controller": "apex"
+        }
+      ]
+    }
+  ]
+}

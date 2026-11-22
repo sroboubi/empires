@@ -8,7 +8,9 @@
   },
   "scripts": {
     "test": "node --import ./stubs.mjs --loader ./loader.mjs ./headless.mjs",
-    "test:redteam": "node --import ./stubs.mjs --loader ./loader.mjs ./headless.mjs --config cheater-test.json"
+    "test:redteam": "node --import ./stubs.mjs --loader ./loader.mjs ./headless.mjs --config cheater-test.json",
+    "test:suite": "node --import ./stubs.mjs --loader ./loader.mjs ./tournament.mjs",
+    "test:suite:quick": "node --import ./stubs.mjs --loader ./loader.mjs ./tournament.mjs --config suite.quick.json"
   },
   "keywords": [],
   "author": "",

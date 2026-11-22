@@ -1,0 +1,96 @@
+{
+  "name": "AI controller comparison",
+  "description": "Headless tournament: each game setting is repeated with a new seed, and reports are written to a timestamped directory.",
+  "outputDir": "results",
+  "iterations": 2,
+  "turns": 30,
+  "mapSize": 16,
+  "seed": 1000,
+  "seedStrategy": "increment",
+  "seedStep": 1,
+  "concurrency": 1,
+  "logPatterns": [
+    "\\[AiHelper\\]",
+    "\\[Barbarians\\]",
+    "\\[AI [^\\]]+\\]\\[(?:warn|combat)\\]",
+    "\\[Harness\\]"
+  ],
+  "defaults": {
+    "winCondition": {
+      "absoluteScore": 1000,
+      "relativeScore": 2
+    },
+    "initialization": {
+      "orders": {
+        "max": 6,
+        "perTurn": 5
+      },
+      "startingResources": {
+        "food": 300,
+        "gems": 5,
+        "gold": 200,
+        "iron": 300,
+        "wood": 300
+      },
+      "startingUnits": {
+        "settler": 1,
+        "swordsman": 1,
+        "worker": 1
+      }
+    },
+    "barbarians": null
+  },
+  "players": [
+    {
+      "id": 1,
+      "name": "Blue",
+      "color": "#0000ff",
+      "controller": "standard"
+    },
+    {
+      "id": 2,
+      "name": "Red",
+      "color": "#ff0000",
+      "controller": "apex"
+    }
+  ],
+  "games": [
+    {
+      "id": "standard-vs-apex",
+      "description": "Coded baseline against the Apex tactical controller, no barbarians.",
+      "iterations": 2
+    },
+    {
+      "id": "hark-vs-entity-barbarians",
+      "description": "Hark and Entity-Centric with barbarians enabled.",
+      "iterations": 2,
+      "turns": 40,
+      "players": [
+        {
+          "id": 1,
+          "name": "Blue",
+          "color": "#0000ff",
+          "controller": "hark"
+        },
+        {
+          "id": 2,
+          "name": "Red",
+          "color": "#ff0000",
+          "controller": "entity"
+        }
+      ],
+      "barbarians": {
+        "horde": {
+          "barbarian": {
+            "min": 2,
+            "max": 4
+          }
+        },
+        "spawnFrequencyTurns": 5,
+        "maxNumber": 20,
+        "maxAge": 25,
+        "aggression": 1
+      }
+    }
+  ]
+}
