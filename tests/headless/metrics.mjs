@@ -762,6 +762,7 @@ export class GameMetricsCollector {
       players,
       timeline: this.timeline,
       timings: this.turnTimings,
+      proxyProfile: context.proxyProfile || null,
       totals: {
         ...this.totals,
         tradeTypes: this._tradeTypes || {},

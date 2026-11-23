@@ -12,6 +12,7 @@
     "test:suite": "node --import ./preload.mjs ./tournament.mjs",
     "test:suite:quick": "node --import ./preload.mjs ./tournament.mjs --config suite.quick.json",
     "test:suite:tactical-pilot": "node --import ./preload.mjs ./tournament.mjs --config suite.tactical-pilot.json",
+    "test:suite:tactical-pilot-profile": "node --import ./preload.mjs ./tournament.mjs --config suite.tactical-pilot-profile.json",
     "test:suite:tactical-pilot-matrix": "node --import ./preload.mjs ./tournament.mjs --config suite.tactical-pilot-matrix.json",
     "test:suite:tactical-matrix": "node --import ./preload.mjs ./tournament.mjs --config suite.tactical-matrix.json"
   },

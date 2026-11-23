@@ -1010,6 +1010,44 @@ export function renderRunReport({ game, run }) {
     lines.push('');
   }
 
+  if (metrics.proxyProfile) {
+    const p = metrics.proxyProfile;
+    lines.push('## Proxy profile');
+    lines.push('');
+    lines.push(table(['Counter', 'Value'], [
+      ['Duration', `${fmt(p.durationMs / 1000, 2)} s`],
+      ['wrapFunction calls', p.wrapFunctionCalls],
+      ['function proxy applies', p.functionProxyApplies],
+      ['deepWrap calls', p.deepWrapCalls],
+      ['deepWrap cache hits', p.deepWrapCacheHits],
+      ['entity filter calls', p.entitiesFilterCalls],
+      ['entities raw total', p.entitiesRawTotal],
+      ['entities filtered total', p.entitiesFilteredTotal],
+      ['getCellsArray calls', p.getCellsArrayCalls],
+      ['getCellsArray cells total', p.getCellsArrayTotal],
+      ['getNeighbors calls', p.getNeighborsCalls],
+      ['fog checks', p.fogChecks],
+      ['arg arrays', p.argArrays],
+      ['args total', p.argsTotal],
+      ['helper calls', p.helperCalls],
+      ['helper arg arrays', p.helperArgArrays],
+    ]));
+    lines.push('');
+    lines.push('### deepWrap by kind');
+    lines.push('');
+    lines.push(table(
+      ['Kind', 'Count'],
+      Object.entries(p.deepWrapKinds || {}).map(([kind, count]) => [kind, count])
+    ));
+    lines.push('');
+    if (Array.isArray(p.methodAccess) && p.methodAccess.length > 0) {
+      lines.push('### Proxy method accesses');
+      lines.push('');
+      lines.push(table(['Method', 'Count'], p.methodAccess.map(item => [item.name, item.count])));
+      lines.push('');
+    }
+  }
+
   lines.push('## Captured logs');
   lines.push('');
   const matches = metrics.logs?.matches || [];
