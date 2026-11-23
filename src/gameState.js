@@ -58,6 +58,10 @@ export class GameState {
     this.random = () => Math.random();
     this.hexGrid = null;  // HexGrid instance
     this.entities = [];   // List of active BaseEntity instances
+    // Monotonic counter bumped by every entity action. Used by the AI proxy
+    // to invalidate its cached visible-entity view at action boundaries.
+    // Not serialized: it is a runtime cache generation only.
+    this.stateVersion = 0;
     // Zone of Control map (Phase 24): cellKey "q,r" -> { controlledBy: [entityId], occupiedBy: [entityId] }.
     // NOT saved/loaded — recreating entities on load (via spawnEntity)
     // repopulates it. NOT exposed to AIs — the AI interface proxy blocks
