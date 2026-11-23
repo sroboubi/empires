@@ -63,7 +63,7 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import path from 'path';
 import { saveCheckpoint, loadCheckpoint, resolveCheckpointPath, CHECKPOINT_FILE } from './checkpoint.mjs';
 import { GameMetricsCollector } from './metrics.mjs';
-import { createAiProxyProfiler } from '../../src/aiProxyProfiler.js';
+import { createAiProxyProfiler } from './aiProxyProfiler.js';
 
 function parseArgs() {
   const args = process.argv.slice(2);
