@@ -1,0 +1,77 @@
+{
+  "name": "Entity worst-case bench",
+  "id": "entity-bench",
+  "description": "Six AIs, map 32, no barbarians, 100 turns, seed 1000. On a small map everyone sees everyone, which is Entity's worst case: use it to check Entity score/time after candidate-shortlist changes (issue #72).",
+  "outputDir": "results",
+  "turns": 100,
+  "iterations": 1,
+  "seed": 1000,
+  "seedStrategy": "increment",
+  "concurrency": 1,
+  "timeoutMs": 7200000,
+  "perRunReports": true,
+  "logPatterns": [
+    "\\[AiHelper\\]"
+  ],
+  "defaults": {
+    "winCondition": null,
+    "barbarians": null,
+    "initialization": {
+      "orders": {
+        "max": 6,
+        "perTurn": 5
+      },
+      "startingResources": {
+        "food": 300,
+        "gems": 5,
+        "gold": 200,
+        "iron": 300,
+        "wood": 300
+      },
+      "startingUnits": {
+        "settler": 1,
+        "swordsman": 1,
+        "worker": 1
+      }
+    }
+  },
+  "mapSize": 32,
+  "players": [
+    {
+      "id": 1,
+      "name": "Adaptive",
+      "color": "#4e79a7",
+      "controller": "adaptive"
+    },
+    {
+      "id": 2,
+      "name": "Apex",
+      "color": "#f28e2b",
+      "controller": "apex"
+    },
+    {
+      "id": 4,
+      "name": "Entity",
+      "color": "#76b7b2",
+      "controller": "entity"
+    },
+    {
+      "id": 5,
+      "name": "Fable",
+      "color": "#59a14f",
+      "controller": "fable"
+    },
+    {
+      "id": 6,
+      "name": "Hark",
+      "color": "#edc948",
+      "controller": "hark"
+    },
+    {
+      "id": 7,
+      "name": "Opus",
+      "color": "#b07aa1",
+      "controller": "opus"
+    }
+  ]
+}

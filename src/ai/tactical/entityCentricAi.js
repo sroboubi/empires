@@ -94,6 +94,18 @@ const DEFAULT_ENTITY_CONFIG = {
   surplusStockMultiple: 3,
   // Reach computation margin (steps beyond maxAP, for cheap terrain)
   reachStepMargin: 2,
+  // Issue #72: Entity's per-unit target evaluation used to run canStrike +
+  // turnsToReach (two A* searches) against EVERY visible enemy, on every
+  // candidate generation. Rank enemies by hex distance and path only to the
+  // nearest few; enemies threatening one of our support requesters always
+  // stay in the shortlist.
+  attackShortlistSize: 6,
+  // Issue #72: claims. Once a target is already being dealt with by units
+  // that acted earlier this turn, later units pick something else instead of
+  // dogpiling it. A target is "addressed" when this many attackers are
+  // committed, or when their projected damage covers its health.
+  maxAttackersPerTarget: 3,
+  claimDamageFraction: 1.0,
   // Loop bounds
   maxIterationsPerOrder: 4,
   minimumIterations: 40,
@@ -238,6 +250,11 @@ export class EntityCentricAI extends BaseManager {
       militaryNeed: 0,
       deficit: null,
       hostileOwners: this.getHostileOwnerIds(),
+      // Issue #72: per-turn/per-generation caches and target claims.
+      claims: new Map(),            // enemy id -> { attackers, damage }
+      cellsWithinCache: new Map(),  // "q,r,radius" -> cells (topology, static)
+      strikeCache: new Map(),       // per generation: canStrike results
+      reachTurnsCache: new Map(),   // per generation: turnsToReach results
     };
     this.turnState = state;
     state.deficit = this.computeDeficit();
@@ -282,6 +299,7 @@ export class EntityCentricAI extends BaseManager {
         reachable: new Set(cells.keys()),
         strikeReachable,
         range,
+        maxSteps,
         power: helper.getCombatPower(enemy) || 1,
       });
     }
@@ -302,6 +320,7 @@ export class EntityCentricAI extends BaseManager {
         unit,
         reachable: new Set(cells.keys()),
         range: this.attackRange(unit),
+        maxSteps,
         power: helper.getCombatPower(unit) || 1,
       });
     }
@@ -319,6 +338,16 @@ export class EntityCentricAI extends BaseManager {
 
   /** Cells within `radius` hexes of `center` (BFS over the grid). */
   cellsWithin(center, radius) {
+    // Memoized per turn (issue #72): the grid topology does not change, and
+    // this used to rebuild a Map, frontier arrays and string keys on every
+    // call — several times per unit per enemy per generation. Callers only
+    // iterate the result, so sharing the array is safe.
+    const cacheKey = `${center.q},${center.r},${radius}`;
+    const cache = this.turnState?.cellsWithinCache;
+    if (cache) {
+      const hit = cache.get(cacheKey);
+      if (hit) return hit;
+    }
     const seen = new Map([[`${center.q},${center.r}`, center]]);
     let frontier = [center];
     for (let step = 0; step < radius; step++) {
@@ -333,7 +362,9 @@ export class EntityCentricAI extends BaseManager {
       }
       frontier = next;
     }
-    return [...seen.values()];
+    const cells = [...seen.values()];
+    if (cache) cache.set(cacheKey, cells);
+    return cells;
   }
 
   /**
@@ -441,6 +472,99 @@ export class EntityCentricAI extends BaseManager {
     return Math.max(1, Math.ceil(path.cost / maxAP));
   }
 
+  /**
+   * Per-generation memo for canStrike (issue #72). Nothing moves during one
+   * candidate generation, so the answer is stable until the next generation
+   * clears the cache. Saves an A* + canDo pass per unit/enemy pair.
+   */
+  canStrikeCached(unit, enemy) {
+    const cache = this.turnState?.strikeCache;
+    if (!cache) return this.canStrike(unit, enemy);
+    const key = `${unit.id}:${enemy.id}`;
+    const hit = cache.get(key);
+    if (hit !== undefined) return hit;
+    const value = this.canStrike(unit, enemy);
+    cache.set(key, value);
+    return value;
+  }
+
+  /** Per-generation memo for turnsToReach (issue #72); see canStrikeCached. */
+  turnsToReachCached(unit, enemy) {
+    const cache = this.turnState?.reachTurnsCache;
+    if (!cache) return this.turnsToReach(unit, enemy);
+    const key = `${unit.id}:${enemy.id}`;
+    const hit = cache.get(key);
+    if (hit !== undefined) return hit;
+    const value = this.turnsToReach(unit, enemy);
+    cache.set(key, value);
+    return value;
+  }
+
+  /**
+   * Cheapest possible cost of one hex of movement for `unit`. Used to derive
+   * exact distance bounds before the expensive reach tests. The shipped
+   * definitions have terrain movementCost >= 1 and leader multipliers >= 0.5,
+   * so the per-step floor is `0.5 * min(terrainCostScale)`.
+   */
+  minStepCost(unit) {
+    const tcs = unit?.terrainCostScale;
+    let scale = 1;
+    if (tcs && typeof tcs === 'object') {
+      for (const v of Object.values(tcs)) {
+        if (typeof v === 'number' && v > 0 && v < scale) scale = v;
+      }
+    }
+    return 0.5 * Math.max(scale, 0.01);
+  }
+
+  /** Rough per-attack damage for claim accounting. */
+  attackDamageEstimate(unit) {
+    const raw = asNumber(unit?.damage?.value, 0)
+      || asNumber(this.getEntityDef(unit?.name)?.damage?.value, 0);
+    const owner = unit?.owner;
+    if (owner && typeof owner.getAttackValue === 'function') {
+      const adjusted = asNumber(owner.getAttackValue(unit.name)?.value, raw);
+      return Math.max(1, adjusted);
+    }
+    return Math.max(1, raw);
+  }
+
+  /**
+   * Is this target already being dealt with by units that acted earlier in
+   * our turn? True once enough attackers are committed or their projected
+   * damage covers the target's pre-hit health (issue #72, claims).
+   *
+   * `hpBase` is the target's health when the first claim was registered (i.e.
+   * before our first hit this turn), so comparing cumulative estimated damage
+   * against it does not double-count the health our hits already removed.
+   */
+  isTargetAddressed(claim, enemy) {
+    if (!claim) return false;
+    if (claim.attackers >= this.config.maxAttackersPerTarget) return true;
+    const hp = asNumber(claim.hpBase, 0);
+    return hp > 0 && claim.damage >= hp * this.config.claimDamageFraction;
+  }
+
+  /** Register a claim the first time we offer an attack on `enemy`. */
+  ensureClaim(enemy) {
+    if (!this.turnState || !enemy) return null;
+    let claim = this.turnState.claims.get(enemy.id);
+    if (!claim) {
+      claim = { attackers: 0, damage: 0, hpBase: asNumber(enemy.health, asNumber(enemy.maxHealth, 0)) };
+      this.turnState.claims.set(enemy.id, claim);
+    }
+    return claim;
+  }
+
+  /** Record that `unit` attacked `enemy`, so later units pick other targets. */
+  recordClaim(enemy, unit) {
+    if (!this.turnState || !enemy) return;
+    const claim = this.ensureClaim(enemy);
+    if (!claim) return;
+    claim.attackers += 1;
+    claim.damage += this.attackDamageEstimate(unit);
+  }
+
   // ==================== Threat assessment ====================
 
   /**
@@ -473,6 +597,12 @@ export class EntityCentricAI extends BaseManager {
   /** Cheap detection check: is any cell the enemy could stand on within its attack range of the entity? `reachable` defaults to the margin reach set; pass the strike set for the 1-turn test (R1). */
   enemyThreatensEntity(info, entity, reachable = info.reachable) {
     const { range } = info;
+    // Issue #72: distance prefilter. Every cell in the reach set is within
+    // maxSteps hexes of the enemy, so by the triangle inequality an entity
+    // farther than maxSteps + range.max cannot possibly be threatened.
+    // Exact, never hides a real threat.
+    const reachSteps = info.maxSteps ?? 0;
+    if (this.helper.distance(info.enemy, entity) > range.max + reachSteps) return false;
     for (const cell of this.cellsWithin(entity.cell, range.max)) {
       const dist = this.helper.distance(cell, entity.cell);
       if (dist < range.min || dist > range.max) continue;
@@ -499,6 +629,10 @@ export class EntityCentricAI extends BaseManager {
       if (protector.destroyed) continue;
       if (helper.distance(protector, entity) <= 1) return true;
       const range = info.range;
+      // Issue #72: distance prefilter, same triangle-inequality bound as
+      // enemyThreatensEntity. A protector farther than its full-turn reach
+      // plus its attack range from the threat cannot intercept it.
+      if (helper.distance(protector, threat.enemy) > range.max + (info.maxSteps ?? 0)) continue;
       for (const cell of this.cellsWithin(threat.enemy.cell, range.max)) {
         const dist = helper.distance(cell, threat.enemy.cell);
         if (dist < range.min || dist > range.max) continue;
@@ -673,6 +807,16 @@ export class EntityCentricAI extends BaseManager {
   generateCandidates(directive) {
     const candidates = [];
     const myUnits = this.getMyUnits();
+    // Issue #72: the per-generation caches (canStrike / turnsToReach) are
+    // invalidated here — within one generation nothing moves, so results are
+    // stable; between generations our own units have acted.
+    if (this.turnState) {
+      this.turnState.strikeCache.clear();
+      this.turnState.reachTurnsCache.clear();
+    }
+    // Hoisted: this is a proxied call that filters the entity list, and it was
+    // being repeated once per unit.
+    const visibleEnemies = this.getVisibleEnemies();
 
     // Re-validate support requests against current positions: a requester
     // that moved to safety, or that a protector now covers, drops off.
@@ -680,7 +824,7 @@ export class EntityCentricAI extends BaseManager {
 
     for (const entity of myUnits) {
       if ((entity.actionPoints ?? 0) <= 0) continue;
-      candidates.push(...this.getEntityCandidates(entity, directive));
+      candidates.push(...this.getEntityCandidates(entity, directive, visibleEnemies));
     }
     return candidates;
   }
@@ -709,7 +853,7 @@ export class EntityCentricAI extends BaseManager {
    * does. A builder that can fight gets attack candidates too (scored by
    * its power, not banned); a fighter that can build gets build candidates.
    */
-  getEntityCandidates(entity, directive) {
+  getEntityCandidates(entity, directive, visibleEnemies = null) {
     const helper = this.helper;
     const candidates = [];
     const isFighter = helper.isCombatCapable(entity);
@@ -728,7 +872,7 @@ export class EntityCentricAI extends BaseManager {
     }
 
     if (isFighter) {
-      candidates.push(...this.getAttackCandidates(entity, directive));
+      candidates.push(...this.getAttackCandidates(entity, directive, visibleEnemies));
       candidates.push(...this.getGuardCandidates(entity, directive));
     }
     if (isBuilder) {
@@ -778,23 +922,69 @@ export class EntityCentricAI extends BaseManager {
 
   // ==================== Attack candidates ====================
 
-  getAttackCandidates(entity, directive) {
+  getAttackCandidates(entity, directive, visibleEnemies = null) {
     const candidates = [];
+    if (!this.turnState) return candidates;
     const helper = this.helper;
     const cfg = this.config;
-    const enemies = this.getVisibleEnemies();
+    const enemies = visibleEnemies || this.getVisibleEnemies();
+    const maxAP = Math.ceil(asNumber(entity.maxActionPoints, asNumber(entity.actionPoints, 0)));
+    const myRange = this.attackRange(entity).max;
+    // A step never costs less than the unit's cheapest terrain scale times
+    // the cheapest terrain movement cost (1) times the lowest leader
+    // multiplier in the shipped definitions (0.5). Deriving it per unit keeps
+    // these bounds exact instead of relying on a magic constant: a target
+    // outside them provably fails the corresponding test.
+    const minStep = this.minStepCost(entity);
+    const strikeBound = Math.ceil(maxAP / minStep) + myRange;
+    const turnsBound = Math.ceil((maxAP * cfg.attackReachTurns) / minStep) + myRange;
 
+    // Issue #72 (1): cheap eligibility filter, then rank by hex distance.
+    const eligible = [];
     for (const enemy of enemies) {
       const stance = this.getStance(enemy.ownerId ?? enemy.owner?.id);
       if (stance === 'friendly' || stance === 'ally' || stance === 'caution') continue;
+      // Claims (2): skip targets already addressed by units that acted
+      // earlier this turn, so the empire does not dogpile one enemy.
+      if (this.isTargetAddressed(this.turnState.claims.get(enemy.id), enemy)) continue;
+      eligible.push({ enemy, stance, dist: helper.distance(entity, enemy) });
+    }
 
-      const myPower = helper.getCombatPower(entity) || 1;
+    // An enemy threatening one of our support requesters is always evaluated,
+    // however far away — that is the retaliation path.
+    const mustConsider = new Set();
+    for (const req of this.turnState.supportRequests.values()) {
+      const id = req.threat?.enemy?.id;
+      if (id !== undefined) mustConsider.add(id);
+    }
+    const rest = eligible
+      .filter(item => !mustConsider.has(item.enemy.id) && item.dist <= turnsBound)
+      .sort((a, b) => a.dist - b.dist)
+      .slice(0, cfg.attackShortlistSize);
+    const shortlist = [
+      ...eligible.filter(item => mustConsider.has(item.enemy.id)),
+      ...rest,
+    ];
+    if (shortlist.length === 0) return candidates;
+
+    const myPower = helper.getCombatPower(entity) || 1;
+
+    for (const { enemy, stance, dist } of shortlist) {
       const enemyPower = helper.getCombatPower(enemy) || 1;
 
       // Reach, in turns of movement — not a hex distance. Only consider
       // enemies we can get to soon; the explore action covers the rest.
-      const canStrikeNow = this.canStrike(entity, enemy);
-      const turns = canStrikeNow ? 0 : this.turnsToReach(entity, enemy);
+      // Both searches are memoized for the current generation.
+      let canStrikeNow = false;
+      if (dist <= strikeBound) canStrikeNow = this.canStrikeCached(entity, enemy);
+      let turns;
+      if (canStrikeNow) {
+        turns = 0;
+      } else if (dist <= turnsBound || mustConsider.has(enemy.id)) {
+        turns = this.turnsToReachCached(entity, enemy);
+      } else {
+        continue;
+      }
       if (!canStrikeNow && turns > cfg.attackReachTurns) continue;
 
       // In neutral stance, only attack if favorable or immediately reachable.
@@ -829,6 +1019,7 @@ export class EntityCentricAI extends BaseManager {
 
       importance = this.applyFocusMultiplier(importance, 'military', directive);
 
+      this.ensureClaim(enemy);
       candidates.push({
         entity,
         action: 'attack',
@@ -1202,6 +1393,7 @@ export class EntityCentricAI extends BaseManager {
     switch (action) {
       case 'attack':
         result = await this.actions.attack(entity, candidate.target, 2);
+        if (result && result.ordersUsed > 0) this.recordClaim(candidate.target, entity);
         break;
       case 'build':
         result = await this.actions.build(entity, candidate.targetName);

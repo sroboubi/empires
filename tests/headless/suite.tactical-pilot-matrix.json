@@ -50,12 +50,6 @@
       "controller": "apex"
     },
     {
-      "id": 3,
-      "name": "BigPickle",
-      "color": "#e15759",
-      "controller": "bigPickle"
-    },
-    {
       "id": 4,
       "name": "Entity",
       "color": "#76b7b2",
