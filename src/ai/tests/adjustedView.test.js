@@ -106,5 +106,73 @@ test('adjustedEntityView with no meta returns null', () => {
     assert(adjustedEntityView({}, null) === null, 'null meta');
 });
 
+// --- cache (issue #72) -------------------------------------------------------
+
+function countingPlayer() {
+    const counts = { getSpawnCost: 0, getMaintenanceCost: 0, getYields: 0, getAttackCost: 0, getAttackValue: 0, getArmorValue: 0 };
+    const player = {
+        getSpawnCost: () => { counts.getSpawnCost++; return { food: 5, gold: 2.5 }; },
+        getMaintenanceCost: () => { counts.getMaintenanceCost++; return { gold: 3 }; },
+        getYields: () => { counts.getYields++; return { gold: 8 }; },
+        getAttackCost: () => { counts.getAttackCost++; return 8; },
+        getAttackValue: () => { counts.getAttackValue++; return { value: 6, type: 'slashing' }; },
+        getArmorValue: () => { counts.getArmorValue++; return { slashing: 1 }; },
+    };
+    return { player, counts };
+}
+
+test('adjustedView cache: repeat calls with same (player, meta, name) call Player functions once', () => {
+    const { player, counts } = countingPlayer();
+    const a = adjustedView(player, META, 'swordsman');
+    const b = adjustedView(player, META, 'swordsman');
+    equal(b.spawnCost, { food: 5, gold: 2.5 }, 'cached spawnCost');
+    equal(b.yields, { gold: 8 }, 'cached yields');
+    assert(b.damage.value === 6, 'cached damage');
+    for (const [fn, n] of Object.entries(counts)) {
+        assert(n === 1, `${fn} called ${n} times, want 1`);
+    }
+    assert(a === b, 'repeat calls return the same cached view object');
+    assert(a.spawnCost === b.spawnCost, 'nested objects are shared, not re-copied');
+});
+
+test('adjustedView cache: returned view is frozen and cannot be mutated', () => {
+    const { player } = countingPlayer();
+    const a = adjustedView(player, META, 'swordsman');
+    assert(Object.isFrozen(a), 'view is frozen');
+    assert(Object.isFrozen(a.spawnCost), 'spawnCost is frozen');
+    assert(Object.isFrozen(a.damage), 'damage is frozen');
+    let threw = false;
+    try { a.spawnCost.food = 999; } catch { threw = true; }
+    assert(threw, 'mutating a frozen view throws (strict mode)');
+    const b = adjustedView(player, META, 'swordsman');
+    assert(b.spawnCost.food === 5, 'spawnCost pristine after mutation attempt');
+    assert(b.damage.value === 6, 'damage pristine after mutation attempt');
+    assert(!Object.isFrozen(META), 'manifest meta itself is never frozen');
+    assert(!Object.isFrozen(META.spawnCost), 'manifest nested objects are never frozen');
+});
+
+test('adjustedView cache: different name or different meta object recomputes', () => {
+    const { player, counts } = countingPlayer();
+    adjustedView(player, META, 'swordsman');
+    adjustedView(player, META, 'knight');
+    assert(counts.getAttackValue === 2, 'new name recomputes');
+    adjustedView(player, { ...META }, 'swordsman');
+    assert(counts.getAttackValue === 3, 'new meta object recomputes');
+    adjustedView(player, META, 'swordsman');
+    assert(counts.getAttackValue === 3, 'original (meta, name) still cached');
+});
+
+test('adjustedView cache: foreign-player fallback is cached too', () => {
+    let calls = 0;
+    const foreignLike = { getAttackValue: () => { calls++; return undefined; } };
+    const a = adjustedView(foreignLike, META, 'swordsman');
+    const b = adjustedView(foreignLike, META, 'swordsman');
+    equal(a.spawnCost, { food: 10, gold: 5 }, 'raw spawnCost');
+    equal(b.spawnCost, { food: 10, gold: 5 }, 'raw spawnCost again');
+    assert(calls === 1, `getAttackValue called ${calls} times, want 1`);
+    assert(a === b, 'fallback returns the same cached frozen view');
+    assert(Object.isFrozen(a), 'fallback view is frozen');
+});
+
 console.log(`\nadjustedView: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exitCode = 1;

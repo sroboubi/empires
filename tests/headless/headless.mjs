@@ -54,6 +54,8 @@
  *   --iteration <n>        iteration number stored in the report
  *   --log-pattern <regex>  capture console lines matching regex (repeatable;
  *                          may also be set via config report.logPatterns)
+ *   --profile-proxy        count AI proxy operations and include the profile
+ *                          in metrics/reports (also config aiProxyProfiler: true)
  */
 import { GameState } from '../../src/gameState.js';
 import { loadGameManifest } from '../../src/manifestLoader.js';
@@ -61,12 +63,14 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import path from 'path';
 import { saveCheckpoint, loadCheckpoint, resolveCheckpointPath, CHECKPOINT_FILE } from './checkpoint.mjs';
 import { GameMetricsCollector } from './metrics.mjs';
+import { createAiProxyProfiler } from './aiProxyProfiler.js';
 
 function parseArgs() {
   const args = process.argv.slice(2);
   const opts = {
     turns: 5, turnsSet: false, config: null, checkpointDir: null, resume: null, seed: null,
     reportJson: null, runLabel: null, iteration: null, logPatterns: [],
+    profileProxy: false,
   };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--config' && args[i + 1]) opts.config = args[++i];
@@ -77,6 +81,7 @@ function parseArgs() {
     else if (args[i] === '--run-label' && args[i + 1]) opts.runLabel = args[++i];
     else if (args[i] === '--iteration' && args[i + 1]) opts.iteration = Number(args[++i]);
     else if (args[i] === '--log-pattern' && args[i + 1]) opts.logPatterns.push(args[++i]);
+    else if (args[i] === '--profile-proxy') opts.profileProxy = true;
     else if (!isNaN(parseInt(args[i]))) {
       opts.turns = parseInt(args[i]);
       opts.turnsSet = true;
@@ -218,6 +223,9 @@ async function main() {
     ...(Array.isArray(cfg.logPatterns) ? cfg.logPatterns : []),
     ...opts.logPatterns,
   ];
+  const proxyProfiler = (opts.profileProxy || cfg.aiProxyProfiler)
+    ? createAiProxyProfiler()
+    : null;
   const collector = (reportPath || logPatterns.length > 0)
     ? new GameMetricsCollector({
       logPatterns,
@@ -412,9 +420,10 @@ async function main() {
   // player's controller URL — no manual swapping
   // needed here. Eagerly resolve now so a bad controller URL fails fast.
   for (const p of gameState.players) {
-    if (p.controller) await p.getAiManager();
+    const managerOptions = proxyProfiler ? { profiler: proxyProfiler } : undefined;
+    if (p.controller) await p.getAiManager(managerOptions);
     // Phase 26: same for the strategic manager.
-    if (p.strategicController) await p.getStrategicManager();
+    if (p.strategicController) await p.getStrategicManager(managerOptions);
     // Timing instrumentation (reporting runs only): wrap the manager
     // instances so the harness can separate AI compute from engine work.
     if (collector) {
@@ -574,6 +583,11 @@ async function main() {
   // Optional machine-readable report (consumed by tournament.mjs, which
   // renders the Markdown report from it). Written before exit so a failing
   // assertion still leaves a complete metrics file behind.
+  const proxyProfile = proxyProfiler ? proxyProfiler.toJSON() : null;
+  if (proxyProfile) {
+    console.log(`[headless] Proxy profile: ${JSON.stringify(proxyProfile)}`);
+  }
+
   if (collector) {
     const totalRounds = roundsDone + roundsRun;
     const report = collector.finalize({
@@ -585,6 +599,7 @@ async function main() {
       resumed: !!resumePath,
       failures,
       failureMessages,
+      proxyProfile,
     });
     if (reportPath) {
       mkdirSync(path.dirname(path.resolve(reportPath)), { recursive: true });

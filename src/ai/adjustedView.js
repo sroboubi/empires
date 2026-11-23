@@ -2,12 +2,14 @@
  * adjustedView — a twist-adjusted view of a manifest entity definition.
  *
  * AI code often reads an entity's numbers from its manifest meta (spawnCost,
- * yields, damage, armor, attackCostScale). This returns a COPY of the meta
+ * yields, damage, armor, attackCostScale). This returns a view of the meta
  * with those fields overlaid from the owning player's Player functions
  * (getSpawnCost, getMaintenanceCost, getYields, getAttackCost,
  * getAttackValue, getArmorValue), so the AI sees the real, twist-adjusted
  * numbers. All other fields (movement, buildables, score, sightRange, …)
- * pass through unchanged, and the manifest is never mutated.
+ * pass through unchanged, and the manifest is never mutated. The returned
+ * view is a shared, frozen object (cached per player/meta/name) — treat
+ * it as read-only.
  *
  * The adjustment multipliers live ONLY in the Player class; this is a thin
  * adapter, not a second implementation — it computes nothing itself.
@@ -29,24 +31,80 @@
  * @param {string} name - the entity type name.
  * @returns {Object|null} adjusted copy, or null when meta is null.
  */
+// Cache of computed adjusted views, keyed by (player, meta, name).
+// The Player value functions depend only on the player's attributes —
+// resolved once at setup and never mutated during a game — and on the
+// manifest meta, so the adjusted view for a given (player, meta, name)
+// never changes. Each uncached call costs six proxied Player calls; AIs
+// that evaluate many types per turn (Opus especially) hit this constantly.
+// Keying on the meta object as well means a chained call that passes an
+// already-adjusted view as meta recomputes instead of reusing stale
+// fallbacks.
+//
+// The cached view is built once, frozen (view + the five adjusted field
+// objects), and returned as-is on every call — no per-call copying (the
+// copies cost ~15% of Opus's turn time; issue #72). Callers must treat
+// views as read-only; mutation throws instead of silently poisoning the
+// cache. Nested field objects are copied once at build time so freezing
+// never touches Player- or manifest-owned objects.
+const viewCache = new WeakMap(); // player -> WeakMap<meta, Map<name, view>>
+
+function copyObj(v) {
+  return v && typeof v === 'object' ? { ...v } : v;
+}
+
+function freezeView(view) {
+  for (const k of ['spawnCost', 'maintenance', 'yields', 'damage', 'armor']) {
+    const v = view[k];
+    if (v && typeof v === 'object') Object.freeze(v);
+  }
+  return Object.freeze(view);
+}
+
 export function adjustedView(player, meta, name) {
   if (!meta) return null;
   if (!player || typeof player.getAttackValue !== 'function') return { ...meta };
-  // A foreign player (or any player whose value functions the proxy hides)
-  // answers with undefined — fall back to the raw manifest values.
-  const attack = player.getAttackValue(name);
-  if (!attack || typeof attack.value !== 'number') return { ...meta };
-  return {
-    ...meta,
-    spawnCost: player.getSpawnCost(name) || meta.spawnCost,
-    maintenance: player.getMaintenanceCost(name) || meta.maintenance,
-    yields: player.getYields(name) || meta.yields,
-    attackCostScale: player.getAttackCost(name) ?? meta.attackCostScale,
-    damage: meta.damage
-      ? { ...meta.damage, value: attack.value, type: attack.type }
-      : undefined,
-    armor: player.getArmorValue(name) || meta.armor,
-  };
+
+  let byMeta = viewCache.get(player);
+  if (!byMeta) {
+    byMeta = new WeakMap();
+    viewCache.set(player, byMeta);
+  }
+  let byName = byMeta.get(meta);
+  if (!byName) {
+    byName = new Map();
+    byMeta.set(meta, byName);
+  }
+  let view = byName.get(name);
+  if (view === undefined) {
+    // A foreign player (or any player whose value functions the proxy hides)
+    // answers with undefined — fall back to the raw manifest values.
+    const attack = player.getAttackValue(name);
+    if (!attack || typeof attack.value !== 'number') {
+      view = freezeView({
+        ...meta,
+        spawnCost: copyObj(meta.spawnCost),
+        maintenance: copyObj(meta.maintenance),
+        yields: copyObj(meta.yields),
+        damage: copyObj(meta.damage),
+        armor: copyObj(meta.armor),
+      });
+    } else {
+      view = freezeView({
+        ...meta,
+        spawnCost: copyObj(player.getSpawnCost(name) || meta.spawnCost),
+        maintenance: copyObj(player.getMaintenanceCost(name) || meta.maintenance),
+        yields: copyObj(player.getYields(name) || meta.yields),
+        attackCostScale: player.getAttackCost(name) ?? meta.attackCostScale,
+        damage: meta.damage
+          ? { ...meta.damage, value: attack.value, type: attack.type }
+          : undefined,
+        armor: copyObj(player.getArmorValue(name) || meta.armor),
+      });
+    }
+    byName.set(name, view);
+  }
+  return view;
 }
 
 /**

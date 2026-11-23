@@ -51,6 +51,7 @@ npm run test:suite -- --game standard-vs-apex --concurrency 4
 
 # Tactical AI pilots and the full matrix
 npm run test:suite:tactical-pilot
+npm run test:suite:tactical-pilot-profile   # same pilot + proxy counters
 npm run test:suite:tactical-pilot-matrix
 npm run test:suite:tactical-matrix
 ```
@@ -253,6 +254,9 @@ The Markdown reports include, per run and aggregated across iterations:
   strategic ms, engine ms, totals, max turn, and AI share of step time.
   The summary aggregates this per game/player; per-run reports include a
   per-turn AI/step timing table;
+- optional proxy profiling counters (method-wrapper calls, deepWrap kinds,
+  entity-filter calls/rows, cell/neighbor queries, fog checks, arg arrays)
+  when `--profile-proxy` or `aiProxyProfiler: true` is used;
 - every log line matching `logPatterns`.
 
 Exit code is non-zero if any iteration failed (assertions, crash, timeout).
@@ -276,6 +280,14 @@ line, e.g. `mapsize-32__barbarians-none 1/10 ... opus wins at turn 52 [AI 14.2s]
 The dashboard uses `•`/`·` bars so a 500-turn run still fits one row per
 worker; line mode prints one `.` per completed turn. If your terminal does
 not support ANSI cursor movement, use `"progressMode": "lines"`.
+
+**Proxy profiling.** Add `"aiProxyProfiler": true` to a suite (or run
+`headless.mjs --profile-proxy`) to count proxy operations. The per-run
+report gains a **Proxy profile** section with method-wrapper calls,
+deepWrap counts by kind, entity-filter rows, cell/neighbor queries, fog
+checks, and argument-array allocations. The profiler is passed through
+`createAiManager(..., { profiler })` and has zero effect when absent.
+`suite.tactical-pilot-profile.json` is the 7-AI pilot with profiling on.
 
 ### LM Studio / local OpenAI-compatible servers
 
@@ -402,6 +414,7 @@ generation randomness does not matter: the generated cells are saved.
 | `headless.mjs` | Test driver: creates GameState, 2 AI players, drives turns, asserts, optional metrics JSON |
 | `tournament.mjs` | AI suite runner: reads a suite config, runs iterations in child processes, writes Markdown reports |
 | `metrics.mjs` | Out-of-tree instrumentation: resource flows, kills/losses, chats/trades, barbarian stats, log capture |
+| `helperRouting.test.mjs` | Equivalence test for helper `getCellsArray`/`getNeighbors` routing through the hexGrid proxy (`npm run test:helper-routing`) |
 | `report.mjs` | Markdown renderers for suite summary, game reports, per-run detail, and logs |
 | `checkpoint.mjs` | Checkpoint/resume: round-end save payloads to disk, resume validation (see above) |
 | `repl.mjs` | Interactive REPL: step turns, inspect state, spawn entities, run AI manually |
@@ -414,6 +427,7 @@ generation randomness does not matter: the generated cells are saved.
 | `suite.example.json` | Tournament template: multiple AI matchups, iterations, log patterns |
 | `suite.quick.json` | Fast smoke suite used by `npm run test:suite:quick` |
 | `suite.tactical-pilot.json` | One 7-AI, 32-map, default-barbarian, 20-turn smoke game |
+| `suite.tactical-pilot-profile.json` | Same pilot with AI proxy counters enabled |
 | `suite.tactical-pilot-matrix.json` | Small 2-map x 2-barbarian matrix pilot |
 | `suite.tactical-matrix.json` | Full tactical matrix: 4 maps x 3 barbarian modes x 10 seeds, 500-turn cap |
 | `suite.llm.example.json` | LLM-vs-coded template (needs provider credentials/local model) |
