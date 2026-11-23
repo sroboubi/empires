@@ -40,6 +40,16 @@ export class AiHelper {
         // player id (see maybeInitiateTrade). Lives on the helper because
         // the policy does — one helper serves every manager in the game.
         this._tradeProposalRoundByPlayer = new Map();
+        // Build-site caches (issue #72), keyed by hex grid so a loaded or
+        // replayed game (new grid object) never sees stale entries:
+        // - _buildPotentialByGrid: grid -> Map<typeName, Map<cellKey,
+        //   {potential, fingerprint}>> — static per-(type, cell) expected
+        //   yield, validated against adjacent natural resources.
+        // - _cellOrderByGrid: grid -> Map<cellKey, index> — getCellsArray()
+        //   order, used to keep candidate ordering identical to the old
+        //   full-map scan (callers' tie-breaking depends on it).
+        this._buildPotentialByGrid = new WeakMap();
+        this._cellOrderByGrid = new WeakMap();
     }
 
     // ==================== Engine bridge: hex grid ====================
@@ -202,6 +212,91 @@ export class AiHelper {
     }
 
     /**
+     * Fingerprint of the natural resources adjacent to a cell — the only
+     * mutable input to a build site's expected yield. Resource quantities
+     * never change after map generation, but a resource can be destroyed
+     * (building on its cell deletes it), which changes the fingerprint of
+     * its six neighbors and so invalidates exactly their cached potentials.
+     */
+    _resourceFingerprint(grid, cell) {
+        let fp = '';
+        for (const c of HexGrid.getNeighborCoords(cell.q, cell.r)) {
+            const res = grid.getCell(c.q, c.r)?.resource;
+            if (res && res.kind === 'natural') fp += `${res.name}:${res.quantity};`;
+        }
+        return fp;
+    }
+
+    /**
+     * Expected yield for a build site, served from the per-(type, cell)
+     * potential index when the adjacent-resource fingerprint still matches.
+     * The potential itself is static per game (manifest + adjacent natural
+     * resources), so after warm-up this is a fingerprint check instead of a
+     * full applyResourceYieldBonus computation per candidate.
+     */
+    _buildPotentialAt(gameState, cell, canonicalName, baseYields) {
+        if (!baseYields || Object.keys(baseYields).length === 0) return 1;
+        const grid = gameState.hexGrid;
+        let byType = this._buildPotentialByGrid.get(grid);
+        if (!byType) {
+            byType = new Map();
+            this._buildPotentialByGrid.set(grid, byType);
+        }
+        let byCell = byType.get(canonicalName);
+        if (!byCell) {
+            byCell = new Map();
+            byType.set(canonicalName, byCell);
+        }
+        const key = `${cell.q},${cell.r}`;
+        const fingerprint = this._resourceFingerprint(grid, cell);
+        const hit = byCell.get(key);
+        if (hit && hit.fingerprint === fingerprint) return hit.potential;
+        const potential = this._expectedYieldAt(gameState, cell, canonicalName, baseYields);
+        byCell.set(key, { potential, fingerprint });
+        return potential;
+    }
+
+    /**
+     * All cells within hex distance `maxDistance` of the source entity,
+     * enumerated by neighbor expansion instead of scanning the whole map.
+     * Coordinates expand through off-map cells so irregular maps still
+     * enumerate completely; only existing cells are returned.
+     */
+    _diskCells(grid, sourceEntity, maxDistance) {
+        const cells = [];
+        const seen = new Set([`${sourceEntity.q},${sourceEntity.r}`]);
+        const startCell = grid.getCell(sourceEntity.q, sourceEntity.r);
+        if (startCell) cells.push(startCell);
+        let frontier = [{ q: sourceEntity.q, r: sourceEntity.r }];
+        for (let d = 1; d <= maxDistance && frontier.length > 0; d++) {
+            const next = [];
+            for (const c of frontier) {
+                for (const nc of HexGrid.getNeighborCoords(c.q, c.r)) {
+                    const key = `${nc.q},${nc.r}`;
+                    if (seen.has(key)) continue;
+                    seen.add(key);
+                    next.push(nc);
+                    const cell = grid.getCell(nc.q, nc.r);
+                    if (cell) cells.push(cell);
+                }
+            }
+            frontier = next;
+        }
+        return cells;
+    }
+
+    /** getCellsArray() index per cell key, built once per grid. */
+    _cellOrder(grid) {
+        let order = this._cellOrderByGrid.get(grid);
+        if (!order) {
+            order = new Map();
+            grid.getCellsArray().forEach((c, i) => order.set(`${c.q},${c.r}`, i));
+            this._cellOrderByGrid.set(grid, order);
+        }
+        return order;
+    }
+
+    /**
      * Finds all valid build sites for a builder and target type.
      * @returns {{ candidates: Array, canonicalName: string }}
      */
@@ -237,10 +332,25 @@ export class AiHelper {
             ? (q, r) => owner.isExplored(q, r)
             : () => true;
 
+        // minSeparation: only entities that themselves carry a
+        // minSeparation can reject a site — precompute that (usually short)
+        // list once per query instead of scanning every entity per cell.
+        const reqSep = (spawnConditions && typeof spawnConditions.minSeparation === 'number')
+            ? spawnConditions.minSeparation : null;
+        const sepEntities = [];
+        if (reqSep !== null) {
+            for (const e of gameState.entities || []) {
+                const eSep = manifestEntities[e.name]?.spawnConditions?.minSeparation;
+                if (typeof eSep === 'number') sepEntities.push({ e, eSep });
+            }
+        }
+
         const candidates = [];
-        for (const cell of this.getCellsArray()) {
+        // Enumerate only the disk within maxDistance (issue #72) instead of
+        // scanning every cell on the map; the disk contains exactly the
+        // cells the old distance filter kept.
+        for (const cell of this._diskCells(grid, sourceEntity, maxDistance)) {
             if (!cell || !cell.terrain) continue;
-            if (this.distance(sourceEntity, cell) > maxDistance) continue;
             if (!isExplored(cell.q, cell.r)) continue;
             if (gameState.getEntityAt(cell.q, cell.r)) continue;
 
@@ -249,12 +359,10 @@ export class AiHelper {
                     const tName = cell.terrain.name || '';
                     if (!spawnConditions.terrain.some(t => t.toLowerCase() === tName.toLowerCase())) continue;
                 }
-                if (typeof spawnConditions.minSeparation === 'number') {
-                    const reqSep = spawnConditions.minSeparation;
+                if (reqSep !== null) {
                     let ok = true;
-                    for (const e of gameState.entities || []) {
-                        const eSep = manifestEntities[e.name]?.spawnConditions?.minSeparation;
-                        if (typeof eSep === 'number' && this.distance(cell, e) < Math.max(reqSep, eSep)) {
+                    for (const { e, eSep } of sepEntities) {
+                        if (this.distance(cell, e) < Math.max(reqSep, eSep)) {
                             ok = false;
                             break;
                         }
@@ -279,9 +387,16 @@ export class AiHelper {
                 cell,
                 stage,
                 dist: this.distance(sourceEntity, cell),
-                yield: this._expectedYieldAt(gameState, cell, canonicalName, baseYields),
+                yield: this._buildPotentialAt(gameState, cell, canonicalName, baseYields),
             });
         }
+
+        // Restore getCellsArray() ordering — the disk enumeration order
+        // differs, and callers' tie-breaking depends on candidate order.
+        const order = this._cellOrder(grid);
+        candidates.sort((a, b) =>
+            (order.get(`${a.cell.q},${a.cell.r}`) ?? Number.MAX_SAFE_INTEGER) -
+            (order.get(`${b.cell.q},${b.cell.r}`) ?? Number.MAX_SAFE_INTEGER));
 
         return { candidates, canonicalName };
     }

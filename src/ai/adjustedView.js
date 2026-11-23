@@ -29,23 +29,67 @@
  * @param {string} name - the entity type name.
  * @returns {Object|null} adjusted copy, or null when meta is null.
  */
+// Cache of computed adjusted fields, keyed by (player, meta, name).
+// The Player value functions depend only on the player's attributes —
+// resolved once at setup and never mutated during a game — and on the
+// manifest meta, so the adjusted fields for a given (player, meta, name)
+// never change. Each uncached call costs six proxied Player calls; AIs
+// that evaluate many types per turn (Opus especially) hit this constantly.
+// Keying on the meta object as well means a chained call that passes an
+// already-adjusted view as meta recomputes instead of reusing stale
+// fallbacks. A null entry marks the foreign-player raw fallback.
+const viewCache = new WeakMap(); // player -> WeakMap<meta, Map<name, fields|null>>
+
+function copyObj(v) {
+  return v && typeof v === 'object' ? { ...v } : v;
+}
+
 export function adjustedView(player, meta, name) {
   if (!meta) return null;
   if (!player || typeof player.getAttackValue !== 'function') return { ...meta };
-  // A foreign player (or any player whose value functions the proxy hides)
-  // answers with undefined — fall back to the raw manifest values.
-  const attack = player.getAttackValue(name);
-  if (!attack || typeof attack.value !== 'number') return { ...meta };
+
+  let byMeta = viewCache.get(player);
+  if (!byMeta) {
+    byMeta = new WeakMap();
+    viewCache.set(player, byMeta);
+  }
+  let byName = byMeta.get(meta);
+  if (!byName) {
+    byName = new Map();
+    byMeta.set(meta, byName);
+  }
+  let fields = byName.get(name);
+  if (fields === undefined) {
+    // A foreign player (or any player whose value functions the proxy hides)
+    // answers with undefined — fall back to the raw manifest values.
+    const attack = player.getAttackValue(name);
+    if (!attack || typeof attack.value !== 'number') {
+      fields = null;
+    } else {
+      fields = {
+        spawnCost: player.getSpawnCost(name) || meta.spawnCost,
+        maintenance: player.getMaintenanceCost(name) || meta.maintenance,
+        yields: player.getYields(name) || meta.yields,
+        attackCostScale: player.getAttackCost(name) ?? meta.attackCostScale,
+        damage: meta.damage
+          ? { ...meta.damage, value: attack.value, type: attack.type }
+          : undefined,
+        armor: player.getArmorValue(name) || meta.armor,
+      };
+    }
+    byName.set(name, fields);
+  }
+  if (fields === null) return { ...meta };
+  // Fresh copies per call, as before: callers may hold or mutate the view,
+  // and the cached field objects must stay pristine.
   return {
     ...meta,
-    spawnCost: player.getSpawnCost(name) || meta.spawnCost,
-    maintenance: player.getMaintenanceCost(name) || meta.maintenance,
-    yields: player.getYields(name) || meta.yields,
-    attackCostScale: player.getAttackCost(name) ?? meta.attackCostScale,
-    damage: meta.damage
-      ? { ...meta.damage, value: attack.value, type: attack.type }
-      : undefined,
-    armor: player.getArmorValue(name) || meta.armor,
+    spawnCost: copyObj(fields.spawnCost),
+    maintenance: copyObj(fields.maintenance),
+    yields: copyObj(fields.yields),
+    attackCostScale: fields.attackCostScale,
+    damage: copyObj(fields.damage),
+    armor: copyObj(fields.armor),
   };
 }
 
