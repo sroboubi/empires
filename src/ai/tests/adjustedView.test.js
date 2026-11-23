@@ -131,18 +131,24 @@ test('adjustedView cache: repeat calls with same (player, meta, name) call Playe
     for (const [fn, n] of Object.entries(counts)) {
         assert(n === 1, `${fn} called ${n} times, want 1`);
     }
-    assert(a !== b, 'each call returns a fresh view object');
-    assert(a.spawnCost !== b.spawnCost, 'nested objects are fresh copies per call');
+    assert(a === b, 'repeat calls return the same cached view object');
+    assert(a.spawnCost === b.spawnCost, 'nested objects are shared, not re-copied');
 });
 
-test('adjustedView cache: mutating a returned view does not poison later calls', () => {
+test('adjustedView cache: returned view is frozen and cannot be mutated', () => {
     const { player } = countingPlayer();
     const a = adjustedView(player, META, 'swordsman');
-    a.spawnCost.food = 999;
-    a.damage.value = 999;
+    assert(Object.isFrozen(a), 'view is frozen');
+    assert(Object.isFrozen(a.spawnCost), 'spawnCost is frozen');
+    assert(Object.isFrozen(a.damage), 'damage is frozen');
+    let threw = false;
+    try { a.spawnCost.food = 999; } catch { threw = true; }
+    assert(threw, 'mutating a frozen view throws (strict mode)');
     const b = adjustedView(player, META, 'swordsman');
-    assert(b.spawnCost.food === 5, 'spawnCost pristine after caller mutation');
-    assert(b.damage.value === 6, 'damage pristine after caller mutation');
+    assert(b.spawnCost.food === 5, 'spawnCost pristine after mutation attempt');
+    assert(b.damage.value === 6, 'damage pristine after mutation attempt');
+    assert(!Object.isFrozen(META), 'manifest meta itself is never frozen');
+    assert(!Object.isFrozen(META.spawnCost), 'manifest nested objects are never frozen');
 });
 
 test('adjustedView cache: different name or different meta object recomputes', () => {
@@ -164,7 +170,8 @@ test('adjustedView cache: foreign-player fallback is cached too', () => {
     equal(a.spawnCost, { food: 10, gold: 5 }, 'raw spawnCost');
     equal(b.spawnCost, { food: 10, gold: 5 }, 'raw spawnCost again');
     assert(calls === 1, `getAttackValue called ${calls} times, want 1`);
-    assert(a !== b, 'fallback still returns a fresh copy');
+    assert(a === b, 'fallback returns the same cached frozen view');
+    assert(Object.isFrozen(a), 'fallback view is frozen');
 });
 
 console.log(`\nadjustedView: ${passed} passed, ${failed} failed`);
