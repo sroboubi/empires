@@ -165,7 +165,11 @@ export class AiHelper {
 
     /**
      * BFS from the unit's cell across traversable hexes.
-     * @returns {Map<string, {cell: Object, path: Array<Object>}>}
+     *
+     * The returned entries carry `dist` (hop count from the start) so callers
+     * can derive sub-ranges (e.g. a strike set) from one BFS instead of
+     * re-running the walk.
+     * @returns {Map<string, {cell: Object, dist: number, path: Array<Object>}>}
      */
     findReachableCells(gameState, unit, maxDistance = Infinity) {
         const reachable = new Map();
@@ -174,6 +178,24 @@ export class AiHelper {
         if (!startCell) return reachable;
         const maxAP = unit.maxActionPoints ?? unit.actionPoints ?? Infinity;
         const startKey = `${unit.q},${unit.r}`;
+
+        // Hoisted out of the neighbour loop (Shahin, 2026-11-23): through the
+        // AI proxy every property read and call is a wrapper lookup, so
+        // `unit.terrainCostScale` and `unit.getMovementCost` were paying that
+        // per neighbour. `getMovementCost(cell)` returns Infinity only when the
+        // unit is a construct, the terrain scale is null (impassable), or the
+        // owner cannot currently see the cell — the numeric result was already
+        // being discarded, so for OUR OWN units evaluate that predicate
+        // directly.
+        //
+        // Foreign units are different: the proxy hides their `owner`, and
+        // `getMovementCost` evaluates visibility against the engine-side owner
+        // (the enemy's own sight), not ours. Keep the proxied call for those so
+        // the threat model is bit-identical to the engine.
+        const tcs = unit.terrainCostScale;
+        const owner = unit.owner;
+        const canSee = owner && typeof owner.isVisible === 'function' ? owner.isVisible.bind(owner) : null;
+        const isConstruct = !!unit.isConstruct;
 
         // Parent pointers + an index queue instead of queue.shift() and
         // copying the whole path for every neighbor. Paths are built lazily
@@ -190,10 +212,18 @@ export class AiHelper {
             for (const nb of this.getNeighbors(curCell.q, curCell.r)) {
                 const key = `${nb.q},${nb.r}`;
                 if (nodes.has(key)) continue;
-                if (!Number.isFinite(unit.getMovementCost(nb))) continue;
-                const baseMc = nb.terrain?.movementCost ?? 1;
-                const tcs = unit.terrainCostScale;
-                const tScale = (tcs && nb.terrain?.name in tcs) ? tcs[nb.terrain.name] : 1;
+                if (isConstruct) continue;
+                const terrain = nb.terrain;
+                const terrainName = terrain?.name;
+                const scaled = tcs && (terrainName in tcs);
+                if (scaled && tcs[terrainName] === null) continue;
+                if (canSee) {
+                    if (!canSee(nb.q, nb.r)) continue;
+                } else if (!Number.isFinite(unit.getMovementCost(nb))) {
+                    continue;
+                }
+                const baseMc = terrain?.movementCost ?? 1;
+                const tScale = scaled ? tcs[terrainName] : 1;
                 if ((baseMc * tScale) > maxAP) continue;
                 const occupant = gameState.getEntityAt(nb.q, nb.r);
                 // Compare by id (see canStageFrom): through the proxy the
@@ -219,6 +249,7 @@ export class AiHelper {
             let cachedPath = null;
             reachable.set(key, {
                 cell: node.cell,
+                dist: node.dist,
                 get path() {
                     if (cachedPath === null) cachedPath = buildPath(key);
                     return cachedPath;
@@ -226,6 +257,30 @@ export class AiHelper {
             });
         }
         return reachable;
+    }
+
+    /**
+     * Wraps an edge-cost function in a per-call memo, keyed by argument
+     * identity. `hexGrid.movementCostTo` prices the same cell once per edge
+     * relaxation (up to six times per cell), and through the AI proxy each of
+     * those is a full wrapper call. The cost function is a pure function of
+     * its argument for the duration of one path search (the unit and the
+     * visibility set are fixed), so caching by identity is safe.
+     *
+     * Identity, not terrain name: `movementCostTo` also samples the cost
+     * function with a representative terrain object to build its A* heuristic,
+     * and `getMovementCost(terrain)` skips the visibility check while
+     * `getMovementCost(cell)` does not — a name-keyed memo would leak a
+     * terrain-only cost onto an unseen cell.
+     */
+    costMemo(costFunc) {
+        const memo = new Map();
+        return (arg) => {
+            if (memo.has(arg)) return memo.get(arg);
+            const value = costFunc(arg);
+            memo.set(arg, value);
+            return value;
+        };
     }
 
     /** Expected total yield for a build site. */

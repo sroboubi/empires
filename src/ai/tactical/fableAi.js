@@ -834,7 +834,7 @@ export default class FableAi extends BaseManager {
     /** Walks `u` toward `target` along the cheapest explored path, as far as its AP allows (one order). */
     march(u, target, category, reason) {
         const { helper, gameState, player } = this;
-        const route = helper.movementCostTo(u.e.cell, target, (c) => u.e.getMovementCost(c), { allowDetours: true });
+        const route = helper.movementCostTo(u.e.cell, target, helper.costMemo((c) => u.e.getMovementCost(c)), { allowDetours: true });
         const path = route ? toArray(route.path).slice(1) : [];
         if (path.length === 0) return 'no path toward the target';
         return this.actions.moveAlongPath(u.e, this.moveAction(u), path, category, reason) ? null : 'could not move along the path';

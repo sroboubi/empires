@@ -1651,7 +1651,7 @@ export class AdaptiveManager extends BaseManager {
 
         // G1: A* (detour mode) replaces the deleted BFS. The returned
         // path includes the source cell; slice it off for moveAlongPath.
-        const res = this.helper.movementCostTo(unit.cell, destination, unit.getMovementCost.bind(unit), { allowDetours: true });
+        const res = this.helper.movementCostTo(unit.cell, destination, this.helper.costMemo(unit.getMovementCost.bind(unit)), { allowDetours: true });
         const path = res ? res.path.slice(1) : [];
         if (path.length === 0) return 0;
 

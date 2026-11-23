@@ -14,6 +14,10 @@ const DIRECTIONS = {
   SE: { q: 0, r: 1 }
 };
 
+// Neighbour offsets in DIRECTIONS order, materialised once. Used by the hot
+// neighbour walkers so they don't rebuild the array on every call.
+const DIRECTION_LIST = Object.values(DIRECTIONS);
+
 /**
  * Reverse mapping — for each direction, the opposite direction name.
  */
@@ -145,7 +149,12 @@ export class HexGrid {
    * @returns {Array<{q: number, r: number}>}
    */
   static getNeighborCoords(q, r) {
-    return Object.values(DIRECTIONS).map(d => ({ q: q + d.q, r: r + d.r }));
+    const out = new Array(DIRECTION_LIST.length);
+    for (let i = 0; i < DIRECTION_LIST.length; i++) {
+      const d = DIRECTION_LIST[i];
+      out[i] = { q: q + d.q, r: r + d.r };
+    }
+    return out;
   }
 
   /**
@@ -155,10 +164,14 @@ export class HexGrid {
    * @returns {Array<Object>} Array of cell objects
    */
   getNeighbors(q, r) {
-    const coords = HexGrid.getNeighborCoords(q, r);
+    // Inline the offset loop: this is the hottest neighbour walk in the AI
+    // layer and the previous Object.values(...).map(...) allocated two
+    // intermediate arrays plus six objects per call.
     const result = [];
-    for (const c of coords) {
-      const cell = this.cells.get(`${c.q},${c.r}`);
+    const cells = this.cells;
+    for (let i = 0; i < DIRECTION_LIST.length; i++) {
+      const d = DIRECTION_LIST[i];
+      const cell = cells.get(`${q + d.q},${r + d.r}`);
       if (cell) result.push(cell);
     }
     return result;
