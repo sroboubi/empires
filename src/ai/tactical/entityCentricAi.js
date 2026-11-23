@@ -267,12 +267,20 @@ export class EntityCentricAI extends BaseManager {
       // above includes reachStepMargin, so it is the threat set, not the
       // strike set; testing it for "can strike now" made canStrikeNow
       // true for every threat.
-      const strikeCells = helper.findReachableCells(this.gameState, enemy, Math.ceil(maxAP));
+      // One BFS serves both sets: findReachableCells now returns `dist`
+      // (hop count), and the strike BFS is a strict subset of the threat
+      // BFS (same start, same neighbour rules; discovery of a node at
+      // dist d does not depend on maxDistance >= d). Issue #72.
+      const strikeLimit = Math.ceil(maxAP);
+      const strikeReachable = new Set();
+      for (const [key, entry] of cells) {
+        if (entry.dist <= strikeLimit) strikeReachable.add(key);
+      }
       const range = this.attackRange(enemy);
       reach.set(enemy.id, {
         enemy,
         reachable: new Set(cells.keys()),
-        strikeReachable: new Set(strikeCells.keys()),
+        strikeReachable,
         range,
         power: helper.getCombatPower(enemy) || 1,
       });
