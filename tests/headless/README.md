@@ -414,6 +414,7 @@ generation randomness does not matter: the generated cells are saved.
 | `headless.mjs` | Test driver: creates GameState, 2 AI players, drives turns, asserts, optional metrics JSON |
 | `tournament.mjs` | AI suite runner: reads a suite config, runs iterations in child processes, writes Markdown reports |
 | `metrics.mjs` | Out-of-tree instrumentation: resource flows, kills/losses, chats/trades, barbarian stats, log capture |
+| `helperRouting.test.mjs` | Equivalence test for helper `getCellsArray`/`getNeighbors` routing through the hexGrid proxy (`npm run test:helper-routing`) |
 | `report.mjs` | Markdown renderers for suite summary, game reports, per-run detail, and logs |
 | `checkpoint.mjs` | Checkpoint/resume: round-end save payloads to disk, resume validation (see above) |
 | `repl.mjs` | Interactive REPL: step turns, inspect state, spawn entities, run AI manually |

@@ -13,6 +13,8 @@ export class AiProxyProfiler {
     constructor() {
         this.startedAt = Date.now();
         this.wrapFunctionCalls = 0;
+        this.wrapFunctionCacheHits = 0;
+        this.functionWrapperCreations = 0;
         this.functionProxyApplies = 0;
         this.deepWrapCalls = 0;
         this.deepWrapCacheHits = 0;
@@ -28,11 +30,14 @@ export class AiProxyProfiler {
             object: 0,
         };
         this.entitiesFilterCalls = 0;
+        this.entitiesFilterCacheHits = 0;
         this.entitiesRawTotal = 0;
         this.entitiesFilteredTotal = 0;
         this.getCellsArrayCalls = 0;
         this.getCellsArrayTotal = 0;
+        this.getCellsArrayCacheHits = 0;
         this.getNeighborsCalls = 0;
+        this.getNeighborsCacheHits = 0;
         this.fogChecks = 0;
         this.argArrays = 0;
         this.argsTotal = 0;
@@ -59,16 +64,21 @@ export class AiProxyProfiler {
         return {
             durationMs: Date.now() - this.startedAt,
             wrapFunctionCalls: this.wrapFunctionCalls,
+            wrapFunctionCacheHits: this.wrapFunctionCacheHits,
+            functionWrapperCreations: this.functionWrapperCreations,
             functionProxyApplies: this.functionProxyApplies,
             deepWrapCalls: this.deepWrapCalls,
             deepWrapCacheHits: this.deepWrapCacheHits,
             deepWrapKinds: { ...this.deepWrapKinds },
             entitiesFilterCalls: this.entitiesFilterCalls,
+            entitiesFilterCacheHits: this.entitiesFilterCacheHits,
             entitiesRawTotal: this.entitiesRawTotal,
             entitiesFilteredTotal: this.entitiesFilteredTotal,
             getCellsArrayCalls: this.getCellsArrayCalls,
             getCellsArrayTotal: this.getCellsArrayTotal,
+            getCellsArrayCacheHits: this.getCellsArrayCacheHits,
             getNeighborsCalls: this.getNeighborsCalls,
+            getNeighborsCacheHits: this.getNeighborsCacheHits,
             fogChecks: this.fogChecks,
             argArrays: this.argArrays,
             argsTotal: this.argsTotal,

@@ -281,8 +281,30 @@ function wrapFunction(fn, target, aiName, seen, ownPlayer = null, propName = nul
     profiler.wrapFunctionCalls++;
     profiler.countMethodAccess(propName);
   }
+
+  // Cache method wrappers per (target, prop) within this proxy tree. The
+  // identity check matters: tests and instrumentation replace methods on
+  // live objects/prototypes, and a cached wrapper must not silently keep
+  // calling the old function.
+  let functionCache = seen._functionCache;
+  if (!functionCache) {
+    functionCache = new WeakMap();
+    seen._functionCache = functionCache;
+  }
+  let targetCache = functionCache.get(target);
+  if (!targetCache) {
+    targetCache = new Map();
+    functionCache.set(target, targetCache);
+  }
+  const cached = targetCache.get(propName);
+  if (cached && cached.fn === fn) {
+    if (profiler) profiler.wrapFunctionCacheHits++;
+    return cached.wrapped;
+  }
+
+  if (profiler) profiler.functionWrapperCreations++;
   const bound = fn.bind(target);
-  return new Proxy(bound, {
+  const wrapped = new Proxy(bound, {
     apply(fnTarget, thisArg, args) {
       if (profiler) {
         profiler.functionProxyApplies++;
@@ -298,6 +320,8 @@ function wrapFunction(fn, target, aiName, seen, ownPlayer = null, propName = nul
       return Reflect.has(target, prop);
     },
   });
+  targetCache.set(propName, { fn, wrapped });
+  return wrapped;
 }
 
 /**
@@ -544,6 +568,10 @@ function createHexGridProxy(hexGrid, ownPlayer, aiName, seen) {
   // every access broke `gs.hexGrid === gs.hexGrid`.
   if (seen.has(hexGrid)) return seen.get(hexGrid);
   let proxy;
+  // Grid topology and cell identity are static; cell proxies read live
+  // terrain/resource fields. Cache the wrapped arrays, not the data.
+  let cellsArrayCache = null;
+  const neighborCache = new Map();
   const handler = addProxyGuards({
     get(target, prop, receiver) {
       if (prop === UNWRAP) return target;
@@ -562,6 +590,12 @@ function createHexGridProxy(hexGrid, ownPlayer, aiName, seen) {
         return (q, r) => {
           const profiler = profilerFor(seen);
           if (profiler) profiler.getNeighborsCalls++;
+          const key = `${q},${r}`;
+          const cached = neighborCache.get(key);
+          if (cached) {
+            if (profiler) profiler.getNeighborsCacheHits++;
+            return cached;
+          }
           const neighbors = target.getNeighbors(q, r);
           // Consistent with helper.getNeighbors (Shahin, 2026-11-06): return
           // ALL neighbours, each deepWrapped — the cell mask hides
@@ -569,14 +603,25 @@ function createHexGridProxy(hexGrid, ownPlayer, aiName, seen) {
           // Filtering to explored-only contradicted the helper path. The
           // engine algorithms running on the filtered gameState (P8) only
           // read n.resource here, which the mask hides on unexplored cells.
-          return (neighbors || []).map(c => deepWrap(c, aiName, seen, ownPlayer));
+          // Wrap the array, not just its elements: array methods on the
+          // proxy preserve the read-only/copy semantics the helper path had.
+          const wrapped = deepWrap(neighbors || [], aiName, seen, ownPlayer);
+          neighborCache.set(key, wrapped);
+          return wrapped;
         };
       }
 
       if (prop === 'getCellsArray') {
         return () => {
-          const cells = target.getCellsArray ? target.getCellsArray() : [];
           const profiler = profilerFor(seen);
+          if (cellsArrayCache) {
+            if (profiler) {
+              profiler.getCellsArrayCalls++;
+              profiler.getCellsArrayCacheHits++;
+            }
+            return cellsArrayCache;
+          }
+          const cells = target.getCellsArray ? target.getCellsArray() : [];
           if (profiler) {
             profiler.getCellsArrayCalls++;
             profiler.getCellsArrayTotal += cells.length;
@@ -586,7 +631,8 @@ function createHexGridProxy(hexGrid, ownPlayer, aiName, seen) {
           // helper path and hid coordinates the spec leaves visible (the
           // map shape is known from config). No engine consumer calls the
           // proxied grid's getCellsArray (helpers use the raw grid).
-          return cells.map(c => deepWrap(c, aiName, seen, ownPlayer));
+          cellsArrayCache = deepWrap(cells, aiName, seen, ownPlayer);
+          return cellsArrayCache;
         };
       }
 
@@ -637,6 +683,7 @@ function createHexGridProxy(hexGrid, ownPlayer, aiName, seen) {
 export function createGameStateProxy(gameState, ownPlayer, aiName, seen = new WeakMap()) {
   const ownPlayerId = ownPlayer.id;
   const playerCache = new Map();
+  let entityCache = null;
 
   function wrapPlayer(p) {
     if (!p) return p;
@@ -674,6 +721,24 @@ export function createGameStateProxy(gameState, ownPlayer, aiName, seen = new We
         const entities = Reflect.get(target, prop, receiver);
         if (Array.isArray(entities)) {
           const profiler = profilerFor(seen);
+          const cacheKey = {
+            grid: target.hexGrid,
+            round: target.currentRound,
+            index: target.activePlayerIndex,
+            version: target.stateVersion ?? 0,
+          };
+          if (entityCache &&
+            entityCache.grid === cacheKey.grid &&
+            entityCache.round === cacheKey.round &&
+            entityCache.index === cacheKey.index &&
+            entityCache.version === cacheKey.version) {
+            if (profiler) {
+              profiler.entitiesFilterCalls++;
+              profiler.entitiesFilterCacheHits++;
+            }
+            return entityCache.wrapped;
+          }
+
           let visibleChecks = 0;
           const filtered = entities.filter(e => {
             if (!e || e.destroyed) return false;
@@ -688,7 +753,9 @@ export function createGameStateProxy(gameState, ownPlayer, aiName, seen = new We
             profiler.entitiesFilteredTotal += filtered.length;
             profiler.fogChecks += visibleChecks;
           }
-          return deepWrap(filtered, aiName, seen, ownPlayer);
+          const wrapped = deepWrap(filtered, aiName, seen, ownPlayer);
+          entityCache = { ...cacheKey, wrapped };
+          return wrapped;
         }
         return deepWrap(entities, aiName, seen, ownPlayer);
       }
@@ -857,6 +924,14 @@ function createHelperProxy(helper, ownPlayer, aiName, seen = new WeakMap(), prox
       if (prop === 'getCell' && proxiedGameState) {
         const hg = proxiedGameState.hexGrid;
         if (hg && typeof hg.getCell === 'function') return hg.getCell.bind(hg);
+      }
+
+      // Route the collection helpers through the hexGrid proxy too: one
+      // wrapping/masking implementation and one cache. The hexGrid proxy
+      // returns wrapped arrays, preserving the old helper result semantics.
+      if ((prop === 'getCellsArray' || prop === 'getNeighbors') && proxiedGameState) {
+        const hg = proxiedGameState.hexGrid;
+        if (hg && typeof hg[prop] === 'function') return hg[prop].bind(hg);
       }
 
       const val = Reflect.get(target, prop, receiver);
