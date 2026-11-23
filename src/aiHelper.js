@@ -164,14 +164,22 @@ export class AiHelper {
         if (!startCell) return reachable;
         const maxAP = unit.maxActionPoints ?? unit.actionPoints ?? Infinity;
         const startKey = `${unit.q},${unit.r}`;
-        reachable.set(startKey, { cell: startCell, path: [] });
-        const queue = [{ q: unit.q, r: unit.r, path: [], dist: 0 }];
-        while (queue.length > 0) {
-            const cur = queue.shift();
-            if (cur.dist >= maxDistance) continue;
-            for (const nb of this.getNeighbors(cur.q, cur.r)) {
+
+        // Parent pointers + an index queue instead of queue.shift() and
+        // copying the whole path for every neighbor. Paths are built lazily
+        // only for entries a caller actually reads.
+        const nodes = new Map();
+        nodes.set(startKey, { cell: startCell, parentKey: null, dist: 0 });
+        const queue = [startKey];
+        let head = 0;
+        while (head < queue.length) {
+            const curKey = queue[head++];
+            const cur = nodes.get(curKey);
+            if (!cur || cur.dist >= maxDistance) continue;
+            const curCell = cur.cell;
+            for (const nb of this.getNeighbors(curCell.q, curCell.r)) {
                 const key = `${nb.q},${nb.r}`;
-                if (reachable.has(key)) continue;
+                if (nodes.has(key)) continue;
                 if (!Number.isFinite(unit.getMovementCost(nb))) continue;
                 const baseMc = nb.terrain?.movementCost ?? 1;
                 const tcs = unit.terrainCostScale;
@@ -182,10 +190,30 @@ export class AiHelper {
                 // occupant is a wrapped proxy and `unit` is raw, so `===`
                 // never matches.
                 if (occupant && occupant.id !== unit.id) continue;
-                const path = [...cur.path, nb];
-                reachable.set(key, { cell: nb, path });
-                queue.push({ q: nb.q, r: nb.r, path, dist: cur.dist + 1 });
+                nodes.set(key, { cell: nb, parentKey: curKey, dist: cur.dist + 1 });
+                queue.push(key);
             }
+        }
+
+        const buildPath = (key) => {
+            const path = [];
+            let node = nodes.get(key);
+            while (node && node.parentKey !== null) {
+                path.push(node.cell);
+                node = nodes.get(node.parentKey);
+            }
+            return path.reverse();
+        };
+
+        for (const [key, node] of nodes) {
+            let cachedPath = null;
+            reachable.set(key, {
+                cell: node.cell,
+                get path() {
+                    if (cachedPath === null) cachedPath = buildPath(key);
+                    return cachedPath;
+                },
+            });
         }
         return reachable;
     }
