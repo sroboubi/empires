@@ -538,7 +538,7 @@ export class EntityCentricAI extends BaseManager {
    * before our first hit this turn), so comparing cumulative estimated damage
    * against it does not double-count the health our hits already removed.
    */
-  isTargetAddressed(claim, enemy) {
+  isTargetAddressed(claim) {
     if (!claim) return false;
     if (claim.attackers >= this.config.maxAttackersPerTarget) return true;
     const hp = asNumber(claim.hpBase, 0);
@@ -946,7 +946,7 @@ export class EntityCentricAI extends BaseManager {
       if (stance === 'friendly' || stance === 'ally' || stance === 'caution') continue;
       // Claims (2): skip targets already addressed by units that acted
       // earlier this turn, so the empire does not dogpile one enemy.
-      if (this.isTargetAddressed(this.turnState.claims.get(enemy.id), enemy)) continue;
+      if (this.isTargetAddressed(this.turnState.claims.get(enemy.id))) continue;
       eligible.push({ enemy, stance, dist: helper.distance(entity, enemy) });
     }
 
