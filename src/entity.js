@@ -305,6 +305,12 @@ export default class Entity {
     if (ordersRequired > 0 && this.owner) {
       this.owner.consumeOrders(ordersRequired);
     }
+    // Any entity action can change entity positions/health/occupancy. Bump
+    // the game-state generation so AI proxy views invalidate at the action
+    // boundary (includes human and AI actions).
+    if (this.gameState) {
+      this.gameState.stateVersion = (this.gameState.stateVersion || 0) + 1;
+    }
   }
 
   /**

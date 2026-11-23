@@ -75,8 +75,9 @@ export class Player {
    * Returns the player's AI manager, creating it on first use by resolving
    * player.controller to a BaseManager implementation. Returns null for
    * human players and replays.
+   * @param {Object} [options] - forwarded to createAiManager (e.g. a test profiler)
    */
-  async getAiManager() {
+  async getAiManager(options = {}) {
     if (this.aiManager) return this.aiManager;
     if (!this.controller?.url || this.isReplayAI) return null;
     const module = await import(this.controller.url);
@@ -84,7 +85,7 @@ export class Player {
     if (!ManagerClass) {
       throw new Error(`Default Class not found in module ${this.controller.url}`);
     }
-    this.aiManager = createAiManager(ManagerClass, this, this.gameState.aiHelper);
+    this.aiManager = createAiManager(ManagerClass, this, this.gameState.aiHelper, options);
     return this.aiManager;
   }
 
@@ -93,8 +94,9 @@ export class Player {
    * first use by resolving player.strategicController the same way
    * getAiManager() resolves the tactical one. Returns null when no
    * strategic controller is selected, or in replays.
+   * @param {Object} [options] - forwarded to createAiManager (e.g. a test profiler)
    */
-  async getStrategicManager() {
+  async getStrategicManager(options = {}) {
     if (this.strategicManager) return this.strategicManager;
     if (!this.strategicController?.url || this.isReplayAI) return null;
     const module = await import(this.strategicController.url);
@@ -102,7 +104,7 @@ export class Player {
     if (!ManagerClass) {
       throw new Error(`Default Class not found in module ${this.strategicController.url}`);
     }
-    this.strategicManager = createAiManager(ManagerClass, this, this.gameState.aiHelper);
+    this.strategicManager = createAiManager(ManagerClass, this, this.gameState.aiHelper, options);
     return this.strategicManager;
   }
 
