@@ -18,7 +18,8 @@
     "test:suite:tactical-pilot-matrix": "node --import ./preload.mjs ./tournament.mjs --config suite.tactical-pilot-matrix.json",
     "test:suite:tactical-matrix": "node --import ./preload.mjs ./tournament.mjs --config suite.tactical-matrix.json",
     "test:suite:lategame": "node --import ./preload.mjs ./tournament.mjs --config suite.lategame.json",
-    "test:suite:entity-bench": "node --import ./preload.mjs ./tournament.mjs --config suite.entity-bench.json"
+    "test:suite:entity-bench": "node --import ./preload.mjs ./tournament.mjs --config suite.entity-bench.json",
+    "test:direction-histogram": "node --import ./preload.mjs ./directionHistogram.test.mjs"
   },
   "keywords": [],
   "author": "",
