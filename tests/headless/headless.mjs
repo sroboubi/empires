@@ -111,6 +111,9 @@ function resolveController(def, playerName, aiJson, leadersJson, { registry = 'c
     if (!def.url && def.key) {
       key = def.key;
       source = aiJson?.[registry]?.[key] || null;
+      if (!source) {
+        throw new Error(`Unknown controller "${key}" (not found in definitions/ai.json ${registry})`);
+      }
     } else {
       source = def;
     }

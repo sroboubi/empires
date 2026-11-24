@@ -291,6 +291,10 @@ export class AiHelper {
      * enumerate completely; only existing cells are returned.
      */
     _diskCells(grid, sourceEntity, maxDistance) {
+        // An unbounded radius is the whole map; the expansion below would
+        // never terminate because off-map coordinates keep generating
+        // frontier forever. Fall back to the full cell list.
+        if (!Number.isFinite(maxDistance)) return grid.getCellsArray();
         const cells = [];
         const seen = new Set([`${sourceEntity.q},${sourceEntity.r}`]);
         const startCell = grid.getCell(sourceEntity.q, sourceEntity.r);
