@@ -17,6 +17,25 @@ const DIRECTIONS = {
 // Neighbour offsets in DIRECTIONS order, materialised once. Used by the hot
 // neighbour walkers so they don't rebuild the array on every call.
 const DIRECTION_LIST = Object.values(DIRECTIONS);
+const DIRECTION_NAMES = Object.keys(DIRECTIONS);
+
+// Adjacent-cell fast path: "dq,dr" -> direction name. Avoids rebuilding
+// Object.entries(DIRECTIONS) on every directionTo() call.
+const ADJACENT_DIRECTION = new Map(
+  DIRECTION_NAMES.map(name => [`${DIRECTIONS[name].q},${DIRECTIONS[name].r}`, name])
+);
+
+// Angular position of each axial direction, computed once with exactly the
+// arithmetic directionTo() used before (axialToPixel + atan2), so that
+// tie-breaking between equidistant directions is bit-identical.
+const SQRT3 = Math.sqrt(3);
+const HEX_SIZE = CONFIG.HEX_SIZE;
+const DIRECTION_ANGLES = DIRECTION_NAMES.map(name => {
+  const d = DIRECTIONS[name];
+  const x = HEX_SIZE * (SQRT3 * d.q + (SQRT3 / 2) * d.r);
+  const z = HEX_SIZE * (1.5 * d.r);
+  return { name, angle: Math.atan2(-z, x) };
+});
 
 /**
  * Reverse mapping — for each direction, the opposite direction name.
@@ -326,54 +345,69 @@ export class HexGrid {
    * @param {boolean} [unsnapped=false]
    * @returns {{fromSource: string, fromTarget: string}}
    */
-  directionTo(source, target, unsnapped = false) {
+  /**
+   * Just the direction name from `source` to `target` (the `fromSource` half of
+   * directionTo). Allocation-free apart from the returned string, so hot loops
+   * that only need the bucket can avoid building the result object.
+   *
+   * @param {{q: number, r: number}} source
+   * @param {{q: number, r: number}} target
+   * @param {boolean} [unsnapped=false]
+   * @returns {string}
+   */
+  static directionName(source, target, unsnapped = false) {
     const dq = target.q - source.q;
     const dr = target.r - source.r;
 
-    // For adjacent cells, we can do an exact match
-    for (const [name, dir] of Object.entries(DIRECTIONS)) {
-      if (dq === dir.q && dr === dir.r) {
-        return { fromSource: name, fromTarget: OPPOSITE_DIRECTION[name] };
-      }
-    }
+    const adjacent = ADJACENT_DIRECTION.get(`${dq},${dr}`);
+    if (adjacent) return adjacent;
 
-    // For non-adjacent cells, compute angle via pixel positions and find closest direction
-    const sourcePixel = HexGrid.axialToPixel(source.q, source.r);
-    const targetPixel = HexGrid.axialToPixel(target.q, target.r);
-
-    const dx = targetPixel.x - sourcePixel.x;
-    const dz = targetPixel.z - sourcePixel.z;
-
-    // atan2 gives angle from positive x-axis; we use (dx, -dz) so that
-    // "up" on screen (negative z) corresponds to a positive angle.
-    const angle = Math.atan2(-dz, dx);
+    // Same arithmetic as axialToPixel on both endpoints followed by the
+    // subtraction, inlined so no objects are allocated. Keeping the identical
+    // operation order preserves the original tie-breaking between directions.
+    const sx = HEX_SIZE * (SQRT3 * source.q + (SQRT3 / 2) * source.r);
+    const sz = HEX_SIZE * (1.5 * source.r);
+    const tx = HEX_SIZE * (SQRT3 * target.q + (SQRT3 / 2) * target.r);
+    const tz = HEX_SIZE * (1.5 * target.r);
+    const angle = Math.atan2(-(tz - sz), tx - sx);
 
     if (unsnapped) {
       let deg = (angle * 180) / Math.PI;
       if (deg < 0) deg += 360;
-      const index = Math.round(deg / 45) % 8;
-      const bestName = DIRECTIONS_8[index];
-      return { fromSource: bestName, fromTarget: OPPOSITE_DIRECTION_8[bestName] };
+      return DIRECTIONS_8[Math.round(deg / 45) % 8];
     }
 
-    // Map each direction to its angular position
     let bestName = 'E';
     let bestDiff = Infinity;
-
-    for (const [name, dir] of Object.entries(DIRECTIONS)) {
-      const dirPixel = HexGrid.axialToPixel(dir.q, dir.r);
-      const dirAngle = Math.atan2(-dirPixel.z, dirPixel.x);
-
-      let diff = Math.abs(angle - dirAngle);
+    for (const entry of DIRECTION_ANGLES) {
+      let diff = Math.abs(angle - entry.angle);
       if (diff > Math.PI) diff = 2 * Math.PI - diff;
-
       if (diff < bestDiff) {
         bestDiff = diff;
-        bestName = name;
+        bestName = entry.name;
       }
     }
+    return bestName;
+  }
 
-    return { fromSource: bestName, fromTarget: OPPOSITE_DIRECTION[bestName] };
+  directionTo(source, target, unsnapped = false) {
+    const dq = target.q - source.q;
+    const dr = target.r - source.r;
+
+    // Adjacent cells are an exact match, with or without `unsnapped` (the
+    // original behaviour: adjacency short-circuits the compass snapping).
+    const adjacent = ADJACENT_DIRECTION.get(`${dq},${dr}`);
+    if (adjacent) {
+      return { fromSource: adjacent, fromTarget: OPPOSITE_DIRECTION[adjacent] };
+    }
+
+    const fromSource = HexGrid.directionName(source, target, unsnapped);
+    return {
+      fromSource,
+      fromTarget: unsnapped
+        ? OPPOSITE_DIRECTION_8[fromSource]
+        : OPPOSITE_DIRECTION[fromSource]
+    };
   }
 
   // ---------------------------------------------------------------------------

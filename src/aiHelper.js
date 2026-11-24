@@ -96,6 +96,33 @@ export class AiHelper {
         return this.gameState.hexGrid.directionTo(fromCell, toCell, asName);
     }
 
+    /**
+     * Count the cells this player has not explored yet, by their axial
+     * direction as seen from `originCell` (E, NE, NW, W, SW, SE).
+     *
+     * Explorer heuristics need a per-direction histogram, which used to be one
+     * proxied directionTo() per cell — on a 128 map with ~49k unexplored cells
+     * that is ~49k proxied calls per explorer per turn, each allocating. This
+     * runs the whole scan engine-side over the raw grid, so it is one call and
+     * no cell array ever crosses the proxy.
+     *
+     * @param {{q:number,r:number}} originCell
+     * @param {number|string} ownPlayerId
+     * @returns {{E:number,NE:number,NW:number,W:number,SW:number,SE:number}}
+     */
+    countUnexploredByDirection(originCell, ownPlayerId) {
+        const counts = { E: 0, NE: 0, NW: 0, W: 0, SW: 0, SE: 0 };
+        const grid = this.gameState?.hexGrid;
+        const player = this.gameState?.players?.find(p => String(p.id) === String(ownPlayerId));
+        if (!grid || !originCell || !player) return counts;
+        for (const cell of grid.cells.values()) {
+            if (!cell || player.isExplored(cell.q, cell.r)) continue;
+            const name = HexGrid.directionName(originCell, cell);
+            if (name in counts) counts[name] += 1;
+        }
+        return counts;
+    }
+
     /** @returns {Object|null} movement cost path between two cells */
     movementCostTo(fromCell, toCell, costFunc, options) {
         return this.gameState.hexGrid.movementCostTo(fromCell, toCell, costFunc, options);
@@ -644,48 +671,83 @@ export class AiHelper {
             }
         }
 
-        const allCells = this.getCellsArray();
-        const unexploredCount = allCells.reduce((n, c) => n + (c && !player.isExplored(c.q, c.r) ? 1 : 0), 0);
-        if (!targetCells && unexploredCount === 0) {
-            return { targetCell: null, path: [], fullyExplored: true, arrivedAtBestReachable: true };
+        // One pass over the candidate pool (was: a full-map reduce for the
+        // unexplored count, then a full-map filter, then a map() for the key
+        // set). On a 128 map that is ~49k cells per call, per explorer, per
+        // turn — issue #72.
+        let pool;
+        if (targetCells) {
+            pool = targetCells.filter(c => c && !ignore.has(`${c.q},${c.r}`));
+        } else {
+            const allCells = this.getCellsArray();
+            let unexploredCount = 0;
+            pool = [];
+            for (const c of allCells) {
+                if (!c || player.isExplored(c.q, c.r)) continue;
+                unexploredCount++;
+                if (!ignore.has(`${c.q},${c.r}`)) pool.push(c);
+            }
+            if (unexploredCount === 0) {
+                return { targetCell: null, path: [], fullyExplored: true, arrivedAtBestReachable: true };
+            }
         }
-
-        const pool = targetCells
-            ? targetCells.filter(c => c && !ignore.has(`${c.q},${c.r}`))
-            : allCells.filter(c => c && !player.isExplored(c.q, c.r) && !ignore.has(`${c.q},${c.r}`));
         if (pool.length === 0) return empty;
-        const poolKeys = new Set(pool.map(c => `${c.q},${c.r}`));
 
-        const reachable = new Map();
+        const poolKeys = new Set();
+        for (const c of pool) poolKeys.add(`${c.q},${c.r}`);
+
+        // BFS with an index queue and parent pointers: the old version called
+        // queue.shift() (O(n)) and copied the whole path for every visited
+        // node, which is what put 44% of the profile in the GC on map 128.
+        const nodes = new Map();
         const startKey = `${explorer.q},${explorer.r}`;
-        reachable.set(startKey, { cell: startCell, path: [] });
+        nodes.set(startKey, { cell: startCell, parentKey: null, dist: 0 });
 
-        const queue = [{ q: explorer.q, r: explorer.r, path: [] }];
+        const queue = [{ key: startKey, cell: startCell }];
+        let head = 0;
         const directTargets = [];
         const borderTargets = [];
 
-        while (queue.length > 0) {
-            const cur = queue.shift();
-            for (const nb of this.getNeighbors(cur.q, cur.r)) {
+        const pathTo = (key) => {
+            const path = [];
+            let node = nodes.get(key);
+            while (node && node.parentKey !== null) {
+                path.push(node.cell);
+                node = nodes.get(node.parentKey);
+            }
+            return path.reverse();
+        };
+
+        while (head < queue.length) {
+            const cur = queue[head++];
+            const curNode = nodes.get(cur.key);
+            for (const nb of this.getNeighbors(cur.cell.q, cur.cell.r)) {
                 const nbKey = `${nb.q},${nb.r}`;
                 if (poolKeys.has(nbKey)) {
-                    if (Number.isFinite(explorer.getMovementCost(nb)) && !reachable.has(nbKey)) {
-                        const pathToNb = [...cur.path, nb];
-                        directTargets.push({ targetCell: nb, path: pathToNb, dist: pathToNb.length });
+                    if (Number.isFinite(explorer.getMovementCost(nb)) && !nodes.has(nbKey)) {
+                        directTargets.push({
+                            targetCell: nb,
+                            key: nbKey,
+                            dist: curNode.dist + 1,
+                            path: [...pathTo(cur.key), nb],
+                        });
                     } else if (!targetCells) {
-                        borderTargets.push({ targetCell: nb, path: cur.path, dist: cur.path.length });
+                        borderTargets.push({
+                            targetCell: nb,
+                            key: cur.key,
+                            dist: curNode.dist,
+                        });
                     }
                 }
-                if (reachable.has(nbKey)) continue;
+                if (nodes.has(nbKey)) continue;
                 if (!Number.isFinite(explorer.getMovementCost(nb))) continue;
-                const nextPath = [...cur.path, nb];
-                reachable.set(nbKey, { cell: nb, path: nextPath });
+                nodes.set(nbKey, { cell: nb, parentKey: cur.key, dist: curNode.dist + 1 });
                 const occupant = gameState.getEntityAt(nb.q, nb.r);
                 // Compare by id (see canStageFrom): through the proxy the
                 // occupant is a wrapped proxy and `explorer` is raw, so
                 // `===` never matches.
                 if (occupant && occupant.id !== explorer.id) continue;
-                queue.push({ q: nb.q, r: nb.r, path: nextPath });
+                queue.push({ key: nbKey, cell: nb });
             }
         }
 
@@ -696,29 +758,41 @@ export class AiHelper {
         }
 
         if (!targetCells) {
-            const validBorderTargets = borderTargets.filter(b => b.path.length > 0);
+            const validBorderTargets = borderTargets.filter(b => b.dist > 0);
             if (validBorderTargets.length > 0) {
                 validBorderTargets.sort((a, b) => a.dist - b.dist);
                 const best = validBorderTargets[0];
-                return { targetCell: best.targetCell, path: best.path, fullyExplored: false, arrivedAtBestReachable: false };
+                return { targetCell: best.targetCell, path: pathTo(best.key), fullyExplored: false, arrivedAtBestReachable: false };
             }
         }
 
-        const sortedPool = [...pool].sort((a, b) => this.distance(explorer, a) - this.distance(explorer, b));
-        const chosenTarget = sortedPool[0];
+        // First minimal-distance cell in BFS insertion order (was a full sort
+        // of the pool, O(n log n) comparisons over the whole map).
+        let chosenTarget = null;
+        let minStartDist = Infinity;
+        for (const cell of pool) {
+            const d = this.distance(explorer, cell);
+            if (d < minStartDist) {
+                minStartDist = d;
+                chosenTarget = cell;
+            }
+        }
         let bestReachable = null;
         let minTargetDist = Infinity;
 
-        for (const { cell, path } of reachable.values()) {
-            const d = this.distance(cell, chosenTarget);
+        for (const [key, node] of nodes) {
+            const d = this.distance(node.cell, chosenTarget);
             if (d < minTargetDist) {
                 minTargetDist = d;
-                bestReachable = { cell, path };
+                bestReachable = { key };
             }
         }
 
-        if (bestReachable && bestReachable.path.length > 0) {
-            return { targetCell: chosenTarget, path: bestReachable.path, fullyExplored: false, arrivedAtBestReachable: false };
+        if (bestReachable && nodes.get(bestReachable.key).dist > 0) {
+            const path = pathTo(bestReachable.key);
+            if (path.length > 0) {
+                return { targetCell: chosenTarget, path, fullyExplored: false, arrivedAtBestReachable: false };
+            }
         }
 
         return { targetCell: chosenTarget, path: [], fullyExplored: false, arrivedAtBestReachable: true };

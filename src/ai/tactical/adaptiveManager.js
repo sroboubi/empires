@@ -1955,26 +1955,6 @@ export class AdaptiveManager extends BaseManager {
         );
     }
 
-    /**
-     * Unexplored cells for the current turn. The map scan is shared by every
-     * direction query in the turn; the explored-set size is the invalidation
-     * key because exploration only ever adds cells.
-     */
-    getUnexploredCells() {
-        const round = this.gameState.currentRound;
-        const size = this.player.exploredCells?.size ?? 0;
-        const cache = this.turnState.unexploredCellsCache;
-        if (cache && cache.round === round && cache.size === size) {
-            return cache.cells;
-        }
-        const cells = [];
-        for (const cell of this.helper.getCellsArray()) {
-            if (cell && !this.player.isExplored(cell.q, cell.r)) cells.push(cell);
-        }
-        this.turnState.unexploredCellsCache = { round, size, cells };
-        return cells;
-    }
-
     getUnexploredDirectionStats(startCell) {
         const stats = EXPLORE_DIRECTIONS.map(direction => ({ direction, count: 0 }));
         if (!startCell) return stats;
@@ -1989,12 +1969,12 @@ export class AdaptiveManager extends BaseManager {
         const cached = statsCache.byStart.get(startKey);
         if (cached) return cached;
 
-        const byDirection = new Map(stats.map(item => [item.direction, item]));
-        for (const cell of this.getUnexploredCells()) {
-            const direction = this.helper.directionTo(startCell, cell, false).fromSource;
-            const entry = byDirection.get(direction);
-            if (entry) entry.count += 1;
-        }
+        // One bulk, engine-side histogram instead of a proxied directionTo()
+        // per unexplored cell (issue #72: map 128 has ~49k of them per start
+        // cell, which dominated Adaptive's turn as proxy + allocation churn).
+        // Passing the player id keeps the 49k-cell array out of the proxy too.
+        const counts = this.helper.countUnexploredByDirection(startCell, this.player.id);
+        for (const item of stats) item.count = counts[item.direction] || 0;
         statsCache.byStart.set(startKey, stats);
         return stats;
     }
