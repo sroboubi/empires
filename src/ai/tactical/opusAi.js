@@ -130,6 +130,14 @@ export default class OpusAI extends BaseManager {
             if (typeof raw[k] === 'number' && Number.isFinite(raw[k])) this.cfg[k] = raw[k];
         }
         this.cells = new Map();     // explored-cell cache: key -> {q, r, t, mc, h, res}
+        // Cells we must avoid (structures of neutral/defensive owners). Set
+        // here, not only in computeForbidden(): refresh() runs computeThreats()
+        // before computeForbidden(), and computeThreats -> assetValue ->
+        // planFor -> hasAnySite -> siteOk reads this set. Without an initial
+        // value the first refresh throws "Cannot read properties of undefined
+        // (reading 'has')" and, because the throw aborts refresh before
+        // computeForbidden runs, that AI stays broken for the rest of the game.
+        this.forbidden = new Set();
         this.defs = null;           // plain copy of the manifest entity definitions
         this.mem = {
             plans: new Map(),       // builder id -> {type, q, r} (multi-turn walks to a build site)
