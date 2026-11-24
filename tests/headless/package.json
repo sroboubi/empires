@@ -10,6 +10,8 @@
     "test": "node --import ./preload.mjs ./headless.mjs",
     "test:redteam": "node --import ./preload.mjs ./headless.mjs --config cheater-test.json",
     "test:helper-routing": "node --import ./preload.mjs ./helperRouting.test.mjs",
+    "test:review-findings": "node --import ./preload.mjs ./reviewFindings.test.mjs",
+    "test:review-controller-typo": "node --import ./preload.mjs ./reviewControllerTypo.test.mjs",
     "test:suite": "node --import ./preload.mjs ./tournament.mjs",
     "test:suite:quick": "node --import ./preload.mjs ./tournament.mjs --config suite.quick.json",
     "test:suite:tactical-pilot": "node --import ./preload.mjs ./tournament.mjs --config suite.tactical-pilot.json",
