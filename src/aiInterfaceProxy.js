@@ -115,7 +115,11 @@ const SET_READ_METHODS = new Set(['has', 'keys', 'values', 'entries', 'forEach',
 const HELPER_METHODS = new Set([
   'distance', 'getNeighbors', 'getCellsArray', 'getCell', 'getCellCount',
   'directionTo', 'movementCostTo', 'getSightAndTrajectory', 'getConfig',
+  // Bulk direction histogram: one call instead of one proxied directionTo per cell.
+  'countUnexploredByDirection',
   'calculateAttackMultiplier', 'camelToTitle', 'formatResourceBundle', 'aiLog', 'findReachableCells',
+  // Pure utility: wraps a cost function in a per-search memo. No engine access.
+  'costMemo',
   'findBuildCandidates', 'isBuilder', 'isRepairer', 'isCombatCapable',
   'isMobile', 'getCombatPower', 'combatEffectiveness', 'isDedicatedMilitary',
   'isMilitary', 'getEntitiesByCapability', 'getEntitiesSortedByPower',

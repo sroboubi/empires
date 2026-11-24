@@ -1,0 +1,74 @@
+[
+  {
+    "label": "p1/settler#settler_1_1/plain",
+    "value": "12,-20|5|7,-15|11,-19|0|0"
+  },
+  {
+    "label": "p1/settler#settler_1_1/claimed",
+    "value": "12,-20|5|7,-15|11,-19|0|0"
+  },
+  {
+    "label": "p1/settler#settler_1_1/targets",
+    "value": "-24,0|7|6,-13|2,-9|0|0"
+  },
+  {
+    "label": "p1/swordsman#swordsman_1_3/plain",
+    "value": "13,-17|4|9,-15|12,-17|0|0"
+  },
+  {
+    "label": "p1/swordsman#swordsman_1_3/claimed",
+    "value": "13,-17|4|9,-15|12,-17|0|0"
+  },
+  {
+    "label": "p1/swordsman#swordsman_1_3/targets",
+    "value": "-24,0|9|7,-15|2,-9|0|0"
+  },
+  {
+    "label": "p1/worker#worker_1_2/plain",
+    "value": "13,-17|4|9,-15|12,-17|0|0"
+  },
+  {
+    "label": "p1/worker#worker_1_2/claimed",
+    "value": "13,-17|4|9,-15|12,-17|0|0"
+  },
+  {
+    "label": "p1/worker#worker_1_2/targets",
+    "value": "-24,0|7|7,-13|2,-9|0|0"
+  },
+  {
+    "label": "p2/settler#settler_2_1/plain",
+    "value": "-6,8|5|-7,13|-7,9|0|0"
+  },
+  {
+    "label": "p2/settler#settler_2_1/claimed",
+    "value": "-6,8|5|-7,13|-7,9|0|0"
+  },
+  {
+    "label": "p2/settler#settler_2_1/targets",
+    "value": "-24,14|5|-7,13|-10,12|0|0"
+  },
+  {
+    "label": "p2/swordsman#swordsman_2_3/plain",
+    "value": "-1,13|4|-5,13|-2,13|0|0"
+  },
+  {
+    "label": "p2/swordsman#swordsman_2_3/claimed",
+    "value": "-1,13|4|-5,13|-2,13|0|0"
+  },
+  {
+    "label": "p2/swordsman#swordsman_2_3/targets",
+    "value": "-24,13|5|-7,13|-10,12|0|0"
+  },
+  {
+    "label": "p2/worker#worker_2_2/plain",
+    "value": "-1,14|4|-5,14|-2,14|0|0"
+  },
+  {
+    "label": "p2/worker#worker_2_2/claimed",
+    "value": "-1,14|4|-5,14|-2,14|0|0"
+  },
+  {
+    "label": "p2/worker#worker_2_2/targets",
+    "value": "-24,14|7|-7,15|-10,12|0|0"
+  }
+]

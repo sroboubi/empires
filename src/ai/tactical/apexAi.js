@@ -670,7 +670,7 @@ export default class ApexAi extends FableAi {
             // target cell, not a flat 1 AP. Using 1 overestimates attacks on
             // rough terrain and produces failed attack orders.
             const route = this.helper.movementCostTo(u.e.cell, f.e.cell,
-                (c) => u.e.getMovementCost(c), { allowDetours: true });
+                this.helper.costMemo((c) => u.e.getMovementCost(c)), { allowDetours: true });
             if (!route || !route.reached) return null;
             baseCost = Math.max(1, route.cost);
             if (steps > 0) moveAp = Math.max(0, route.cost - baseCost);

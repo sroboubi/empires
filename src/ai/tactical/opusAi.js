@@ -130,6 +130,15 @@ export default class OpusAI extends BaseManager {
             if (typeof raw[k] === 'number' && Number.isFinite(raw[k])) this.cfg[k] = raw[k];
         }
         this.cells = new Map();     // explored-cell cache: key -> {q, r, t, mc, h, res}
+        this.multCache = new WeakMap(); // owner -> Map<terrain, movementCostMultiplier> (static per game; issue #72)
+        // Cells we must avoid (structures of neutral/defensive owners). Set
+        // here, not only in computeForbidden(): refresh() runs computeThreats()
+        // before computeForbidden(), and computeThreats -> assetValue ->
+        // planFor -> hasAnySite -> siteOk reads this set. Without an initial
+        // value the first refresh throws "Cannot read properties of undefined
+        // (reading 'has')" and, because the throw aborts refresh before
+        // computeForbidden runs, that AI stays broken for the rest of the game.
+        this.forbidden = new Set();
         this.defs = null;           // plain copy of the manifest entity definitions
         this.mem = {
             plans: new Map(),       // builder id -> {type, q, r} (multi-turn walks to a build site)
@@ -243,7 +252,19 @@ export default class OpusAI extends BaseManager {
         const tcs = def.movement.terrainCostScale;
         let s = (tcs && cell.t in tcs) ? tcs[cell.t] : 1;
         if (s === null) s = Infinity;
-        const mult = owner?.getMovementCostMultiplier ? (owner.getMovementCostMultiplier(cell.t) ?? 1) : 1;
+        // The owner's per-terrain multiplier is static for the whole game
+        // (attributes are assigned once at setup), so memoize it instead of
+        // paying a proxied call on every Dijkstra edge (issue #72).
+        let mult = 1;
+        if (owner?.getMovementCostMultiplier) {
+            let byTerrain = this.multCache.get(owner);
+            if (!byTerrain) { byTerrain = new Map(); this.multCache.set(owner, byTerrain); }
+            mult = byTerrain.get(cell.t);
+            if (mult === undefined) {
+                mult = owner.getMovementCostMultiplier(cell.t) ?? 1;
+                byTerrain.set(cell.t, mult);
+            }
+        }
         return (cell.mc || 1) * s * mult;
     }
 

@@ -1,23 +1,26 @@
 {
-  "name": "empires-res",
+  "name": "headless",
   "version": "1.0.0",
-  "description": "We are building a modular, data-driven 4X strategy game using vanilla JavaScript (ESModules) and Three.js.",
+  "description": "",
   "main": "index.js",
-  "directories": {
-    "test": "tests"
-  },
   "scripts": {
     "test": "node --import ./preload.mjs ./headless.mjs",
     "test:redteam": "node --import ./preload.mjs ./headless.mjs --config cheater-test.json",
     "test:helper-routing": "node --import ./preload.mjs ./helperRouting.test.mjs",
+    "test:strike-dedupe": "node --import ./preload.mjs ./strikeSetDedupe.test.mjs",
     "test:review-findings": "node --import ./preload.mjs ./reviewFindings.test.mjs",
     "test:review-controller-typo": "node --import ./preload.mjs ./reviewControllerTypo.test.mjs",
+    "test:opus-forbidden-init": "node --import ./preload.mjs ./opusForbiddenInit.test.mjs",
     "test:suite": "node --import ./preload.mjs ./tournament.mjs",
     "test:suite:quick": "node --import ./preload.mjs ./tournament.mjs --config suite.quick.json",
     "test:suite:tactical-pilot": "node --import ./preload.mjs ./tournament.mjs --config suite.tactical-pilot.json",
     "test:suite:tactical-pilot-profile": "node --import ./preload.mjs ./tournament.mjs --config suite.tactical-pilot-profile.json",
     "test:suite:tactical-pilot-matrix": "node --import ./preload.mjs ./tournament.mjs --config suite.tactical-pilot-matrix.json",
-    "test:suite:tactical-matrix": "node --import ./preload.mjs ./tournament.mjs --config suite.tactical-matrix.json"
+    "test:suite:tactical-matrix": "node --import ./preload.mjs ./tournament.mjs --config suite.tactical-matrix.json",
+    "test:suite:lategame": "node --import ./preload.mjs ./tournament.mjs --config suite.lategame.json",
+    "test:suite:entity-bench": "node --import ./preload.mjs ./tournament.mjs --config suite.entity-bench.json",
+    "test:direction-histogram": "node --import ./preload.mjs ./directionHistogram.test.mjs",
+    "test:find-path-golden": "node --import ./preload.mjs ./findPathGolden.test.mjs"
   },
   "keywords": [],
   "author": "",
