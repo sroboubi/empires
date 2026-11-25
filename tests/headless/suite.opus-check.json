@@ -1,0 +1,60 @@
+{
+  "name": "Opus check",
+  "id": "opus-check",
+  "description": "Small Opus validation run (3 AIs, map 64, no barbarians, 40 turns, seed 1000). Opus is not in the matrix rosters for cost reasons; this keeps it testable.",
+  "outputDir": "results",
+  "turns": 40,
+  "iterations": 1,
+  "seed": 1000,
+  "seedStrategy": "increment",
+  "concurrency": 1,
+  "timeoutMs": 3600000,
+  "progressMode": "auto",
+  "progressEveryTurns": 10,
+  "perRunReports": true,
+  "logPatterns": [
+    "\\[AiHelper\\]"
+  ],
+  "defaults": {
+    "winCondition": null,
+    "initialization": {
+      "orders": {
+        "max": 6,
+        "perTurn": 5
+      },
+      "startingResources": {
+        "food": 300,
+        "gems": 5,
+        "gold": 200,
+        "iron": 300,
+        "wood": 300
+      },
+      "startingUnits": {
+        "settler": 1,
+        "swordsman": 1,
+        "worker": 1
+      }
+    },
+    "barbarians": null
+  },
+  "players": [
+    {
+      "id": 1,
+      "name": "Opus",
+      "color": "#b07aa1",
+      "controller": "opus"
+    },
+    {
+      "id": 2,
+      "name": "Fable",
+      "color": "#59a14f",
+      "controller": "fable"
+    },
+    {
+      "id": 3,
+      "name": "Apex",
+      "color": "#f28e2b",
+      "controller": "apex"
+    }
+  ]
+}

@@ -69,12 +69,6 @@
       "name": "Hark",
       "color": "#edc948",
       "controller": "hark"
-    },
-    {
-      "id": 7,
-      "name": "Opus",
-      "color": "#b07aa1",
-      "controller": "opus"
     }
   ],
   "matrix": {

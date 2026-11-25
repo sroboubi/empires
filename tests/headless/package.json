@@ -20,7 +20,8 @@
     "test:suite:lategame": "node --import ./preload.mjs ./tournament.mjs --config suite.lategame.json",
     "test:suite:entity-bench": "node --import ./preload.mjs ./tournament.mjs --config suite.entity-bench.json",
     "test:direction-histogram": "node --import ./preload.mjs ./directionHistogram.test.mjs",
-    "test:find-path-golden": "node --import ./preload.mjs ./findPathGolden.test.mjs"
+    "test:find-path-golden": "node --import ./preload.mjs ./findPathGolden.test.mjs",
+    "test:suite:opus-check": "node --import ./preload.mjs ./tournament.mjs --config suite.opus-check.json"
   },
   "keywords": [],
   "author": "",
