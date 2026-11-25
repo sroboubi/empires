@@ -655,9 +655,9 @@ export class AiHelper {
     // allowDetours: true; it is A*, has no cap, and returns a
     // best-effort path when the target is unreachable.)
 
-    findPathTowardsUnexplored(explorer, gameState, player, targetedCells = new Set(), targetCells = null) {
+    findPathTowardsUnexplored(explorer, gameState, player, targetedCells = new Set(), targetCells = null, options = {}) {
         const grid = this.gameState?.hexGrid;
-        const empty = { targetCell: null, path: [], fullyExplored: false, arrivedAtBestReachable: true };
+        const empty = { targetCell: null, path: [], fullyExplored: false, arrivedAtBestReachable: true, directionEmpty: false };
         if (!grid || !explorer || !player) return empty;
 
         const startCell = explorer.cell || grid.getCell(explorer.q, explorer.r);
@@ -675,20 +675,41 @@ export class AiHelper {
         // unexplored count, then a full-map filter, then a map() for the key
         // set). On a 128 map that is ~49k cells per call, per explorer, per
         // turn — issue #72.
+        //
+        // options.direction builds the pool engine-side for one compass
+        // direction, so callers that explore "to the NE" no longer pull the
+        // whole map through the proxy just to filter it. The explored set is
+        // read from the raw player object, not the proxy.
+        const direction = options.direction || null;
+        const hasExplicitTargets = !!targetCells || !!direction;
+        const rawPlayer = direction
+            ? (this.gameState?.players?.find(p => String(p.id) === String(player.id)) || player)
+            : player;
         let pool;
         if (targetCells) {
             pool = targetCells.filter(c => c && !ignore.has(`${c.q},${c.r}`));
+        } else if (direction) {
+            pool = [];
+            for (const cell of grid.cells.values()) {
+                if (!cell || rawPlayer.isExplored(cell.q, cell.r)) continue;
+                if (ignore.has(`${cell.q},${cell.r}`)) continue;
+                if (HexGrid.directionName(startCell, cell) !== direction) continue;
+                pool.push(cell);
+            }
+            if (pool.length === 0) {
+                return { targetCell: null, path: [], fullyExplored: false, arrivedAtBestReachable: true, directionEmpty: true };
+            }
         } else {
             const allCells = this.getCellsArray();
             let unexploredCount = 0;
             pool = [];
             for (const c of allCells) {
-                if (!c || player.isExplored(c.q, c.r)) continue;
+                if (!c || rawPlayer.isExplored(c.q, c.r)) continue;
                 unexploredCount++;
                 if (!ignore.has(`${c.q},${c.r}`)) pool.push(c);
             }
             if (unexploredCount === 0) {
-                return { targetCell: null, path: [], fullyExplored: true, arrivedAtBestReachable: true };
+                return { targetCell: null, path: [], fullyExplored: true, arrivedAtBestReachable: true, directionEmpty: false };
             }
         }
         if (pool.length === 0) return empty;
@@ -705,7 +726,6 @@ export class AiHelper {
 
         const queue = [{ key: startKey, cell: startCell }];
         let head = 0;
-        const directTargets = [];
         const borderTargets = [];
 
         const pathTo = (key) => {
@@ -725,13 +745,18 @@ export class AiHelper {
                 const nbKey = `${nb.q},${nb.r}`;
                 if (poolKeys.has(nbKey)) {
                     if (Number.isFinite(explorer.getMovementCost(nb)) && !nodes.has(nbKey)) {
-                        directTargets.push({
+                        // BFS discovers in distance order, so the first direct
+                        // target is the shortest one (ties: earliest discovered,
+                        // same as the old stable sort). Return immediately
+                        // instead of collecting the whole set and sorting it.
+                        return {
                             targetCell: nb,
-                            key: nbKey,
-                            dist: curNode.dist + 1,
                             path: [...pathTo(cur.key), nb],
-                        });
-                    } else if (!targetCells) {
+                            fullyExplored: false,
+                            arrivedAtBestReachable: false,
+                            directionEmpty: false,
+                        };
+                    } else if (!hasExplicitTargets) {
                         borderTargets.push({
                             targetCell: nb,
                             key: cur.key,
@@ -751,18 +776,12 @@ export class AiHelper {
             }
         }
 
-        if (directTargets.length > 0) {
-            directTargets.sort((a, b) => a.dist - b.dist);
-            const best = directTargets[0];
-            return { targetCell: best.targetCell, path: best.path, fullyExplored: false, arrivedAtBestReachable: false };
-        }
-
-        if (!targetCells) {
+        if (!hasExplicitTargets) {
             const validBorderTargets = borderTargets.filter(b => b.dist > 0);
             if (validBorderTargets.length > 0) {
                 validBorderTargets.sort((a, b) => a.dist - b.dist);
                 const best = validBorderTargets[0];
-                return { targetCell: best.targetCell, path: pathTo(best.key), fullyExplored: false, arrivedAtBestReachable: false };
+                return { targetCell: best.targetCell, path: pathTo(best.key), fullyExplored: false, arrivedAtBestReachable: false, directionEmpty: false };
             }
         }
 
@@ -791,11 +810,11 @@ export class AiHelper {
         if (bestReachable && nodes.get(bestReachable.key).dist > 0) {
             const path = pathTo(bestReachable.key);
             if (path.length > 0) {
-                return { targetCell: chosenTarget, path, fullyExplored: false, arrivedAtBestReachable: false };
+                return { targetCell: chosenTarget, path, fullyExplored: false, arrivedAtBestReachable: false, directionEmpty: false };
             }
         }
 
-        return { targetCell: chosenTarget, path: [], fullyExplored: false, arrivedAtBestReachable: true };
+        return { targetCell: chosenTarget, path: [], fullyExplored: false, arrivedAtBestReachable: true, directionEmpty: false };
     }
 
     /**

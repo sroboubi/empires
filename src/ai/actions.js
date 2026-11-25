@@ -479,11 +479,20 @@ export class ActionApi {
             else if (Array.isArray(targetedCells)) targetedCells.push(targetCell);
         };
 
-        const doExplore = (targetCells, reason) => {
-            const res = this.helper.findPathTowardsUnexplored(unit, this.gameState, player, targetedCells, targetCells);
+        const doExplore = (targetCells, reason, direction = null) => {
+            const res = this.helper.findPathTowardsUnexplored(
+                unit, this.gameState, player, targetedCells, targetCells,
+                direction ? { direction } : undefined
+            );
             if (res.fullyExplored) {
                 this.helper.aiLog(player || 'AI', 'explore', `All map territory is fully explored.`);
                 return fail('Map is fully explored.');
+            }
+            // The direction is filtered engine-side (issue #72): the caller no
+            // longer pulls the whole cell array through the proxy to build it.
+            if (res.directionEmpty) {
+                this.helper.aiLog(player || 'AI', 'explore', `No unexplored cells to the ${direction}.`);
+                return fail(`No unexplored cells to the ${direction}.`);
             }
             if (!res.targetCell || !res.path || res.path.length === 0) return fail('No reachable unexplored cell.');
             const used = this.moveAlongPath(unit, moveAction, res.path, 'explore', reason);
@@ -515,20 +524,10 @@ export class ActionApi {
                 this.helper.aiLog(player || 'AI', 'warn', `explore: unknown direction "${direction}" (expected one of ${DIRECTIONS_8.join(', ')}).`);
                 return fail(`Unknown direction "${direction}".`);
             }
-            const fromCell = unit.cell || this.gameState.hexGrid.getCell(unit.q, unit.r);
-            const targets = [];
-            for (const cell of this.helper.getCellsArray()) {
-                if (!cell) continue;
-                if (player && player.isExplored(cell.q, cell.r)) continue;
-                if (this.helper.directionTo(fromCell, cell).fromSource === direction) targets.push(cell);
-            }
-            if (targets.length === 0) {
-                this.helper.aiLog(player || 'AI', 'explore', `No unexplored cells to the ${direction}.`);
-                // G7: return a result object like every other path, not 0 —
-                // callers read res.result.status.
-                return fail(`No unexplored cells to the ${direction}.`);
-            }
-            return doExplore(targets, `to the ${direction}`);
+            // Previously: getCellsArray() (proxy-wrapped whole map) + isExplored
+            // + directionTo per cell, on every explore call — 94% of which fail
+            // late game. The helper now filters by direction engine-side.
+            return doExplore(null, `to the ${direction}`, direction);
         }
 
         return doExplore(null, 'towards unexplored territory');
