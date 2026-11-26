@@ -54,6 +54,8 @@ const DEFAULT_CONFIG = {
     capacityBoost: 2.5,
     exploreScale: 1,
     noDirectiveStance: 'offensive', // stance toward rivals when no director/config directive exists
+    marchMinUnits: 4,       // army size before it marches out
+    gatherRadius: 5,        // units further than this from the army centroid wait to regroup
     verbose: 0,
     maxIterations: 70,
     exploreFraction: 0.6,   // share of the T-value one frontier explored is worth, tuned by score pillar
@@ -85,7 +87,8 @@ export default class KestrelAI extends BaseManager {
         const raw = player.controller?.config || {};
         this.cfg = { ...DEFAULT_CONFIG };
         for (const k of Object.keys(DEFAULT_CONFIG)) {
-            if (typeof raw[k] === 'number' && Number.isFinite(raw[k])) this.cfg[k] = raw[k];
+            const dv = DEFAULT_CONFIG[k];
+            if (typeof raw[k] === typeof dv && (typeof dv !== 'number' || Number.isFinite(raw[k]))) this.cfg[k] = raw[k];
         }
         this.defs = null;
         this.mem = {
@@ -175,7 +178,6 @@ export default class KestrelAI extends BaseManager {
         return d * (hp ?? def.health ?? 1) * (1 + 0.25 * (armor - 1)) * (def.range ? 1.15 : 1);
     }
 
-    scoreOf(def) { return (def.score?.military || 0) + (def.score?.economic || 0); }
 
     // ------------------------------------------------------------------ per-turn refresh
     refresh() {
@@ -198,11 +200,23 @@ export default class KestrelAI extends BaseManager {
             if (visible.has(k) && (!here || here.id !== id)) this.mem.seen.delete(id);
             else if (s.mobile && round - s.round > 6) this.mem.seen.delete(id);
         }
-        this.army = this.mine.filter(u => u.mobile && u.attack && u.dmg >= this.minArmyDamage() && !u.builds.size);
+        this.army = this.mine.filter(u => u.mobile && u.attack && this.isFighter(u.def) && !u.builds.size);
         this.armyIds = new Set(this.army.map(u => u.id));
         this.structs = this.mine.filter(u => !u.mobile);
         this.computeEconomy();
         this.rankRivals();
+    }
+
+    /** A mobile, non-building unit that is meant to fight: strong hit, or a military score near the top (keeps assassins in, scouts out). */
+    isFighter(d) {
+        if (!d || !d.movement || d.buildables?.length || !(d.damage?.value > 0)) return false;
+        if (d.damage.value >= this.minArmyDamage()) return true;
+        if (this._maxMil === undefined) {
+            let mx = 0;
+            for (const x of Object.values(this.defs)) if (x.movement && !(x.buildables?.length) && x.damage?.value > 0) mx = Math.max(mx, x.score?.military || 0);
+            this._maxMil = mx;
+        }
+        return this._maxMil > 0 && (d.score?.military || 0) >= 0.5 * this._maxMil;
     }
 
     minArmyDamage() {
@@ -275,14 +289,16 @@ export default class KestrelAI extends BaseManager {
         this.mem.claimed = new Set();
         this._dbgDone = false;
         this.pathCache = new Map();
+        this.walkCache = new Map();
         this.siteCache = new Map();
+        this._siteDirty = false;
         const round = this.gameState.currentRound;
         this.observeAttacks(round);
         const start = P.orders;
         let iter = 0;
         while (P.orders > this.cfg.reserveOrders && iter++ < this.cfg.maxIterations) {
             this.refresh();
-            this.siteCache = new Map();
+            if (this._siteDirty) { this.siteCache = new Map(); this._siteDirty = false; } // site search only changes when something was built
             const cands = [];
             this.defendCands(cands);
             this.attackCands(cands);
@@ -299,6 +315,7 @@ export default class KestrelAI extends BaseManager {
             }
             if (!best) break;
             const before = P.orders;
+            if (best.kind === 'build') this._siteDirty = true;
             try {
                 await best.exec();
             } catch (err) {
@@ -342,8 +359,8 @@ export default class KestrelAI extends BaseManager {
         }
         const ordersPts = (d.ordersPerTurn || 0) * this.cfg.growth * this.T / this.opt * 0.8;
         let mil = 0;
-        if (d.movement && d.damage?.value >= this.minArmyDamage() && !(d.buildables?.length)) mil = this.armyBonus(type);
-        else if (d.movement && !(d.buildables?.length) && !d.repairables && !(d.damage?.value >= this.minArmyDamage())) mil = this.explorerBonus(d);
+        if (this.isFighter(d)) mil = this.armyBonus(type);
+        else if (d.movement && !(d.buildables?.length) && !d.repairables && !this.isFighter(d)) mil = this.explorerBonus(d);
         const cost = this.budgetPts * this.resFrac(d.spawnCost) + this.cfg.growth * this.T / (this.cfg.horizon * this.opt);
         return { value: gain + yieldPts - upkeepPts + ordersPts + mil - cost, gain, yieldPts, upkeepPts, ordersPts, mil, cost };
     }
@@ -369,7 +386,7 @@ export default class KestrelAI extends BaseManager {
     /** Extra value of a mobile non-fighting, non-building unit that can explore. */
     explorerBonus(d) {
         let n = 0;
-        for (const u of this.mine) if (u.mobile && !u.builds.size && !u.repair && u.dmg < this.minArmyDamage()) n++;
+        for (const u of this.mine) if (u.mobile && !u.builds.size && !u.repair && !this.isFighter(u.def)) n++;
         return this.exploreMovePts(d.maxActionPoints, d.sightRange) * this.cfg.horizon * 0.4 / (1 + n);
     }
 
@@ -388,9 +405,9 @@ export default class KestrelAI extends BaseManager {
     desiredArmyPower() {
         if (this._want && this._wantRound === this.gameState.currentRound) return this._want;
         let ref = 0;
-        for (const d of Object.values(this.defs)) if (d.movement && d.damage?.value >= this.minArmyDamage() && !(d.buildables?.length)) ref = Math.max(ref, this.power(d, d.health));
+        for (const d of Object.values(this.defs)) if (this.isFighter(d)) ref = Math.max(ref, this.power(d, d.health));
         let enemy = 0;
-        for (const f of this.foreign) if (f.mobile && f.dmg >= this.minArmyDamage()) enemy += this.power(f.def, f.hp);
+        for (const f of this.foreign) if (f.mobile && this.isFighter(f.def)) enemy += this.power(f.def, f.hp);
         const round = this.gameState.currentRound;
         this._want = Math.max(ref * 1.5, this.cfg.rivalPowerFactor * enemy, ref * this.cfg.armyPerRound * round);
         this._wantRound = round;
@@ -710,7 +727,7 @@ export default class KestrelAI extends BaseManager {
         for (const u of list) {
             if (!u.dmg) continue;
             if (ownerSide === 'mine' && !this.armyIds.has(u.id)) continue;
-            if (hexDist(u.x ?? u.q, u.y ?? u.r, q, r) <= rad) p += this.power(u.def, u.hp);
+            if (hexDist(u.q, u.r, q, r) <= rad) p += this.power(u.def, u.hp);
         }
         return p;
     }
@@ -721,12 +738,29 @@ export default class KestrelAI extends BaseManager {
         return ((dmg.value || 0) + (dmg.lifeFraction || 0) * t.hp) / armor;
     }
 
+    /** Can this unit walk to (q,r) at all (any number of turns)? Cached per turn. Water or mountain barriers make a rival unreachable for land units. */
+    walkable(u, q, r) {
+        const key = `${u.name}:${u.q},${u.r}>${q},${r}`;
+        if (!this.walkCache) this.walkCache = new Map();
+        if (this.walkCache.has(key)) return this.walkCache.get(key);
+        let ok = false;
+        try {
+            const cell = this.helper.getCell(q, r);
+            const res = cell && this.helper.movementCostTo(u.e.cell, cell, u.e.getMovementCost.bind(u.e), { allowDetours: true });
+            const last = res && res.path && res.path[res.path.length - 1];
+            ok = !!last && last.q === q && last.r === r;
+        } catch (err) { ok = false; }
+        this.walkCache.set(key, ok);
+        return ok;
+    }
+
     /** Estimated AP cost to attack `t` (move adjacent/in range + first hit). null if clearly out of reach this turn. */
     reachInfo(u, t) {
-        const ck = `${u.id}:${t.id}:${u.q},${u.r}`;
+        const ck = `${u.id}:${t.id}:${u.q},${u.r}:${u.ap}:${Math.round(t.hp)}`;
         if (this.pathCache.has(ck)) return this.pathCache.get(ck);
         let info = null;
         const dist = hexDist(u.q, u.r, t.q, t.r);
+        if (!u.def.range && dist > 1 && !this.walkable(u, t.q, t.r)) { this.pathCache.set(ck, null); return null; }
         const lo = u.def.range ? (u.def.range.minCells || 1) : 1;
         const hi = u.range;
         const scale = u.def.attackCostScale ?? 1;
@@ -807,8 +841,13 @@ export default class KestrelAI extends BaseManager {
     async execAttack(u, t, orders, value, team) {
         const from = `(${u.q},${u.r})`;
         const hpBefore = t.e.health;
+        let dbg = '';
+        if (this.cfg.verbose) {
+            const pr = this.helper.movementCostTo(u.e.cell, t.e.cell, u.e.getMovementCost.bind(u.e), { allowDetours: true });
+            dbg = ` [path ${pr && pr.path ? pr.path.length + ' cells cost ' + Math.round(pr.cost ?? pr.totalCost ?? -1) : 'none'}, target terrain ${t.e.cell?.terrain?.name}]`;
+        }
         const res = await this.actions.attack(u.e, t.e, orders);
-        this.log(`ATTACK ${this.label(t)} with ${u.name}#${sid(u.id)} from ${from} (value ${value.toFixed(1)}, team est. ${Math.round(team)} vs ${Math.round(hpBefore)} hp): ${res?.result?.message} [hp ${Math.round(hpBefore)} -> ${t.e.destroyed ? 0 : Math.round(t.e.health)}]`);
+        this.log(`ATTACK ${this.label(t)} with ${u.name}#${sid(u.id)} from ${from} (value ${value.toFixed(1)}, team est. ${Math.round(team)} vs ${Math.round(hpBefore)} hp): ${res?.result?.message} [hp ${Math.round(hpBefore)} -> ${t.e.destroyed ? 0 : Math.round(t.e.health)}]${dbg}`);
         return res?.ordersUsed || 0;
     }
 
@@ -832,8 +871,9 @@ export default class KestrelAI extends BaseManager {
     }
 
     marchCands(out) {
-        if (this.army.length < 2) return;
-        const known = this.knownTargets();
+        if (this.army.length < this.cfg.marchMinUnits) return; // lone units trickling in die piecemeal
+        const probe = this.army.find(u => u.move);
+        const known = this.knownTargets().filter(k => !probe || probe.def.range || this.walkable(probe, k.q, k.r));
         if (!known.length) return;
         const c = this.centroid(this.army);
         // choose the target site by value per distance
@@ -846,6 +886,13 @@ export default class KestrelAI extends BaseManager {
             if (!best || sc > best.sc) best = { s, val, dist, sc };
         }
         if (!best) return;
+        // commitment: keep the site chosen last time while the push is on, so the group does not dither between targets
+        const round = this.gameState.currentRound;
+        const pushing = this.mem.march && round - this.mem.march.round <= 6;
+        if (pushing) {
+            const keep = known.find(k => k.q === this.mem.march.q && k.r === this.mem.march.r);
+            if (keep) best = { ...best, s: keep, dist: hexDist(c.q, c.r, keep.q, keep.r) };
+        }
         // estimated defence at the target
         let defence = 0;
         for (const s of known) {
@@ -857,10 +904,11 @@ export default class KestrelAI extends BaseManager {
         for (const u of this.army) have += this.power(u.def, u.hp);
         this.marchTarget = best.s;
         if (best.dist <= 1) return;
-        if (have < this.cfg.marchRatio * defence) return;
+        if (have < (pushing ? 0.8 : 1) * this.cfg.marchRatio * defence) return;
         // healthy units only
-        const ready = this.army.filter(u => u.active && u.move && u.ap >= u.maxAp * 0.6 && u.hp >= u.maxHp * 0.5 && hexDist(u.q, u.r, best.s.q, best.s.r) > 1);
-        if (ready.length < Math.max(2, Math.ceil(this.army.length * 0.6))) return;
+        const ready = this.army.filter(u => u.active && u.move && u.ap >= u.maxAp * 0.6 && u.hp >= u.maxHp * 0.5 && hexDist(u.q, u.r, best.s.q, best.s.r) > 1 && hexDist(u.q, u.r, c.q, c.r) <= this.cfg.gatherRadius);
+        if (ready.length < Math.max(2, Math.ceil(this.army.length * (pushing ? 0.4 : 0.6)))) return;
+        this.mem.march = { round, q: best.s.q, r: best.s.r };
         const slow = Math.min(...ready.map(u => u.maxAp));
         const value = this.cfg.marchDrive * best.val * Math.min(1, best.dist / 6 + 0.3);
         // one candidate per unit: the whole group moves, value spread over its units
@@ -881,14 +929,12 @@ export default class KestrelAI extends BaseManager {
         if (!res || !res.path || res.path.length < 2) return 0;
         // do not outrun the group: stop within `slow` AP of the group centroid
         const path = [];
-        let acc = 0;
         for (let i = 1; i < res.path.length; i++) {
             const cell = res.path[i];
             if (cell.q === goal.q && cell.r === goal.r) break;
             const d = hexDist(cell.q, cell.r, centroid.q, centroid.r);
             if (d > slow + 1 && path.length) break;
             path.push(cell);
-            acc++;
         }
         if (!path.length) return 0;
         const used = this.actions.moveAlongPath(u.e, u.move, path, 'combat', `marching on ${this.ownerName(goal.ownerId)} ${goal.name} at (${goal.q},${goal.r})`);
@@ -945,6 +991,7 @@ export default class KestrelAI extends BaseManager {
         const idle = [];
         for (const u of this.army) {
             if (!u.active || !u.move || u.ap < 1) continue;
+            if (this.mem.march && this.gameState.currentRound - this.mem.march.round <= 2 && u.hp >= u.maxHp * 0.5) continue; // on a push
             const here = K(u.q, u.r);
             if (rally.some(c => c.k === here)) { taken.add(here); continue; }
             idle.push(u);
@@ -955,7 +1002,6 @@ export default class KestrelAI extends BaseManager {
             let pick = null;
             for (const c of rally) {
                 if (taken.has(c.k) || this.occ.has(c.k)) continue;
-                if (!this.canStand(u.def, c.cell)) continue;
                 const d = hexDist(u.q, u.r, c.q, c.r);
                 const s = c.sc - d * 0.15;
                 if (!pick || s > pick.s) pick = { c, s };
@@ -969,11 +1015,6 @@ export default class KestrelAI extends BaseManager {
                 exec: () => this.execGuard(u, pick.c, val),
             });
         }
-    }
-
-    canStand(def, cell) {
-        const t = def.spawnConditions?.terrain;
-        return !t || t.some(n => n.toLowerCase() === String(cell.terrain?.name).toLowerCase());
     }
 
     async execGuard(u, c, value) {
