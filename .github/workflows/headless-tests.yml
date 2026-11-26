@@ -1,0 +1,61 @@
+name: headless tests
+
+# Fast, deterministic Node checks: the headless game-logic harness, the
+# focused headless scripts, and the standalone root + src/ai test files.
+# The local (Chromium) and Modal suites are intentionally excluded — they
+# need a browser / paid cloud browser and run manually (see tests/README.md).
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: headless-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+
+      - name: Install headless test dependencies
+        working-directory: tests/headless
+        run: npm ci
+
+      - name: Headless harness (5-turn game, save/load round-trip)
+        working-directory: tests/headless
+        run: npm test
+
+      - name: Focused headless tests
+        working-directory: tests/headless
+        run: |
+          npm run test:helper-routing
+          npm run test:strike-dedupe
+          npm run test:review-findings
+          npm run test:review-controller-typo
+          npm run test:opus-forbidden-init
+          npm run test:direction-histogram
+          npm run test:find-path-golden
+
+      - name: Root tests (engine-level, via headless preload)
+        run: |
+          node --import=./tests/headless/preload.mjs --input-type=module -e "import('./tests/buildSiteIndex.test.js')"
+          node --import=./tests/headless/preload.mjs --input-type=module -e "import('./tests/leaderAttributes.test.js')"
+
+      - name: src/ai tests (via headless preload)
+        run: |
+          node --import=./tests/headless/preload.mjs --input-type=module -e "import('./src/ai/tests/markdown.test.js')"
+          node --import=./tests/headless/preload.mjs --input-type=module -e "import('./src/ai/tests/chatEmote.test.js')"
+          node --import=./tests/headless/preload.mjs --input-type=module -e "import('./src/ai/tests/adjustedView.test.js')"
+          node --import=./tests/headless/preload.mjs --input-type=module -e "import('./src/ai/tests/menu.test.js')"
+          node --import=./tests/headless/preload.mjs --input-type=module -e "import('./src/ai/tests/strategic.test.js')"
