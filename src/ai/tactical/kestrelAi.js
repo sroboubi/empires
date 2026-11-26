@@ -1,3 +1,4 @@
+import { adjustedView, adjustedEntityView } from '../adjustedView.js';
 import { BaseManager } from '../baseManager.js';
 
 /**
@@ -52,6 +53,7 @@ const DEFAULT_CONFIG = {
     minCharges: 4,
     capacityBoost: 2.5,
     exploreScale: 1,
+    noDirectiveStance: 'offensive', // stance toward rivals when no director/config directive exists
     verbose: 0,
     maxIterations: 70,
     exploreFraction: 0.6,   // share of the T-value one frontier explored is worth, tuned by score pillar
@@ -109,7 +111,13 @@ export default class KestrelAI extends BaseManager {
     // ------------------------------------------------------------------ static data
     loadStatic() {
         const m = this.gameState.manifestData || {};
-        this.defs = plainCopy(m.entities || {});
+        this.rawDefs = plainCopy(m.entities || {});
+        // Leader twists: the acting player's catalog comes through the Player value functions
+        this.defs = {};
+        for (const [n, d] of Object.entries(this.rawDefs)) {
+            const a = adjustedView(this.player, d, n);
+            this.defs[n] = a ? plainCopy(a) : d;
+        }
         const names = new Set();
         for (const d of Object.values(this.defs)) {
             for (const f of ['spawnCost', 'maintenance', 'yields']) for (const r of Object.keys(d[f] || {})) names.add(r);
@@ -135,7 +143,10 @@ export default class KestrelAI extends BaseManager {
 
     // ------------------------------------------------------------------ views
     view(e, own) {
-        const def = this.defs[e.name] || plainCopy(e.data || {});
+        const base = this.rawDefs[e.name] || plainCopy(e.data || {});
+        // visible entity instances, including rivals', expose their real-owner adjusted numbers
+        let def = base;
+        try { def = adjustedEntityView(e, base) || base; } catch (err) { def = base; }
         const v = {
             e, own, def, id: e.id, name: e.name, q: e.q, r: e.r,
             hp: e.health, maxHp: e.maxHealth, active: e.active,
@@ -238,11 +249,12 @@ export default class KestrelAI extends BaseManager {
         this.leaderId = rivals.length ? rivals[0].id : null;
         // target: the highest-score rival we know something about (else the highest)
         this.targetId = null;
-        for (const r of rivals) {
+        const eligible = rivals.filter(r => this.mayInitiate(r.id));
+        for (const r of eligible) {
             for (const s of this.mem.seen.values()) if (s.ownerId === r.id) { this.targetId = r.id; break; }
             if (this.targetId !== null) break;
         }
-        if (this.targetId === null && rivals.length) this.targetId = rivals[0].id;
+        if (this.targetId === null && eligible.length) this.targetId = eligible[0].id;
     }
 
     // ------------------------------------------------------------------ valuation helpers
@@ -637,9 +649,36 @@ export default class KestrelAI extends BaseManager {
     }
 
     // ------------------------------------------------------------------ combat
+    /** Directive set by a director or the config (same lookup as the other tactical AIs), or null. */
+    getDirective() {
+        const controller = this.player.controller || {};
+        const config = controller.config || {};
+        return controller.directive || config.directive || config.aiDirective || null;
+    }
+
+    /** Stance toward a player: friendly/ally, neutral, caution, defensive, offensive. Ownerless = barbarians. */
+    stanceOf(ownerId) {
+        if (ownerId === null || ownerId === undefined) return 'defensive';
+        const dir = this.getDirective();
+        if (!dir) return this.cfg.noDirectiveStance; // no director: the configured default (aggressive by design)
+        const map = dir.stance || {};
+        return map[ownerId] || map[String(ownerId)] || 'neutral';
+    }
+
+    peaceful(ownerId) {
+        const st = this.stanceOf(ownerId);
+        return st === 'friendly' || st === 'ally';
+    }
+
+    /** May we start a fight with this owner? Only with an offensive stance; neutral is defence only. */
+    mayInitiate(ownerId) {
+        return ownerId !== null && this.stanceOf(ownerId) === 'offensive';
+    }
+
     isHostile(f) {
         if (f.ownerId === null) return true; // barbarians and other ownerless units
-        if (f.ownerId === this.targetId || f.ownerId === this.leaderId) return true;
+        if (this.peaceful(f.ownerId)) return false; // a negotiated peace is never broken
+        if (this.mayInitiate(f.ownerId) && (f.ownerId === this.targetId || f.ownerId === this.leaderId)) return true;
         const last = this.mem.attackedBy.get(f.ownerId);
         if (last !== undefined && this.gameState.currentRound - last <= 6) return true;
         return false;
