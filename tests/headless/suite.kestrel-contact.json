@@ -1,0 +1,59 @@
+{
+  "name": "kestrel-contact",
+  "id": "kestrel-contact",
+  "description": "Kestrel vs Opus on map 24, 60 turns, 2 seeds: forces contact so march, rally and attack code runs.",
+  "outputDir": "results",
+  "turns": 60,
+  "iterations": 2,
+  "seed": 3400,
+  "seedStrategy": "increment",
+  "concurrency": 1,
+  "timeoutMs": 3600000,
+  "progressMode": "lines",
+  "progressEveryTurns": 10,
+  "perRunReports": true,
+  "logPatterns": [
+    "\\[Kestrel [^\\]]* R\\d+\\] (turn end|ERROR|MARCH|ATTACK)"
+  ],
+  "defaults": {
+    "winCondition": null,
+    "initialization": {
+      "orders": {
+        "max": 6,
+        "perTurn": 5
+      },
+      "startingResources": {
+        "food": 300,
+        "gems": 5,
+        "gold": 200,
+        "iron": 300,
+        "wood": 300
+      },
+      "startingUnits": {
+        "settler": 1,
+        "swordsman": 1,
+        "worker": 1
+      }
+    },
+    "barbarians": null,
+    "mapSize": 24
+  },
+  "players": [
+    {
+      "id": 1,
+      "name": "Kestrel",
+      "color": "#e15759",
+      "controller": "kestrel",
+      "controllerConfig": {
+        "armyWeight": 0.6
+      }
+    },
+    {
+      "id": 2,
+      "name": "Opus",
+      "color": "#b07aa1",
+      "controller": "opus"
+    }
+  ],
+  "barbarians": null
+}

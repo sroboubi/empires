@@ -315,14 +315,14 @@ export default class KestrelAI extends BaseManager {
             }
             if (!best) break;
             const before = P.orders;
-            if (best.kind === 'build') this._siteDirty = true;
             try {
                 await best.exec();
             } catch (err) {
                 this.log(`ERROR executing ${best.key}: ${err?.message || err}`);
             }
-            if (!(P.orders < before)) this.failed.add(best.key);
-            else await this.helper.onActionDone(this.gameState, null, best.key);
+            if (!(P.orders < before)) { this.failed.add(best.key); if (best.kind === 'build') this._siteDirty = true; }
+            else if (best.kind !== 'explore' && best.kind !== 'repair') this._siteDirty = true; // builds, moves and fights change occupancy and what sites exist
+            if (P.orders < before) await this.helper.onActionDone(this.gameState, null, best.key);
         }
         const sc = P.score || {};
         this.log(`turn end: used ${start - P.orders} of ${start} orders | army ${this.army ? this.army.length : 0} | target ${this.ownerName(this.targetId)} | score M${sc.military} E${sc.economic} X${sc.exploration} T${sc.total}`);
@@ -760,11 +760,12 @@ export default class KestrelAI extends BaseManager {
         if (this.pathCache.has(ck)) return this.pathCache.get(ck);
         let info = null;
         const dist = hexDist(u.q, u.r, t.q, t.r);
-        if (!u.def.range && dist > 1 && !this.walkable(u, t.q, t.r)) { this.pathCache.set(ck, null); return null; }
         const lo = u.def.range ? (u.def.range.minCells || 1) : 1;
         const hi = u.range;
         const scale = u.def.attackCostScale ?? 1;
         const maxSteps = (u.def.movement ? u.ap : 0) + hi;
+        // the (expensive) walkability pathfind runs only for targets already within a turn's reach
+        if (dist <= maxSteps + 1 && !u.def.range && dist > 1 && !this.walkable(u, t.q, t.r)) { this.pathCache.set(ck, null); return null; }
         if (dist <= maxSteps + 1) {
             if (dist >= lo && dist <= hi) {
                 const cost = Math.ceil(scale * dist);
@@ -878,12 +879,15 @@ export default class KestrelAI extends BaseManager {
         const c = this.centroid(this.army);
         // choose the target site by value per distance
         let best = null;
-        for (const s of known) {
+        const rate = (s) => {
             const def = s.def || this.defs[s.name] || {};
             const val = this.targetPts({ def, ownerId: s.ownerId, mobile: !!def.movement, dmg: def.damage?.value || 0, hp: s.hp ?? def.health ?? 1, q: s.q, r: s.r, maxAp: def.maxActionPoints || 0 });
             const dist = hexDist(c.q, c.r, s.q, s.r);
-            const sc = val / (3 + dist);
-            if (!best || sc > best.sc) best = { s, val, dist, sc };
+            return { s, val, dist, sc: val / (3 + dist) };
+        };
+        for (const s of known) {
+            const r = rate(s);
+            if (!best || r.sc > best.sc) best = r;
         }
         if (!best) return;
         // commitment: keep the site chosen last time while the push is on, so the group does not dither between targets
@@ -891,7 +895,7 @@ export default class KestrelAI extends BaseManager {
         const pushing = this.mem.march && round - this.mem.march.round <= 6;
         if (pushing) {
             const keep = known.find(k => k.q === this.mem.march.q && k.r === this.mem.march.r);
-            if (keep) best = { ...best, s: keep, dist: hexDist(c.q, c.r, keep.q, keep.r) };
+            if (keep) best = rate(keep); // re-score the kept site so value and priority describe the site we actually march on
         }
         // estimated defence at the target
         let defence = 0;
@@ -908,7 +912,6 @@ export default class KestrelAI extends BaseManager {
         // healthy units only
         const ready = this.army.filter(u => u.active && u.move && u.ap >= u.maxAp * 0.6 && u.hp >= u.maxHp * 0.5 && hexDist(u.q, u.r, best.s.q, best.s.r) > 1 && hexDist(u.q, u.r, c.q, c.r) <= this.cfg.gatherRadius);
         if (ready.length < Math.max(2, Math.ceil(this.army.length * (pushing ? 0.4 : 0.6)))) return;
-        this.mem.march = { round, q: best.s.q, r: best.s.r };
         const slow = Math.min(...ready.map(u => u.maxAp));
         const value = this.cfg.marchDrive * best.val * Math.min(1, best.dist / 6 + 0.3);
         // one candidate per unit: the whole group moves, value spread over its units
@@ -938,6 +941,7 @@ export default class KestrelAI extends BaseManager {
         }
         if (!path.length) return 0;
         const used = this.actions.moveAlongPath(u.e, u.move, path, 'combat', `marching on ${this.ownerName(goal.ownerId)} ${goal.name} at (${goal.q},${goal.r})`);
+        if (used) this.mem.march = { round: this.gameState.currentRound, q: goal.q, r: goal.r };
         if (used) this.log(`MARCH ${u.name}#${sid(u.id)} ${from} -> (${u.e.q},${u.e.r}) toward ${this.ownerName(goal.ownerId)} ${goal.name}@(${goal.q},${goal.r}) value ${value.toFixed(2)}`);
         return used;
     }
