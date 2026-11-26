@@ -38,7 +38,7 @@ const DEFAULT_CONFIG = {
     chainDepth: 3,          // max depth of builder chains (hint 10)
     chainDiscount: 0.6,     // value kept per enabler step
     repairBelow: 0.55,      // heavily damaged fraction (hint 16)
-    armyWeight: 0.5,        // value of closing the gap to the desired army power
+    armyWeight: 0.1,        // value of closing the gap to the desired army power
     armyPerRound: 0.12,     // desired army power grows with the round (fraction of a mid unit per round)
     rivalPowerFactor: 1.3,  // desired army power relative to the strongest visible rival army
     leaderWeight: 1.0,      // value of one score point removed from the leading rival, relative to one of ours
@@ -49,6 +49,8 @@ const DEFAULT_CONFIG = {
     guardValue: 0.015,      // value (fraction of T) of positioning a unit on its rally cell
     marchDrive: 0.35,       // value of a march step as a share of the target's value
     reserveOrders: 0,       // orders kept back (never spent)
+    minCharges: 4,
+    capacityBoost: 2.5,
     verbose: 0,
     maxIterations: 70,
     exploreFraction: 0.6,   // share of the T-value one frontier explored is worth, tuned by score pillar
@@ -423,6 +425,7 @@ export default class KestrelAI extends BaseManager {
         }
         // enabler chains: types nobody can build now pass a share of their value to the types that lead to them
         const enabled = new Map();
+        const enabledList = new Map();
         for (const [t, o] of opts) {
             if (o.builders.length || !(o.g.value > 0)) continue;
             const walk = (type, depth, val, seen) => {
@@ -432,11 +435,20 @@ export default class KestrelAI extends BaseManager {
                     const bo = opts.get(bn);
                     if (!bo) continue;
                     const v2 = val * this.cfg.chainDiscount;
-                    if (bo.builders.length) { enabled.set(bn, Math.max(enabled.get(bn) || 0, v2)); }
+                    if (bo.builders.length) { if (!enabledList.has(bn)) enabledList.set(bn, []); enabledList.get(bn).push(v2); }
                     else walk(bn, depth + 1, v2, new Set([...seen, bn]));
                 }
             };
             walk(t, 1, o.g.value, new Set([t]));
+        }
+        // a builder with limited charges is worth the sum of the best jobs it will do
+        for (const [bn, list] of enabledList) {
+            list.sort((a, b) => b - a);
+            const charges = this.defs[bn]?.buildCharges;
+            const k = Number.isFinite(charges) && charges > 0 ? charges : list.length;
+            let sum = 0;
+            for (let i = 0; i < Math.min(k, list.length); i++) sum += list[i];
+            enabled.set(bn, sum);
         }
         // reserve: the best unaffordable build we can pay for soon
         const stock = this.eco.stock;
@@ -470,6 +482,8 @@ export default class KestrelAI extends BaseManager {
                 for (const r of Object.keys(d.yields || {})) if (crit.has(r)) helps = true;
                 if (helps) val *= 3; else if (o.g.upkeepPts > 0) val *= 0.2;
             }
+            // builder capacity: low on build charges means orders go idle; make more of the builder types
+            if (d.movement && d.buildables?.length && this.chargesLeft() < this.cfg.minCharges) val = Math.max(val, 0) * this.cfg.capacityBoost + this.T * 0.05;
             if (!(val > 0)) continue;
             if (!afford(d.spawnCost)) continue;
             if (!this.runwayOk(d, crit)) continue;
@@ -497,6 +511,17 @@ export default class KestrelAI extends BaseManager {
             });
         }
         if (this.cfg.verbose && this.gameState.currentRound % this.cfg.verbose === 0 && !this._dbgDone) { this._dbgDone = true; this.log(`options: ${dbg.join(' ')} | stock ${this.resNames.map(r => r + ' ' + Math.round(this.eco.stock[r]) + '/' + Math.round(this.eco.net[r])).join(' ')}`); }
+    }
+
+    /** Total build charges left across our mobile builders. */
+    chargesLeft() {
+        let n = 0;
+        for (const u of this.mine) {
+            if (!u.mobile || !u.builds.size) continue;
+            const c = u.e.state?.buildCharges;
+            n += Number.isFinite(c) ? c : 3;
+        }
+        return n;
     }
 
     criticalResources() {
