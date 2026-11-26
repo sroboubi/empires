@@ -1,6 +1,8 @@
 /**
  * Node-based tests for the diplomatic chat emote tag (Phase 25).
- * Run with: node --input-type=module -e "import('./src/ai/tests/chatEmote.test.js')"
+ * Run with: node --import=./tests/headless/preload.mjs --input-type=module -e "import('./src/ai/tests/chatEmote.test.js')"
+ * (the preload is required: llmBase.js pulls in client.js, whose bare 'ajv'
+ * import only resolves through the headless loader)
  *
  * Covers extractChatEmote: tag parsing, normalization to the portrait
  * filename stem, validation against the approved subset, and the
