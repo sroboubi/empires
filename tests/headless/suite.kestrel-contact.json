@@ -1,7 +1,7 @@
 {
   "name": "kestrel-contact",
   "id": "kestrel-contact",
-  "description": "Kestrel vs Opus on map 24, 60 turns, 2 seeds: forces contact so march, rally and attack code runs.",
+  "description": "Kestrel vs Opus on map 24, 60 turns, 2 seeds, default config: the map-size army scale applies, so march, rally and attack code runs.",
   "outputDir": "results",
   "turns": 60,
   "iterations": 2,
@@ -44,9 +44,7 @@
       "name": "Kestrel",
       "color": "#e15759",
       "controller": "kestrel",
-      "controllerConfig": {
-        "armyWeight": 0.6
-      }
+      "controllerConfig": {}
     },
     {
       "id": 2,

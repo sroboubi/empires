@@ -182,6 +182,9 @@ export default class KestrelAI extends BaseManager {
 
 
     // ------------------------------------------------------------------ per-turn refresh
+    /** Timer for the verbose timing log; costs nothing when verbose is off. */
+    now() { return this.cfg.verbose ? performance.now() : 0; }
+
     refresh() {
         const P = this.player, gs = this.gameState, round = gs.currentRound;
         this.mine = [];
@@ -300,18 +303,18 @@ export default class KestrelAI extends BaseManager {
         this.tm = { refresh: 0, defendCands: 0, attackCands: 0, buildCands: 0, marchCands: 0, guardCands: 0, exploreCands: 0, repairCands: 0, exec: 0 };
         let iter = 0;
         while (P.orders > this.cfg.reserveOrders && iter++ < this.cfg.maxIterations) {
-            const T0 = performance.now();
+            const T0 = this.now();
             this.refresh();
-            this.tm.refresh += performance.now() - T0;
+            this.tm.refresh += this.now() - T0;
             if (this._siteDirty) { this.siteCache = new Map(); this._siteDirty = false; } // site search only changes when something was built
             const cands = [];
-            { const t = performance.now(); this.defendCands(cands); this.tm.defendCands += performance.now() - t; }
-            { const t = performance.now(); this.attackCands(cands); this.tm.attackCands += performance.now() - t; }
-            { const t = performance.now(); this.buildCands(cands); this.tm.buildCands += performance.now() - t; }
-            { const t = performance.now(); this.marchCands(cands); this.tm.marchCands += performance.now() - t; }
-            { const t = performance.now(); this.guardCands(cands); this.tm.guardCands += performance.now() - t; }
-            { const t = performance.now(); this.exploreCands(cands); this.tm.exploreCands += performance.now() - t; }
-            { const t = performance.now(); this.repairCands(cands); this.tm.repairCands += performance.now() - t; }
+            { const t = this.now(); this.defendCands(cands); this.tm.defendCands += this.now() - t; }
+            { const t = this.now(); this.attackCands(cands); this.tm.attackCands += this.now() - t; }
+            { const t = this.now(); this.buildCands(cands); this.tm.buildCands += this.now() - t; }
+            { const t = this.now(); this.marchCands(cands); this.tm.marchCands += this.now() - t; }
+            { const t = this.now(); this.guardCands(cands); this.tm.guardCands += this.now() - t; }
+            { const t = this.now(); this.exploreCands(cands); this.tm.exploreCands += this.now() - t; }
+            { const t = this.now(); this.repairCands(cands); this.tm.repairCands += this.now() - t; }
             let best = null;
             for (const c of cands) {
                 if (!(c.value > 0) || this.failed.has(c.key)) continue;
@@ -320,14 +323,14 @@ export default class KestrelAI extends BaseManager {
             }
             if (!best) break;
             const before = P.orders;
-            const tx = performance.now();
+            const tx = this.now();
             try {
                 await best.exec();
             } catch (err) {
                 this.log(`ERROR executing ${best.key}: ${err?.message || err}`);
             }
-            this.tm.exec += performance.now() - tx;
-            this.tm['x_' + best.kind] = (this.tm['x_' + best.kind] || 0) + performance.now() - tx;
+            this.tm.exec += this.now() - tx;
+            this.tm['x_' + best.kind] = (this.tm['x_' + best.kind] || 0) + this.now() - tx;
             if (!(P.orders < before)) { this.failed.add(best.key); if (best.kind === 'build') this._siteDirty = true; }
             else if (best.kind !== 'explore' && best.kind !== 'repair') this._siteDirty = true; // builds, moves and fights change occupancy and what sites exist
             if (P.orders < before) await this.helper.onActionDone(this.gameState, null, best.key);
