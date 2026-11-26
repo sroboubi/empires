@@ -1,6 +1,52 @@
-# README #
+# Empires #
 
-## Task: Phase 1 - Base Engine Architecture & 3D Hex Grid Visualization ##
+A turn-based 4X strategy game that runs in the browser, on a 3D hex grid. You explore a procedurally generated map, found settlements, gather resources, build an army and compete with AI-led empires. Opponents can be scripted or driven by an LLM, and you can chat and trade with them.
+
+It is vanilla JavaScript (ES modules) with Three.js loaded from a CDN import map. There is no build step.
+
+## Gameplay ##
+
+- **Map.** A hex grid (axial q,r coordinates) with terrain from simplex noise: water, tundra, swamp, grasslands, desert, hills and mountains. Natural resources (trees, gold, iron, gems, deer, bison, pearls, crab) and treasure ruins are scattered across it. Fog of war hides what you have not explored or cannot currently see.
+- **Resources.** Food, gold, iron, wood and gems. Buildings produce them and units cost upkeep.
+- **Entities.** Everything on the map is an entity defined as data in `definitions/entities.json`. Units (settler, worker, scout, medic, swordsman, pikeman, bowman, longbowman, knight, horseman, catapult, assassin) can move, and some can attack. Constructs (village, farm, mine, lumber mill, forge, camp, barracks, temple, tower) cannot move. Entities with a zone of control block enemy movement through adjacent cells.
+- **Orders.** Each turn you get a limited number of orders to spend on actions, up to a maximum (set in game setup).
+- **Barbarians.** Optional neutral raiders that spawn and harass players.
+- **Diplomacy.** Chat with AI leaders and trade resources, either as a one-time offer or as a per-turn exchange.
+- **Leaders.** AI players use leaders from `definitions/leaders.json`. Each has a focus, portraits and attribute modifiers (for example cheaper upkeep for some units, or stronger attacks).
+- **Winning.** A player's score is the geometric mean of military, economic and exploration scores. The game ends when the leading player reaches the absolute score, or a multiple of the second-highest score. Both thresholds are set in game setup and either can be turned off. Wins are not checked before round 5.
+
+## Running the game ##
+
+Serve the repo root with any static file server and open `index.html`. For example:
+
+```
+python3 -m http.server 8000
+```
+
+then browse to `http://localhost:8000`. The setup page lets you pick map size, players (human or an AI controller), starting resources, win conditions and API keys for LLM providers. Games can be saved and loaded. Game definitions can be overridden with URL query parameters that match the keys in `src/config.js`.
+
+Controls: WASD or left-drag to pan, mouse wheel to zoom, Q/E or right-drag to rotate and tilt, left click to select an entity, right click for its action menu.
+
+## AI ##
+
+- **Tactical AIs** play each turn's moves: the scripted ones in `src/ai/standard` and `src/ai/tactical`, and LLM harnesses in `src/ai/llm`.
+- **Strategic AIs** are optional. They run once per turn before the tactical AI, handle diplomacy and trade, and set a directive for the tactical AI (`src/ai/strategic`, `src/ai/llm/strategic`).
+- **LLM providers** (local OpenAI-compatible servers, OpenRouter, Google, Groq) are listed in `definitions/ai.json`. Keys are entered in game setup.
+
+## Project layout ##
+
+- `index.html`, `styles.css`: page and UI.
+- `src/`: engine, game state, hex grid, renderer, players, entities, AI.
+- `definitions/`: data-driven JSON for entities, terrains, resources, leaders, audio, treasures and default settings, with schemas.
+- `assets/`: models, leader media and audio.
+- `tests/`: see [tests/README.md](tests/README.md) for how to run the test suites.
+- `todo.md`, `mistakes.md`: planned work and lessons learned.
+
+## Prompts ##
+
+This game was built through a series of prompts to coding agents. They are kept here as a record of how the design evolved.
+
+### Task: Phase 1 - Base Engine Architecture & 3D Hex Grid Visualization ##
 
 We are building a modular, data-driven 4X strategy game using vanilla JavaScript (ESModules) and Three.js.
 
@@ -18,11 +64,11 @@ Strict Constraints:
 - Keep the Game Manager completely agnostic to specific terrain types. Use a configuration lookup for heights and colors.
 - Ensure the scene auto-resizes with the browser window.
 
-### Task: Phase 1.1 - Terrain Provider ###
+#### Task: Phase 1.1 - Terrain Provider ###
 
 Create a terrainProvider class. It will contain the terrain config. In [gameState.js](codeContext;file:///c%3A/Users/Falcon/workspace/empires/src/gameState.js#L16-50) we will call terrainProvider get(q, r) which will provide a terrain object to use for the cell at q, r. Use simplex noise for the terrain type.
 
-## Task: Phase 2 - Dynamic Asset and Controller Manifest Loader ##
+### Task: Phase 2 - Dynamic Asset and Controller Manifest Loader ##
 
 Implement the game configuration loading system using the provided JSON architecture.
 
@@ -36,7 +82,7 @@ Implement the game configuration loading system using the provided JSON architec
 5. When the manifest and entities are loaded, add the resources and add the entities to the grid for each player.
 6. Create `src/engine.js` that will be responsible for the game loop. It will call the step() function of each entity every frame. It will also handle the game state and the drawing of the grid and entities.
 
-## Task: Phase 3 - Update Camera Controls and Selection ##
+### Task: Phase 3 - Update Camera Controls and Selection ##
 
 1. WASD keys or drag with left click to pan the camera but keep the camera elevation fixed
 2. mouse wheel to zoom in and out
@@ -45,7 +91,7 @@ Implement the game configuration loading system using the provided JSON architec
    - selected entity should be highlighted
 5. right click to get a context menu for actions on selected entity
 
-## Task: Phase 4 - Cleanup and refactor ##
+### Task: Phase 4 - Cleanup and refactor ##
 
 1. don't pass entities to controllers, instead each controller instance will be an entity
 2. remove references from cells to entities, instead each entity already has a refernece to the cell it stands on
@@ -59,7 +105,7 @@ Implement the game configuration loading system using the provided JSON architec
    - remove isLand() function, instead for each entity to spawn use canStandOn()
 7. combine all rendering code into one file instead of havign renderer.js and engine.js
 
-## Task: Phase 5 - Entities and actions ##
+### Task: Phase 5 - Entities and actions ##
 
 1. Read and modify baseEntity.js to make it functional. Note the comments. All entities should extend this class.
 2. Each entity will have a reference to the hex grid. 
@@ -69,13 +115,13 @@ Implement the game configuration loading system using the provided JSON architec
    - if an attack is possible and is performed, it will adjust its own and the target entity properties accordingly, by consuming resources, reducing health, etc. 
    - if the entity is asked to construct another entity on a target cell, it can again determine if it's possible based on target cell properties, resources, etc, and then make the adjustments and spawn the new entity
 
-## Task: Phase 6 - Bug fixes ##
+### Task: Phase 6 - Bug fixes ##
 
 1. Units are not being placed on the map anymore. Fix it.
 2. Update baseEntity to have getActions and doAction - these apply to all entities
    - for example, Village should have a "spawn" action to create units on adjacent hexes if the terrain type allows and enough resources exist.
 
-## Task: Phase 7 - Refactor Hex Grid ##
+### Task: Phase 7 - Refactor Hex Grid ##
 
 1. Make a class to encapsulate the hex grid and merge hexMath.js into it.
 2. This class should contain all the cells, where each cell has axial co-ordinates and the terrain for that cell. Cells don't need to have an "owner".
@@ -86,7 +132,7 @@ Implement the game configuration loading system using the provided JSON architec
    - movementCostTo(source, target) - this will calculate the minimum movement cost of cells between the source and target, but only considering cells that are progressively closer to the target, never moving away from the target. It will return the cost and the list of cells along the best path.
    - visiblePath(source, target) - this will determine if and along what path the source cell can see that target based on elevation, but only considering cells that are progressively closer to the target, never moving away from the target. For each path, if there is a cell that has a higher elevation than the source then the target can't be seen along that path. If no path exists, return nil, otherwise return the shortest path (list of cells) along which the target is visible.
 
-## Task: Phase 8 - Entity refactor and game logic ##
+### Task: Phase 8 - Entity refactor and game logic ##
 
 1. Update the base entity class to have the following attributes and functions:
    - health : number
@@ -118,7 +164,7 @@ Implement the game configuration loading system using the provided JSON architec
    - if the unit has a range attribute then the attack is ranged - call getSightAndTrajectory() for target cell. The attack is possible if the target cell is within range and is either visible OR the maxObstructionDelta is less than the range's arcHeight. The attack cost is equal to attackCostScale * distance to target.  
 8. for all units add a move action that uses the movementCostTo() function to determine the cost of moving to a target cell and moving the entity to that cell if possible and updates the entity's action points and facing based on the direction of movement
 
-## Task: Phase 9 - Cleanup ##
+### Task: Phase 9 - Cleanup ##
 
 1. Identify and remove unused code: e.g. hexMath, entity.doAction
 2. When constructing entity, use the JS spread notation to get default data defined in the class, then override with manifest data, then override with initialState - do NOT set values individually (e.g. if a new value is added to the manifest it should be included in the entity without any code change)
@@ -128,7 +174,7 @@ Implement the game configuration loading system using the provided JSON architec
 6. entity.gridProxy is not a grid, it is GameState. Rename to entity.gameState
 7. add action to worker to repair constructs. It will consume all action points and repair an adjacent construct increasing the target construct health by 2x the worker's action points, up to max health
 
-## Task: Phase 10 - Player and visiblity ##
+### Task: Phase 10 - Player and visiblity ##
 
 1. Add a step() function to the player class that will be called at the start of the players turn
 2. Add player definitions to the manifest as an array with player attributes. This will define the name, color, and description. A new player should be instantiated for each player in the manifest. 
@@ -138,14 +184,14 @@ Implement the game configuration loading system using the provided JSON architec
    - when rendering, for each cell check if it is in the current player's explored list - if not then render the hidden terrain from the terrainProvider.getHiddenTerrain(). If it is in the explored list then check if it is in the visible list - if not then render the cell with a desaturated version of its terrain color and without any entities on it, otherwise render the cell normally with its entities on it   
 6. Add a sight range to each entity, provided in the manifest, defining the cell distance that it can see. Add a list of visible cells to the entity and determine these cells by calling hexGrid.visibleCells() on spawn and move. On spawn, move, and destruction of an entity, update the player visible list by taking the union of all player owned entities visible cells. Any cells added to the visible list are also added to the explored list, but no cells are ever removed from the explored list.
 
-## Task: Phase 11 - Move and add game config to manifest ##
+### Task: Phase 11 - Move and add game config to manifest ##
 
 1. Move terrain definitions to the manifest, have terrainProvider use those. Leave default terrain in the terrainProvider.js
 2. For each entity definition in the manifest, add spawnConditions: {terrain: [...list of terrain types by name], minSeparation: number} -in the baseEntity build action, ensure that the cell it is spawned on has terrain listed in spawnConditions.terrain and that it is at least minSeparation cells away from any other construct entity. Only check conditions that are present, if any are missing, then they don't limit the entity spawning.
 3. When placing initial units for a player, ensure units are not on the same cell. Add them further from the first unit if needed, they don't need to be adjacent.
 4. Add elevationAdjustment attribute to the damage object in the entity defintion of the manifest. When a unit attacks, if this adjustment is present, then calculate attackerElevation/targetElevation. If this is greater than 1, then multiply by the adjustment, otherwise divide by the adjustment. Scale the damage by this value.
 
-## Task: Phase 12 - Setup Page and Save/Load functionality ##
+### Task: Phase 12 - Setup Page and Save/Load functionality ##
 
 1. Move "initialization" and "players" attributes from the manifest to defaultSettings.json
 2. Add a new modal panel for game setup - this should be shown when the page is first loaded
@@ -167,20 +213,20 @@ Implement the game configuration loading system using the provided JSON architec
 }
 7. The game should auto-save as per settings, and keep as many previous auto-saves as per settings, removing the oldest ones first. When the user selects to load a game, they should be presented with a list of saved games to choose from. When the user selects to manually save a game, they can input the save game name, and these manual saves should not count towards the auto-save limit.
 
-## Task: Phase 13 - Fix bugs ##
+### Task: Phase 13 - Fix bugs ##
 
 1. resource types should be defined only in the manifest - remove hardcodes from main.js
 2. on player turn start, focus camera on center of mass of player entities (average position of all entities)
 3. on load - gameState.deserialize can not call new HexGrid() as this will try to regen the terrain and fail because there is no terrain config provided. Make terrain config manditory in the existing hexGrid constructor. Make a new constructor for load that just takes the cells and does not try to generate new ones.
 
-## Task: Phase 14 - Conventional AI and UI ##
+### Task: Phase 14 - Conventional AI and UI ##
 
 1. Fix and enhance the conventional AI in ai/standard/core.js
 2. The action menu goes off the bottom of the screen when there are lots of actions - suggest making a radial menu instead or just fix current menu placement
 3. When the user clicks on an empire in the empires panel, show a panel that to visualize the player resource profile using output from player.getResourceProfile(). Use a stacked barchart or sankey diagram, or something better if you can think of it. You can use external JS libraries, but only if needed.
 4. When the user long hovers over an empire in the empires panel, show the same resource profile panel as a tooltip.
 
-## Task: Phase 15 - Enhance AI and Utilities ##
+### Task: Phase 15 - Enhance AI and Utilities ##
 
 1. Add functions to ai/utils.js
    - attack(gameState, sourceEntity, targetEntity, maxOrders): if target is in range and (directional x elevation) multiplier >= 1, perform attack; otherwise, if possible, and maxOrders is > 1, move to within range, preferring a cell that maximises the directional x elevation multiplier, then perform attack. Once an attack is performed, if the number of orders used is less than maxOrders and the target is still alive, and the source has enough action points, continue to perform attacks. Return number of orders used.
@@ -198,7 +244,7 @@ Implement the game configuration loading system using the provided JSON architec
 4. Add a log of what actions are taken by the AI during a turn and the rational - log these to the console.   
 5. Update the resource profile panel to show a bar for each resource indicating the current stock. If the net income is negative, add a red bar over the end portion to indicate the change in the stock over the next turn. If the net income is positive, add a green bar at the end to indicate the projected gain in the stock over the next turn.
 
-## Task: Phase 16 - AI Bug Fixes ##
+### Task: Phase 16 - AI Bug Fixes ##
 
 1. Remove hard coded values from the AI logic as much as possible. For example:
    - Do not hardcode resource types, except for "orders" - you should exclude orders from the stock/yield calculations
@@ -207,14 +253,14 @@ Implement the game configuration loading system using the provided JSON architec
    - Don't use entity names to determine what unit to build, look at unit attributes and actions. E.g. if you need wood, then determine what entity gives you wood, then determine what entity   can build it. If that entity is not available, then determine what entity can build it. If that entity does not exist, then determine what entity can build it. Follow this chain until you find and entity that can start the process needed to eventually build what you need to yield more wood.
    - Don't use entity names to find military units. Instead look at their damage and armor relative to other entities.
 
-## Task: Phase 17 - Visual/UX Improvements ##
+### Task: Phase 17 - Visual/UX Improvements ##
 
 1. When action panel opens it flies in from the top left of the screen. Fix this.
 2. When unit selected has the "move" action, show movement path and cost as mouse hovers on other cells
 3. On hover over unit, show building exclusion zone defined by entity spawnConditions.minSeparation value - it is a circle of hexes with that radius. It should be semi-transparent and use the same color as the owning player
 4. For build actions, show maintenance and yield of entities to build
 
-## Task: Phase 18 - Game setup and win conditions ##
+### Task: Phase 18 - Game setup and win conditions ##
 
 1. Game Setup Panel:
    - Orders: Just have 2 inputs, one for max orders and another for orders per turn. Add labels to these. Use the max orders as the inital value are remove "initial" from the defaultSettings.json and from the code.
@@ -222,7 +268,7 @@ Implement the game configuration loading system using the provided JSON architec
    - After the player selection div, add another section for "Win Condition". Here, have a inputs to allow changing the defaults from winCondition in defaultSettings. Each condition should have a checkbox, so it is only enabled if selected. Both, either one, or neither can be selected.
 2. Implement the win conditions as per game settings. At the end of each turn, check if any player has met the win conditions - if so, then display a victory popup with a message including the winning player and the conditions met, and end the game.
 
-## Task: Phase 19 - Player history ##
+### Task: Phase 19 - Player history ##
 
 1. Remove attackHistory from BaseEntity class and instead add a generic history map to the Player class where the key is a game Round number, and the value is an array of history entries sorted by time.
 2. Each entry should have a round number, date/time, category (e.g. action name like "move"/"attack", recieved damage etc), entity name and ID (if applicable), details (how much damage was done to what target, what was built costing how much resources, etc)
@@ -235,7 +281,7 @@ Implement the game configuration loading system using the provided JSON architec
 5. Update ai/standard/smartManager.js to use this instead of entity.attackHistory by looking at entries from the previous turn where damage was received or units were destroyed.
 6. Enhance the Resource Profile panel. This should become a generic player info panel. In addition to current information (resources, score, units), add a panel to the side or bottom to list the player history. The history panel should be paged by some number of rounds (where rounds per page is a selectable dropdown or numeric selector of 1 to 10 and there is a next/previous page button)
 
-## Task: Phase 20 - LLM Integration ##
+### Task: Phase 20 - LLM Integration ##
 
 1. Add API key input in the game settings panel and a button to fetch all models using the key.
 2. use google/genai to get list of available models and filter to those that support "generateContent".
@@ -243,7 +289,7 @@ Implement the game configuration loading system using the provided JSON architec
 4. Save the key and selected list in session storage and add it to game settings/state inside an "llm" object.
 5. Review the LLM integration in ai/llm and ensure the logic makes sense and will work as expected. Fix any issues you find. 
 
-## Task: Phase 21 - Simplify LLM Interface ##
+### Task: Phase 21 - Simplify LLM Interface ##
 
 1. Split manifest.json into
    - entities.json
@@ -257,7 +303,7 @@ Implement the game configuration loading system using the provided JSON architec
    - add move/attack actions if it has movement/damage defined
 4. Move this entity.js into the src folder and delete controllers folder.
 
-## Task: Phase 22 - Chat with Other Players ##
+### Task: Phase 22 - Chat with Other Players ##
 
 1. Implement the chat() function in ai/llm/harness.js to allow other players to chat with the LLM.
 2. When a player right clicks in an AI player in the empires panel, give them a context menu with a single option: "Chat". The chat costs 1 order.
@@ -267,7 +313,7 @@ Implement the game configuration loading system using the provided JSON architec
 6. When an AI player wants to chat with another AI player using the CHAT command, allow them to chat in the background as part of the initiators turn. The human can not see the content.
 7. In all cases, when an AI player finishes chat either by the AI player triggering a chat termination, or by the human exiting the chat, allow the AI player to add a note to it's history to summarize the chat and any information it needs to remember.
 
-## Task: Phase 23 - AI selection ##
+### Task: Phase 23 - AI selection ##
 
 1. replace game setup -> ai config with input fields to enter a key for each provider in ai.json (key is optiona, e.g. local doesn't need it)
 2. replace AI checkbox in player setup with dropdown selector to pick either "human" or a controller from ai.json.
@@ -275,7 +321,7 @@ Implement the game configuration loading system using the provided JSON architec
 4. on hover over of the leader, show the description/focus.
 5. For AI players, combine the leader info to the selected controller to set player.controller.
 
-## Task: Phase 24 - Prevent movement through enemy entities, and implement zone of control ##
+### Task: Phase 24 - Prevent movement through enemy entities, and implement zone of control ##
 
 Fix entity.canStandOn()
 
@@ -293,7 +339,7 @@ Zone of control:
 5. Show zone of control highlight in render when non-own entity is highlighted, similar to entity.minSeparation but only for non-own entities.
 6. Verify all AIs use move.canDo to determine possible moves. Audit 2026-11-08: they all do — adaptive and entity check canDo directly, smart moves via helper.explore → moveAlongPath (which checks canDo), menu.js via moveAlongPath, barbarians directly; llmBase's movementCostTo is only a reachability summary, not a move order. AI can "plan" routes without ZoC consideration, but move.canDo should always be used to determine what movement orders are actually possible. Note: planning ignores ZoC, so an AI may plan through a controlled cell and have canDo reject it — moveAlongPath falls back to the furthest reachable cell that passes canDo, so it advances as far as it can rather than failing; it will not detour around ZoC (follow-up, not this phase).
 
-## Task: Phase 25 - Enhance AI leaders and interactions ##
+### Task: Phase 25 - Enhance AI leaders and interactions ##
 
 1. add trade to chat screen (or as slide out panel) [COMPLETED]:
    - one time offer: build a resource bundle offering (a set of resource amounts: e.g. {iron: 50, gold: 10}) and ask for a bundle in return. Allow other player to adjust bundle and offer it back to you. This can be done until one player rejects the process, or both players accept the exchange bundles.
@@ -305,7 +351,7 @@ Zone of control:
 2. leader portraits and emotes or videos + add all leaders
 3. faction description and special abilities (Asymmetric faction twists. The most praised engagement mechanic in modern 4X (Endless Legend's rule-breaking factions). 2–3 JSON-authored twists per faction)
 
-## Task: Phase 26 - LLM Director [COMPLETED] ##
+### Task: Phase 26 - LLM Director [COMPLETED] ##
 
 1. Add ability to select strategic AI and tactical AI controllers in game setup (tactical must be selected, strategic is optional) [COMPLETED]
    - Note: ALL existing AI controllers are tactical, although some of the older ones like standard/smartManager.js and the LLM AIs don't inspect or act on player.controller.directive which is set by the strategic AI
