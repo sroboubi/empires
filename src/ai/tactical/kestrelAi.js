@@ -51,6 +51,7 @@ const DEFAULT_CONFIG = {
     reserveOrders: 0,       // orders kept back (never spent)
     minCharges: 4,
     capacityBoost: 2.5,
+    exploreScale: 1,
     verbose: 0,
     maxIterations: 70,
     exploreFraction: 0.6,   // share of the T-value one frontier explored is worth, tuned by score pillar
@@ -350,7 +351,7 @@ export default class KestrelAI extends BaseManager {
         // X = cbrt(visible * explored): a move that reveals n new cells raises X by about (2/3) X n / explored
         const expl = Math.max(80, this.player.exploredCells.size);
         const fresh = 3.5 * (sight || 5) * (0.3 + this.unexploredFrac()) * Math.min(1.5, (maxAp || 5) / 6);
-        return (this.T / 3) * (2 / 3) * fresh / expl;
+        return this.cfg.exploreScale * (this.T / 3) * (2 / 3) * fresh / expl;
     }
 
     /** Extra value of a mobile non-fighting, non-building unit that can explore. */

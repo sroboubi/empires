@@ -1,0 +1,57 @@
+{
+  "name": "kestrel-bench",
+  "id": "kestrel-bench",
+  "description": "Kestrel vs Opus, map 48, 45 turns.",
+  "outputDir": "results",
+  "turns": 45,
+  "iterations": 1,
+  "seed": 1000,
+  "seedStrategy": "increment",
+  "concurrency": 1,
+  "timeoutMs": 3600000,
+  "progressMode": "lines",
+  "progressEveryTurns": 10,
+  "perRunReports": true,
+  "logPatterns": [
+    "\\[Kestrel [^\\]]* R\\d+\\] (turn end|ERROR)"
+  ],
+  "defaults": {
+    "winCondition": null,
+    "initialization": {
+      "orders": {
+        "max": 6,
+        "perTurn": 5
+      },
+      "startingResources": {
+        "food": 300,
+        "gems": 5,
+        "gold": 200,
+        "iron": 300,
+        "wood": 300
+      },
+      "startingUnits": {
+        "settler": 1,
+        "swordsman": 1,
+        "worker": 1
+      }
+    },
+    "barbarians": null,
+    "mapSize": 48
+  },
+  "players": [
+    {
+      "id": 1,
+      "name": "Kestrel",
+      "color": "#e15759",
+      "controller": "kestrel",
+      "controllerConfig": {}
+    },
+    {
+      "id": 2,
+      "name": "Opus",
+      "color": "#b07aa1",
+      "controller": "opus"
+    }
+  ],
+  "barbarians": null
+}
