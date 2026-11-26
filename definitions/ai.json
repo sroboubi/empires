@@ -181,6 +181,10 @@
                 "maxChatExchanges": 6,
                 "chatCooldownOrders": 2
             }
+        },
+        "kestrel": {
+            "url": "./ai/tactical/kestrelAi.js",
+            "config": {}
         }
     },
     "strategicControllers": {
