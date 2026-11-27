@@ -1,20 +1,18 @@
 {
   "name": "Tactical AI matrix",
-  "description": "Seven tactical AIs in a free-for-all. 4 map sizes x 3 barbarian configurations x 10 seeds = 120 games, each capped at 500 turns.",
+  "description": "Six tactical AIs in a free-for-all. 4 map sizes x 3 barbarian configurations x 5 seeds = 60 games, each capped at 200 turns.",
   "outputDir": "results",
-  "turns": 500,
-  "iterations": 10,
+  "turns": 200,
+  "iterations": 5,
   "seed": 1000,
   "seedStrategy": "increment",
   "seedStep": 1,
-  "concurrency": 8,
+  "concurrency": 12,
   "timeoutMs": 14400000,
   "progressMode": "auto",
   "progressEveryTurns": 10,
   "perRunReports": false,
-  "logPatterns": [
-    "\\[AiHelper\\]"
-  ],
+  "logPatterns": [],
   "defaults": {
     "winCondition": {
       "absoluteScore": 1000,
@@ -69,6 +67,12 @@
       "name": "Hark",
       "color": "#edc948",
       "controller": "hark"
+    },
+    {
+      "id": 7,
+      "name": "Kestrel",
+      "color": "#29ee22",
+      "controller": "kestrel"
     }
   ],
   "matrix": {
@@ -88,7 +92,7 @@
           },
           "barbarianChief": {
             "min": 1,
-            "max": 2
+            "max": 1
           },
           "barbarianPrincess": {
             "min": 1,
@@ -108,7 +112,7 @@
           },
           "barbarianChief": {
             "min": 2,
-            "max": 4
+            "max": 2
           },
           "barbarianPrincess": {
             "min": 2,

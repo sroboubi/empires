@@ -442,7 +442,7 @@ export class HarkManager extends AdaptiveManager {
     // barbarians are near the village.
     //
     // TODO(hark): advance gating. Logs show the starting swordsman (dies in ~90%
-    // of barbarian games) advancing alone onto a chief or princess (250-400 HP,
+    // of barbarian games) advancing alone onto a chief or princess (200-300 HP,
     // regenerating) it cannot finish. Proposal: don't send a lone unit at a
     // target far above its power unless it is defending a structure; a variant
     // (advancePowerRatio 0.5) was tested in round 1 and scored 15-11/28, so

@@ -47,6 +47,10 @@ jobs:
           npm run test:direction-histogram
           npm run test:find-path-golden
 
+      - name: Kestrel contact suite (map 24, forces march and attack code)
+        working-directory: tests/headless
+        run: npm run test:suite:kestrel-contact
+
       - name: Root tests (engine-level, via headless preload)
         run: |
           node --import=./tests/headless/preload.mjs --input-type=module -e "import('./tests/buildSiteIndex.test.js')"

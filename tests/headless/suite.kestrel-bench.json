@@ -1,0 +1,69 @@
+{
+  "name": "kestrel-bench",
+  "id": "kestrel-bench",
+  "description": "Kestrel (default config) vs Opus, Fable and Apex: 60 turns, map 48, 8 seeds (5000-5007), no barbarians.",
+  "outputDir": "results",
+  "turns": 60,
+  "iterations": 8,
+  "seed": 5000,
+  "seedStrategy": "increment",
+  "concurrency": 2,
+  "timeoutMs": 3600000,
+  "progressMode": "lines",
+  "progressEveryTurns": 10,
+  "perRunReports": true,
+  "logPatterns": [
+    
+  ],
+  "defaults": {
+    "winCondition": null,
+    "initialization": {
+      "orders": {
+        "max": 6,
+        "perTurn": 5
+      },
+      "startingResources": {
+        "food": 300,
+        "gems": 5,
+        "gold": 200,
+        "iron": 300,
+        "wood": 300
+      },
+      "startingUnits": {
+        "settler": 1,
+        "swordsman": 1,
+        "worker": 1
+      }
+    },
+    "barbarians": null,
+    "mapSize": 48
+  },
+  "players": [
+    {
+      "id": 1,
+      "name": "Kestrel",
+      "color": "#e15759",
+      "controller": "kestrel",
+      "controllerConfig": {}
+    },
+    {
+      "id": 2,
+      "name": "Opus",
+      "color": "#b07aa1",
+      "controller": "opus"
+    },
+    {
+      "id": 3,
+      "name": "Fable",
+      "color": "#4e79a7",
+      "controller": "fable"
+    },
+    {
+      "id": 4,
+      "name": "Apex",
+      "color": "#59a14f",
+      "controller": "apex"
+    }
+  ],
+  "barbarians": null
+}
