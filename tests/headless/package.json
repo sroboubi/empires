@@ -23,6 +23,7 @@
     "test:find-path-golden": "node --import ./preload.mjs ./findPathGolden.test.mjs",
     "test:suite:kestrel": "node --import ./preload.mjs ./tournament.mjs --config suite.kestrel.json",
     "test:suite:kestrel-contact": "node --import ./preload.mjs ./tournament.mjs --config suite.kestrel-contact.json",
+    "test:suite:kestrel-bench": "node --import ./preload.mjs ./tournament.mjs --config suite.kestrel-bench.json",
     "test:suite:opus-check": "node --import ./preload.mjs ./tournament.mjs --config suite.opus-check.json"
   },
   "keywords": [],

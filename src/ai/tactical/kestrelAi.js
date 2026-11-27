@@ -52,17 +52,12 @@ const DEFAULT_CONFIG = {
     reserveOrders: 0,       // orders kept back (never spent)
     minCharges: 12,         // below this many build charges left across builders, another builder is valued (8-seed map-48 bench: 252 -> 265)
     capacityBoost: 1,
-    exploreScale: 1,
     noDirectiveStance: 'offensive', // stance toward rivals when no director/config directive exists
     marchMinUnits: 4,       // army size before it marches out
     gatherRadius: 5,        // units further than this from the army centroid wait to regroup
     armyMapPower: 2.5,      // army weight scales with (48 / map radius)^power
     armyMapMax: 6,
-    orderValue: 1,          // multiplier on the value of extra orders per turn
-    walkPenalty: 0.9,       // site score divisor per extra builder turn of walking
-    explorerWeight: 1,      // multiplier on the value of building another explorer
     builderRunway: 2,       // turns of stock a new builder (worker, settler) must leave, instead of safetyRunway
-    armyRamp: 0,            // rounds over which the army bonus ramps up from zero (economy-first opening)
     verbose: 0,
     maxIterations: 70,
     exploreFraction: 0.6,   // share of the T-value one frontier explored is worth, tuned by score pillar
@@ -374,7 +369,7 @@ export default class KestrelAI extends BaseManager {
             if (this.eco.S[r] === undefined) continue;
             upkeepPts += this.budgetPts * H * v / this.eco.S[r];
         }
-        const ordersPts = (d.ordersPerTurn || 0) * this.cfg.growth * this.T / this.opt * 0.8 * this.cfg.orderValue;
+        const ordersPts = (d.ordersPerTurn || 0) * this.cfg.growth * this.T / this.opt * 0.8;
         let mil = 0;
         if (this.isFighter(d)) mil = this.armyBonus(type);
         else if (d.movement && !(d.buildables?.length) && !d.repairables && !this.isFighter(d)) mil = this.explorerBonus(d);
@@ -406,14 +401,14 @@ export default class KestrelAI extends BaseManager {
         // X = cbrt(visible * explored): a move that reveals n new cells raises X by about (2/3) X n / explored
         const expl = Math.max(80, this.player.exploredCells.size);
         const fresh = 3.5 * (sight || 5) * (0.3 + this.unexploredFrac()) * Math.min(1.5, (maxAp || 5) / 6);
-        return this.cfg.exploreScale * (this.T / 3) * (2 / 3) * fresh / expl;
+        return (this.T / 3) * (2 / 3) * fresh / expl;
     }
 
     /** Extra value of a mobile non-fighting, non-building unit that can explore. */
     explorerBonus(d) {
         let n = 0;
         for (const u of this.mine) if (u.mobile && !u.builds.size && !u.repair && !this.isFighter(u.def)) n++;
-        return this.exploreMovePts(d.maxActionPoints, d.sightRange) * this.cfg.horizon * 0.4 * this.cfg.explorerWeight / (1 + n);
+        return this.exploreMovePts(d.maxActionPoints, d.sightRange) * this.cfg.horizon * 0.4 / (1 + n);
     }
 
     /** How much we want one more unit of this type in the army (0 when the army is big enough). */
@@ -425,8 +420,7 @@ export default class KestrelAI extends BaseManager {
         const shortfall = Math.max(0, 1 - have / Math.max(1, want));
         if (shortfall <= 0) return 0;
         const share = Math.min(1, this.power(d, d.health) / Math.max(1, want));
-        const ramp = this.cfg.armyRamp > 0 ? Math.min(1, (this.gameState.currentRound || 0) / this.cfg.armyRamp) : 1;
-        return ramp * this.cfg.armyWeight * this.mapArmyScale() * shortfall * this.T * (0.1 + share);
+        return this.cfg.armyWeight * this.mapArmyScale() * shortfall * this.T * (0.1 + share);
     }
 
     desiredArmyPower() {
@@ -659,7 +653,7 @@ export default class KestrelAI extends BaseManager {
                 const factor = (c.yield || 1) / baseYield;
                 let near2 = 0;
                 for (const st of this.structs) { const dd = hexDist(st.q, st.r, c.cell.q, c.cell.r); if (dd < 12) near2 += 1; }
-                const sc = (0.5 + 0.5 * (maxY > 0 ? (c.yield || 0) / maxY : 1)) / (1 + this.cfg.walkPenalty * turns) * (1 + Math.min(near2, 6) * 0.03);
+                const sc = (0.5 + 0.5 * (maxY > 0 ? (c.yield || 0) / maxY : 1)) / (1 + 0.9 * turns) * (1 + Math.min(near2, 6) * 0.03);
                 if (!best || sc > best.sc) best = { cell: c.cell, stage: c.stage, turns, pathCost, factor, sc };
             }
         }
