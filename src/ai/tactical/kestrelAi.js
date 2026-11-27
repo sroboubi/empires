@@ -58,6 +58,7 @@ const DEFAULT_CONFIG = {
     gatherRadius: 5,        // units further than this from the army centroid wait to regroup
     armyMapPower: 2.5,      // army weight scales with (48 / map radius)^power
     armyMapMax: 6,
+    orderValue: 1,          // multiplier on the value of extra orders per turn
     verbose: 0,
     maxIterations: 70,
     exploreFraction: 0.6,   // share of the T-value one frontier explored is worth, tuned by score pillar
@@ -369,7 +370,7 @@ export default class KestrelAI extends BaseManager {
             if (this.eco.S[r] === undefined) continue;
             upkeepPts += this.budgetPts * H * v / this.eco.S[r];
         }
-        const ordersPts = (d.ordersPerTurn || 0) * this.cfg.growth * this.T / this.opt * 0.8;
+        const ordersPts = (d.ordersPerTurn || 0) * this.cfg.growth * this.T / this.opt * 0.8 * this.cfg.orderValue;
         let mil = 0;
         if (this.isFighter(d)) mil = this.armyBonus(type);
         else if (d.movement && !(d.buildables?.length) && !d.repairables && !this.isFighter(d)) mil = this.explorerBonus(d);
