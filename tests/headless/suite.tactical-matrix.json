@@ -1,6 +1,6 @@
 {
   "name": "Tactical AI matrix",
-  "description": "Five tactical AIs in a free-for-all. 4 map sizes x 3 barbarian configurations x 5 seeds = 60 games, each capped at 200 turns.",
+  "description": "Six tactical AIs in a free-for-all. 4 map sizes x 3 barbarian configurations x 5 seeds = 60 games, each capped at 200 turns.",
   "outputDir": "results",
   "turns": 200,
   "iterations": 5,
