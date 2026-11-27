@@ -13,7 +13,7 @@
   "progressEveryTurns": 10,
   "perRunReports": true,
   "logPatterns": [
-    "zzz"
+    
   ],
   "defaults": {
     "winCondition": null,
