@@ -599,7 +599,7 @@ export default class KestrelAI extends BaseManager {
             if (after >= 0) continue;
             const left = (this.eco.stock[r] || 0) - (d.spawnCost?.[r] || 0);
             // a builder is how a shortage gets fixed (farms, mines), so it only has to stay afloat a couple of turns
-            const runway = d.buildables?.length ? this.cfg.builderRunway : this.cfg.safetyRunway;
+            const runway = d.movement && d.buildables?.length ? this.cfg.builderRunway : this.cfg.safetyRunway;
             if (left + runway * after < 0) return false;
         }
         return true;
