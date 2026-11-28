@@ -16,7 +16,7 @@
  * and report layout.
  */
 import { spawn } from 'child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import {
@@ -33,6 +33,7 @@ const SUITE_ONLY_KEYS = new Set([
   'seed', 'concurrency', 'timeoutMs', 'logPatterns', 'report', 'games', 'matrix',
   'failFast', 'saveFullLogs', 'maxLogMatches', 'perRunReports', 'defaults',
   'progressEveryTurns', 'progressMode', 'id', 'slug', 'settings', 'label',
+  'definitionsDir',
 ]);
 
 function parseArgs() {
@@ -45,6 +46,7 @@ function parseArgs() {
     seed: null,
     concurrency: null,
     games: [],
+    definitionsDir: null,
     failFast: false,
     fullLogs: null,
     perRun: null,
@@ -75,6 +77,7 @@ function parseArgs() {
       case '--seed': opts.seed = takeValue(); break;
       case '--concurrency': opts.concurrency = Number(takeValue()); break;
       case '--game': opts.games.push(takeValue()); break;
+      case '--definitions-dir': opts.definitionsDir = takeValue(); break;
       case '--fail-fast':
         if (inline !== null) throw new Error('--fail-fast does not take a value');
         opts.failFast = true;
@@ -285,7 +288,7 @@ function redactSecrets(value) {
   return out;
 }
 
-function normalizeSuite(suite, opts) {
+function normalizeSuite(suite, opts, suiteDir = __dirname) {
   const suiteDefaults = deepMerge(settingsFrom(suite), suite.defaults || {});
   const hasMatrix = suite.matrix !== undefined && suite.matrix !== null;
   const gameDefs = hasMatrix
@@ -323,6 +326,27 @@ function normalizeSuite(suite, opts) {
     settings.turns = turns;
     if (settings.seed === undefined) settings.seed = baseSeed;
 
+    // Optional test-only definitions overlay. Resolved relative to the suite
+    // file (not the cwd), validated here so a typo cannot silently run with
+    // the repo definitions.
+    const rawDefinitionsDir = opts.definitionsDir ?? game.definitionsDir ?? suite.definitionsDir ?? null;
+    let definitionsDir = null;
+    let definitionsFiles = null;
+    if (rawDefinitionsDir) {
+      definitionsDir = path.isAbsolute(rawDefinitionsDir)
+        ? rawDefinitionsDir
+        : path.resolve(suiteDir, rawDefinitionsDir);
+      let stat = null;
+      try { stat = statSync(definitionsDir); } catch (err) { stat = null; }
+      if (!stat || !stat.isDirectory()) {
+        throw new Error(`definitionsDir for game "${id}" is not a directory: ${rawDefinitionsDir} (resolved ${definitionsDir})`);
+      }
+      definitionsFiles = readdirSync(definitionsDir).filter(file => file.endsWith('.json')).sort();
+      if (definitionsFiles.length === 0) {
+        throw new Error(`definitionsDir for game "${id}" contains no .json files: ${definitionsDir}`);
+      }
+    }
+
     return {
       id,
       slug,
@@ -334,6 +358,8 @@ function normalizeSuite(suite, opts) {
       seedStep,
       logPatterns: game.logPatterns ?? suite.logPatterns ?? suite.report?.logPatterns ?? [],
       settings,
+      definitionsDir,
+      definitionsFiles,
       matrixValues: entry.matrixValues || null,
       matrixSelection: entry.matrixSelection || null,
       suite,
@@ -590,7 +616,7 @@ async function main() {
     throw new Error(`Suite config not found: ${configPath}`);
   }
   const suite = JSON.parse(readFileSync(configPath, 'utf-8'));
-  const games = normalizeSuite(suite, opts);
+  const games = normalizeSuite(suite, opts, path.dirname(configPath));
 
   const startedAt = new Date();
   const suiteName = suite.name || path.basename(configPath, '.json');
@@ -605,6 +631,16 @@ async function main() {
   mkdirSync(path.join(outDir, 'runs'), { recursive: true });
   mkdirSync(path.join(outDir, 'games'), { recursive: true });
   mkdirSync(path.join(outDir, 'logs'), { recursive: true });
+  // Keep the definition variant with the results so a run is auditable even
+  // if the generated variant directory is not committed.
+  for (const game of games) {
+    if (!game.definitionsDir) continue;
+    const dest = path.join(outDir, 'definitions', game.slug);
+    mkdirSync(dest, { recursive: true });
+    for (const file of game.definitionsFiles) {
+      copyFileSync(path.join(game.definitionsDir, file), path.join(dest, file));
+    }
+  }
 
   const logPatterns = Array.isArray(suite.logPatterns)
     ? suite.logPatterns
@@ -635,6 +671,8 @@ async function main() {
       logPatterns: game.logPatterns,
       matrixValues: game.matrixValues,
       matrixSelection: game.matrixSelection,
+      definitionsDir: game.definitionsDir,
+      definitionsFiles: game.definitionsFiles,
       settings: game.settings,
     })),
   }), null, 2) + '\n');
@@ -647,6 +685,11 @@ async function main() {
     console.log(`[suite] ids: ${games.map(g => `${g.id} x${g.iterations}`).join(', ')}`);
   }
   console.log(`[suite] concurrency: ${concurrency}${logPatterns.length ? `; log patterns: ${logPatterns.join(', ')}` : ''}`);
+  for (const game of games) {
+    if (game.definitionsDir) {
+      console.log(`[suite] definitions ${game.id}: ${game.definitionsDir} (${game.definitionsFiles.join(', ')})`);
+    }
+  }
 
   const runsByGame = Object.fromEntries(games.map(game => [game.id, []]));
   let failFastTriggered = false;
@@ -696,6 +739,9 @@ async function main() {
           totalTurns: game.turns,
           seed,
         });
+        const childEnv = { ...process.env };
+        if (game.definitionsDir) childEnv.HEADLESS_DEFINITIONS_DIR = game.definitionsDir;
+        else delete childEnv.HEADLESS_DEFINITIONS_DIR;
         const result = await runCommand({
           command: process.execPath,
           args: [
@@ -707,7 +753,7 @@ async function main() {
             '--iteration', String(iteration),
           ],
           cwd: __dirname,
-          env: process.env,
+          env: childEnv,
           timeoutMs,
           onOutput: ({ stream, text }) => {
             if (stream === 'stderr') {
@@ -737,6 +783,8 @@ async function main() {
           stderr: result.stderr,
           configPath: configFile,
           metricsPath: metricsFile,
+          definitionsDir: game.definitionsDir,
+          definitionsFiles: game.definitionsFiles,
           metrics,
         };
         runsByGame[game.id].push(run);

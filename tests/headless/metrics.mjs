@@ -742,6 +742,8 @@ export class GameMetricsCollector {
         seed: this.runMeta.seed ?? null,
         turns: context.totalTurns ?? this.runMeta.turns ?? null,
         mapSize: this.runMeta.mapSize ?? null,
+        definitionsDir: this.runMeta.definitionsDir ?? null,
+        definitionsFiles: this.runMeta.definitionsFiles ?? null,
         resumed: !!context.resumed,
         startedAt: this.startedAt,
         finishedAt: new Date().toISOString(),
