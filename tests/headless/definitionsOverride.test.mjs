@@ -8,7 +8,7 @@
  *
  * Run with: node --import ./preload.mjs ./definitionsOverride.test.mjs
  */
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'fs';
 import os from 'os';
 import path from 'path';
@@ -58,6 +58,32 @@ try {
   assert(result.foodCost === 12345, 'overlay entities.json is served from definitionsDir');
   assert(result.terrains === (Array.isArray(terrains) ? terrains.length : -1),
     'terrains.json absent from the overlay falls back to the repo copy');
+  // Bad definitionsDir must fail the suite at load, not silently use the repo.
+  const badSuite = path.join(tmp, 'bad-suite.json');
+  writeFileSync(badSuite, JSON.stringify({
+    name: 'bad definitionsDir',
+    id: 'bad-defs',
+    outputDir: path.join(tmp, 'out'),
+    turns: 1,
+    concurrency: 1,
+    games: [{
+      id: 'bad',
+      definitionsDir: 'does-not-exist',
+      players: [
+        { id: 1, name: 'Blue', controller: 'standard' },
+        { id: 2, name: 'Red', controller: 'standard' },
+      ],
+    }],
+  }));
+  const badEnv = { ...process.env };
+  delete badEnv.HEADLESS_DEFINITIONS_DIR;
+  const bad = spawnSync(process.execPath, [
+    '--import', './preload.mjs',
+    './tournament.mjs',
+    '--config', badSuite,
+  ], { cwd: __dirname, env: badEnv, encoding: 'utf-8' });
+  assert(bad.status !== 0, 'bad definitionsDir exits non-zero');
+  assert(`${bad.stdout}${bad.stderr}`.includes('not a directory'), 'bad definitionsDir reports a clear error');
 } finally {
   rmSync(tmp, { recursive: true, force: true });
 }

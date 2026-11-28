@@ -232,7 +232,8 @@ async function main() {
     try {
       definitionsFiles = readdirSync(definitionsDir).filter(file => file.endsWith('.json')).sort();
     } catch (err) {
-      definitionsFiles = null;
+      console.error(`[headless] definitions overlay is not readable: ${definitionsDir} (${err.message})`);
+      process.exit(2);
     }
     console.log(`[headless] definitions overlay: ${definitionsDir}${definitionsFiles ? ` (${definitionsFiles.join(', ')})` : ''}`);
   }

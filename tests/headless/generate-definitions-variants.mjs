@@ -12,6 +12,11 @@
  * the suite plus the directory. Re-run this script after changing the base
  * definitions; do not hand-edit the variants.
  *
+ * `definitions/entities.json` uses `1e1000` for impassable water costs. JSON
+ * parses that as Infinity and `JSON.stringify` would turn it into null, so
+ * writes go through a replacer and every variant is diffed against the base:
+ * only the paths the variant intends to change may differ.
+ *
  * Usage:
  *   node generate-definitions-variants.mjs            # write all variants
  *   node generate-definitions-variants.mjs c1 c3      # write selected ones
@@ -27,21 +32,61 @@ const OUT_ROOT = path.join(__dirname, 'definitions-variants');
 const ENTITIES_PATH = path.join(REPO_ROOT, 'definitions', 'entities.json');
 const TERRAINS_PATH = path.join(REPO_ROOT, 'definitions', 'terrains.json');
 
-const clone = (value) => JSON.parse(JSON.stringify(value));
+const clone = (value) => structuredClone(value);
 const round2 = (value) => Math.round(value * 100) / 100;
 
+function readJson(file) {
+  return JSON.parse(readFileSync(file, 'utf-8'));
+}
 function entities() {
-  return clone(JSON.parse(readFileSync(ENTITIES_PATH, 'utf-8')));
+  return clone(readJson(ENTITIES_PATH));
 }
 function terrains() {
-  return clone(JSON.parse(readFileSync(TERRAINS_PATH, 'utf-8')));
+  return clone(readJson(TERRAINS_PATH));
 }
 const isCombat = (entity) => !!entity.movement && (entity.damage?.value || 0) > 0 && !(entity.buildables?.length);
 const isBuilder = (entity) => !!entity.movement && (entity.buildables?.length || 0) > 0;
+const keyOf = (index, field) => `[${index}].${field}`;
 
-function scaleSpawnCost(entity, factor) {
+/**
+ * Write JSON while preserving Infinity as the numeric literal `1e1000`
+ * (the format the base definitions use). JSON.stringify maps Infinity to
+ * null, which would silently change water costs.
+ */
+const INF_SENTINEL = '__HEADLESS_INFINITY__';
+function stringify(data) {
+  const text = JSON.stringify(data, (key, value) => {
+    if (value === Infinity) return INF_SENTINEL;
+    if (value === -Infinity) return `-${INF_SENTINEL}`;
+    return value;
+  }, 2);
+  return `${text.split(`"${INF_SENTINEL}"`).join('1e1000').split(`"-${INF_SENTINEL}"`).join('-1e1000')}\n`;
+}
+
+/** Paths whose values differ between two JSON values. */
+function diffPaths(before, after, prefix = '') {
+  if (Object.is(before, after)) return [];
+  const isObj = (v) => v !== null && typeof v === 'object';
+  if (!isObj(before) || !isObj(after)) return [prefix];
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  const out = [];
+  for (const key of keys) {
+    const childPrefix = Array.isArray(before) && Array.isArray(after)
+      ? `${prefix}[${key}]`
+      : (prefix ? `${prefix}.${key}` : key);
+    if (!(key in before) || !(key in after)) {
+      out.push(childPrefix);
+      continue;
+    }
+    out.push(...diffPaths(before[key], after[key], childPrefix));
+  }
+  return out;
+}
+
+function scaleSpawnCost(entity, factor, touched, index) {
   for (const key of Object.keys(entity.spawnCost || {})) {
     entity.spawnCost[key] = round2(entity.spawnCost[key] * factor);
+    touched.add(keyOf(index, `spawnCost.${key}`));
   }
 }
 
@@ -50,79 +95,100 @@ const VARIANTS = {
     description: 'Combat-unit spawn costs x1.25',
     build() {
       const data = entities();
-      for (const entity of data) if (isCombat(entity)) scaleSpawnCost(entity, 1.25);
-      return { entities: data };
+      const touched = new Set();
+      data.forEach((entity, index) => { if (isCombat(entity)) scaleSpawnCost(entity, 1.25, touched, index); });
+      return { files: { entities: data }, touched };
     },
   },
   'c2-builder-cost-x1.25': {
     description: 'Worker/settler spawn costs x1.25',
     build() {
       const data = entities();
-      for (const entity of data) if (isBuilder(entity)) scaleSpawnCost(entity, 1.25);
-      return { entities: data };
+      const touched = new Set();
+      data.forEach((entity, index) => { if (isBuilder(entity)) scaleSpawnCost(entity, 1.25, touched, index); });
+      return { files: { entities: data }, touched };
     },
   },
   'c3-combat-hp-x0.8': {
     description: 'Combat-unit HP x0.8',
     build() {
       const data = entities();
-      for (const entity of data) {
-        if (!isCombat(entity)) continue;
+      const touched = new Set();
+      data.forEach((entity, index) => {
+        if (!isCombat(entity)) return;
         entity.health = Math.round(entity.health * 0.8);
         entity.maxHealth = Math.round(entity.maxHealth * 0.8);
-      }
-      return { entities: data };
+        touched.add(keyOf(index, 'health'));
+        touched.add(keyOf(index, 'maxHealth'));
+      });
+      return { files: { entities: data }, touched };
     },
   },
   'c4-yields-x1.3': {
     description: 'Economy-building yields x1.3',
     build() {
       const data = entities();
-      for (const entity of data) {
+      const touched = new Set();
+      data.forEach((entity, index) => {
         for (const key of Object.keys(entity.yields || {})) {
           entity.yields[key] = round2(entity.yields[key] * 1.3);
+          touched.add(keyOf(index, `yields.${key}`));
         }
-      }
-      return { entities: data };
+      });
+      return { files: { entities: data }, touched };
     },
   },
   'c5-terrain-move-plus1': {
     description: 'Hills / Mountains / Swamp movement cost +1',
     build() {
       const data = terrains();
+      const touched = new Set();
       const target = new Set(['Hills', 'Mountains', 'Swamp']);
-      for (const terrain of data) {
-        if (target.has(terrain.name)) terrain.movementCost = round2((terrain.movementCost || 1) + 1);
-      }
-      return { terrains: data };
+      data.forEach((terrain, index) => {
+        if (!target.has(terrain.name)) return;
+        terrain.movementCost = round2((terrain.movementCost || 1) + 1);
+        touched.add(keyOf(index, 'movementCost'));
+      });
+      return { files: { terrains: data }, touched };
     },
   },
   'c6-barbarian-hp-old': {
     description: 'Barbarian HP restored to the pre-nerf values (300/250/400)',
     build() {
       const data = entities();
+      const touched = new Set();
       const old = { barbarian: 300, barbarianPrincess: 250, barbarianChief: 400 };
-      for (const entity of data) {
-        if (!(entity.name in old)) continue;
+      data.forEach((entity, index) => {
+        if (!(entity.name in old)) return;
         entity.health = old[entity.name];
         entity.maxHealth = old[entity.name];
-      }
-      return { entities: data };
+        touched.add(keyOf(index, 'health'));
+        touched.add(keyOf(index, 'maxHealth'));
+      });
+      return { files: { entities: data }, touched };
     },
   },
   'c7-barbarian-hp-x1.5': {
     description: 'Barbarian HP x1.5',
     build() {
       const data = entities();
+      const touched = new Set();
       const barbarians = new Set(['barbarian', 'barbarianPrincess', 'barbarianChief']);
-      for (const entity of data) {
-        if (!barbarians.has(entity.name)) continue;
+      data.forEach((entity, index) => {
+        if (!barbarians.has(entity.name)) return;
         entity.health = Math.round(entity.health * 1.5);
         entity.maxHealth = Math.round(entity.maxHealth * 1.5);
-      }
-      return { entities: data };
+        touched.add(keyOf(index, 'health'));
+        touched.add(keyOf(index, 'maxHealth'));
+      });
+      return { files: { entities: data }, touched };
     },
   },
+};
+
+const BASE = {
+  entities: () => readJson(ENTITIES_PATH),
+  terrains: () => readJson(TERRAINS_PATH),
 };
 
 const args = process.argv.slice(2);
@@ -134,8 +200,7 @@ const requested = args.length ? args : Object.keys(VARIANTS);
 const selected = requested.map((arg) => {
   if (VARIANTS[arg]) return arg;
   const matches = Object.keys(VARIANTS).filter((id) => id === arg || id.startsWith(arg + '-') || id.split('-')[0] === arg);
-  if (matches.length === 1) return matches[0];
-  return null;
+  return matches.length === 1 ? matches[0] : null;
 });
 for (const id of selected) {
   if (!id) {
@@ -143,15 +208,16 @@ for (const id of selected) {
     process.exit(1);
   }
   const variant = VARIANTS[id];
-  if (!variant) {
-    console.error(`Unknown variant "${id}". Use --list to see the names.`);
-    process.exit(1);
-  }
   const dir = path.join(OUT_ROOT, id);
   mkdirSync(dir, { recursive: true });
-  const files = variant.build();
+  const { files, touched } = variant.build();
   for (const [name, data] of Object.entries(files)) {
-    writeFileSync(path.join(dir, `${name}.json`), JSON.stringify(data, null, 2) + '\n');
+    const unexpected = diffPaths(BASE[name](), data).filter((p) => !touched.has(p));
+    if (unexpected.length) {
+      console.error(`${id}: refusing to write ${name}.json; unintended differences: ${unexpected.slice(0, 5).join(', ')}${unexpected.length > 5 ? '…' : ''}`);
+      process.exit(1);
+    }
+    writeFileSync(path.join(dir, `${name}.json`), stringify(data));
   }
   console.log(`${id}: ${variant.description} -> ${path.relative(REPO_ROOT, dir)}`);
 }

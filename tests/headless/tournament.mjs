@@ -46,6 +46,7 @@ function parseArgs() {
     seed: null,
     concurrency: null,
     games: [],
+    definitionsDir: null,
     failFast: false,
     fullLogs: null,
     perRun: null,
@@ -76,6 +77,7 @@ function parseArgs() {
       case '--seed': opts.seed = takeValue(); break;
       case '--concurrency': opts.concurrency = Number(takeValue()); break;
       case '--game': opts.games.push(takeValue()); break;
+      case '--definitions-dir': opts.definitionsDir = takeValue(); break;
       case '--fail-fast':
         if (inline !== null) throw new Error('--fail-fast does not take a value');
         opts.failFast = true;
