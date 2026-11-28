@@ -38,8 +38,7 @@ plan without a code change.
 
 R3. Orders are a resource. Order cost per turn comes from the config. The AI
 ranks actions by value per order and drops the lowest when orders are scarce.
-(B5 is where Kestrel is closest to Opus, so scarcity is a case she already
-handles better.)
+(B5 is where Kestrel is closest to Opus. The probes do not say why.)
 
 R4. Opening by starting units. The opening is chosen from what it starts with
 (settler only, 2 settlers, extra swordsman), not a fixed build order. B4 is the
