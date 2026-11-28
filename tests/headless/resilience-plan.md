@@ -224,4 +224,6 @@ the base row exactly on her VM (Kestrel 253, Opus 322.5, 0 failures).
 Headline so far: Kestrel never wins on score at 45 turns in base or any
 variant; her two knobs move her total by under 13 points; the Opus gap is
 narrowest when orders are scarce (B5) and under heavy barbarians, widest
-with 2 starting settlers (B4).
+with 2 starting settlers (B4). B1 is the exception on outcome — a survival
+race, not a score row (Kestrel won one seed at turn 4, Opus the other at
+turn 14).
