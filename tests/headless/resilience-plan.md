@@ -115,14 +115,18 @@ Suite config only; can start before the harness change.
 Also in B: orders max 4 / 3 per turn (B5) and max 10 / 8 per turn (B6) —
 orders as a real constraint vs nearly free.
 
-**Suite-config rule (verified 2026-11-27, Kestrel's finding):** per-game
+**Suite-config rule (verified 2026-11-27–28):** how a per-game value is
+applied depends on the suite shape. In a plain `games` list, per-game
 settings deep-merge over `defaults` (`tournament.mjs:289,310`, `deepMerge`
 at :109-120) — dropping a key from `startingUnits` does NOT remove it; the
 default unit comes back. To remove a unit, set it to 0 explicitly (e.g.
-`"swordsman": 0` for B1 and E's settler-only start). Check
-`suite.resolved.json` before trusting a run. Kestrel's first B1 and
-settler-only runs silently kept the default swordsman; the results she
-posted use explicit 0s.
+`"swordsman": 0` for B1 and E's settler-only start). In a `matrix` suite,
+values are set at the path and used exactly as written (`expandMatrix`,
+`tournament.mjs:193,227-228`) — a dropped key is genuinely gone; Rook's B1
+resolved config confirms it (settler + worker only, no swordsman). Either
+way, check `suite.resolved.json` before trusting a run. Kestrel's first B1
+and settler-only runs (a `games`-list suite) silently kept the default
+swordsman; the results she posted use explicit 0s.
 
 ### C. Definition changes — 7 variants, 56 games, ~3.7 h
 
