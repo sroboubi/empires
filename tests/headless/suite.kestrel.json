@@ -1,6 +1,6 @@
 {
-  "name": "kestrel-bench",
-  "id": "kestrel-bench",
+  "name": "kestrel",
+  "id": "kestrel",
   "description": "Kestrel vs Opus, map 48, 45 turns.",
   "outputDir": "results",
   "turns": 45,
