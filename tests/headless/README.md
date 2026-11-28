@@ -351,6 +351,11 @@ node generate-definitions-variants.mjs            # all
 node generate-definitions-variants.mjs c1 c3      # selected
 ```
 
+Put only the files a variant changes in its directory. The overlay also
+covers `ai.json`, `leaders.json` and the other definition files; a stray
+`ai.json` would change every AI's defaults. Use per-player `controllerConfig`
+for AI knobs instead.
+
 `npm run test:definitions-override` checks the overlay/fallback behaviour.
 
 ## Game setup
