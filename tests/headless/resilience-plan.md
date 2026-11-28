@@ -38,8 +38,11 @@ nightly; long runs split across nights).
 - **Suite config** (no harness work): barbarian settings, starting
   resources/units, orders, win condition, per-AI `controllerConfig`.
 - **`definitionsDir`** (harness change, test-only, no game-code change):
-  a suite entry `"definitionsDir": "variants/cost-x1.25"`; `tournament.mjs`
-  resolves it and passes `HEADLESS_DEFINITIONS_DIR` to each child;
+  a suite entry `"definitionsDir": "variants/cost-x1.25"`, set per suite
+  or per game entry — the per-game form is what lets one probe suite carry
+  both the baseline and a definition variant without separate runs;
+  `tournament.mjs` resolves it and passes `HEADLESS_DEFINITIONS_DIR` to
+  each child;
   `stubs.mjs` resolves `./definitions/<file>` from that dir first, falling
   back to the repo copy for untouched files. Variant dirs contain only the
   changed file(s). Lands as its own PR, separate from AI changes.
@@ -88,7 +91,7 @@ AI for a non-viable game.
 
 Current defaults, 4 maps × 3 barb × 2 seeds, 200 turns.
 
-### B. Starting conditions — 4 variants, 32 games, ~2.1 h
+### B. Starting conditions — 6 variants, 48 games, ~3.2 h
 
 Suite config only; can start before the harness change.
 
@@ -100,8 +103,7 @@ Suite config only; can start before the harness change.
 | B4 expansion | standard | 2 settlers + swordsman + worker |
 
 Also in B: orders max 4 / 3 per turn (B5) and max 10 / 8 per turn (B6) —
-orders as a real constraint vs nearly free. (6 variants, 48 games, ~3.2 h
-with B5–B6 included.)
+orders as a real constraint vs nearly free.
 
 ### C. Definition changes — 7 variants, 56 games, ~3.7 h
 
