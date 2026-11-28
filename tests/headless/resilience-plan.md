@@ -115,6 +115,27 @@ Suite config only; can start before the harness change.
 Also in B: orders max 4 / 3 per turn (B5) and max 10 / 8 per turn (B6) —
 orders as a real constraint vs nearly free.
 
+**Suite-config rule (verified 2026-11-27–28):** whether a dropped key
+comes back depends on the suite shape. Three cases:
+- `games` list + suite `defaults`: per-game settings deep-merge over
+  `defaults` (`tournament.mjs:289,310`, `deepMerge` at :109-120) — dropping
+  a key from `startingUnits` does NOT remove it; the default unit comes
+  back. To remove a unit, set it to 0 explicitly (e.g. `"swordsman": 0`
+  for B1 and E's settler-only start). This is Kestrel's trap: her first B1
+  and settler-only runs (a `games`-list suite with defaults) silently kept
+  the default swordsman; the results she posted use explicit 0s.
+- `games` list with per-game full settings and no suite `defaults`:
+  nothing to restore — the game's own `initialization` is used whole
+  (`headless.mjs:413`, `cfg.initialization || ds.initialization || {}`).
+  This is Rook's B suite: B1 resolved to settler + worker only, no
+  swordsman, with no explicit 0 needed.
+- `matrix` suite: values are set at the path and used exactly as written
+  (`expandMatrix`, `tournament.mjs:193,227-228`) — a dropped key is
+  genuinely gone.
+Either way, check `suite.resolved.json` before trusting a run — and when
+in doubt, the explicit-`0` form is the safe default for any suite that
+uses `defaults`.
+
 ### C. Definition changes — 7 variants, 56 games, ~3.7 h
 
 Needs `definitionsDir`. Magnitudes are ±25–30%: realistic balance changes,
@@ -206,3 +227,15 @@ recommendations for (a) a new, more adaptive AI, (b) changes to existing
 AIs, (c) identification and config of AIs that already handle adjusted
 config well, (d) config changes that make the game better, or at least
 don't make it worse or break it.
+
+## First results
+
+Kestrel's 2-player probes (Kestrel vs Opus, map 48, 45 turns, seeds
+1000–1001, dev 5e2c09e) are in #72 comment 7234450573. Leona reproduced
+the base row exactly on her VM (Kestrel 253, Opus 322.5, 0 failures).
+Headline so far: Kestrel never wins on score at 45 turns in base or any
+variant; her two knobs move her total by under 13 points; the Opus gap is
+narrowest when orders are scarce (B5) and under heavy barbarians, widest
+with 2 starting settlers (B4). B1 is the exception on outcome — a survival
+race, not a score row (Kestrel won one seed at turn 4, Opus the other at
+turn 14).
