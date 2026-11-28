@@ -21,6 +21,7 @@
     "test:suite:entity-bench": "node --import ./preload.mjs ./tournament.mjs --config suite.entity-bench.json",
     "test:direction-histogram": "node --import ./preload.mjs ./directionHistogram.test.mjs",
     "test:find-path-golden": "node --import ./preload.mjs ./findPathGolden.test.mjs",
+    "test:definitions-override": "node --import ./preload.mjs ./definitionsOverride.test.mjs",
     "test:suite:kestrel": "node --import ./preload.mjs ./tournament.mjs --config suite.kestrel.json",
     "test:suite:kestrel-contact": "node --import ./preload.mjs ./tournament.mjs --config suite.kestrel-contact.json",
     "test:suite:kestrel-bench": "node --import ./preload.mjs ./tournament.mjs --config suite.kestrel-bench.json",

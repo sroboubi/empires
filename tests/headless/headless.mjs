@@ -59,7 +59,7 @@
  */
 import { GameState } from '../../src/gameState.js';
 import { loadGameManifest } from '../../src/manifestLoader.js';
-import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
+import { readFileSync, existsSync, writeFileSync, mkdirSync, readdirSync } from 'fs';
 import path from 'path';
 import { saveCheckpoint, loadCheckpoint, resolveCheckpointPath, CHECKPOINT_FILE } from './checkpoint.mjs';
 import { GameMetricsCollector } from './metrics.mjs';
@@ -226,6 +226,16 @@ async function main() {
     ...(Array.isArray(cfg.logPatterns) ? cfg.logPatterns : []),
     ...opts.logPatterns,
   ];
+  const definitionsDir = process.env.HEADLESS_DEFINITIONS_DIR || null;
+  let definitionsFiles = null;
+  if (definitionsDir) {
+    try {
+      definitionsFiles = readdirSync(definitionsDir).filter(file => file.endsWith('.json')).sort();
+    } catch (err) {
+      definitionsFiles = null;
+    }
+    console.log(`[headless] definitions overlay: ${definitionsDir}${definitionsFiles ? ` (${definitionsFiles.join(', ')})` : ''}`);
+  }
   const proxyProfiler = (opts.profileProxy || cfg.aiProxyProfiler)
     ? createAiProxyProfiler()
     : null;
@@ -239,6 +249,8 @@ async function main() {
         seed: opts.seed ?? cfg.seed ?? null,
         turns: TURNS,
         mapSize: cfg.mapSize ?? null,
+        definitionsDir,
+        definitionsFiles,
       },
       maxLogMatches: reportCfg.maxLogMatches ?? cfg.maxLogMatches ?? 5000,
     })

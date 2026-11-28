@@ -56,21 +56,36 @@ import path from 'path';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 
+// Test-only definitions overlay. The tournament resolves `definitionsDir`
+// relative to the suite file, validates it, and passes it here. A variant
+// directory contains full replacement files (entities.json, terrains.json,
+// ...); files it does not contain fall back to the repo copies.
+const DEFINITIONS_DIR = process.env.HEADLESS_DEFINITIONS_DIR
+  ? path.resolve(process.env.HEADLESS_DEFINITIONS_DIR)
+  : null;
+
 const origFetch = globalThis.fetch;
 globalThis.fetch = async (url, ...args) => {
   const urlStr = url.toString();
   // Serve local definition files and assets from disk
   if (urlStr.startsWith('./') || urlStr.startsWith('../') || urlStr.includes('definitions/')) {
-    const localPath = path.resolve(REPO_ROOT, urlStr.replace(/^\.\//, ''));
-    try {
-      const data = await readFile(localPath, 'utf-8');
-      return {
-        ok: true,
-        json: async () => JSON.parse(data),
-        text: async () => data,
-      };
-    } catch (e) {
-      // Fall through to original fetch
+    const relative = urlStr.replace(/^\.\//, '');
+    const candidates = [];
+    if (DEFINITIONS_DIR && relative.includes('definitions/')) {
+      candidates.push(path.join(DEFINITIONS_DIR, path.basename(relative)));
+    }
+    candidates.push(path.resolve(REPO_ROOT, relative));
+    for (const localPath of candidates) {
+      try {
+        const data = await readFile(localPath, 'utf-8');
+        return {
+          ok: true,
+          json: async () => JSON.parse(data),
+          text: async () => data,
+        };
+      } catch (e) {
+        // Try the next candidate, then fall through to original fetch
+      }
     }
   }
   if (origFetch) return origFetch(url, ...args);

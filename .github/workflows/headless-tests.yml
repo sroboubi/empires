@@ -46,6 +46,7 @@ jobs:
           npm run test:opus-forbidden-init
           npm run test:direction-histogram
           npm run test:find-path-golden
+          npm run test:definitions-override
 
       - name: Kestrel contact suite (map 24, forces march and attack code)
         working-directory: tests/headless

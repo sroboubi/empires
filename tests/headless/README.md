@@ -325,6 +325,34 @@ sbx policy approval inspect <approval-id>
 sbx policy approval respond <approval-id> --option <option-id>
 ```
 
+### Definition variants (resilience tests)
+
+`definitionsDir` is a test-only overlay for a suite entry. It points at a
+directory containing complete replacement files for `definitions/entities.json`
+and/or `definitions/terrains.json`; files the directory does not contain fall
+back to the repo copies. The path is resolved relative to the suite file.
+
+```json
+{
+  "id": "combat-cost-x1.25",
+  "definitionsDir": "definitions-variants/c1-combat-cost-x1.25",
+  "iterations": 2
+}
+```
+
+The resolved directory and its file names are logged at suite start and child
+start, and recorded in `suite.resolved.json` and each run's `runMeta`.
+
+Variants are generated from the current definitions, never hand-edited:
+
+```bash
+node generate-definitions-variants.mjs --list
+node generate-definitions-variants.mjs            # all
+node generate-definitions-variants.mjs c1 c3      # selected
+```
+
+`npm run test:definitions-override` checks the overlay/fallback behaviour.
+
 ## Game setup
 
 Game configuration comes from an optional JSON config file (see `config.example.json`):
